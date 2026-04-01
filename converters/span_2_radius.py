@@ -35,9 +35,6 @@ class SpanToRadiusConverter:
         self.chord_length = chord_length
         self.radius_resolution = radius_resolution
         self.r_target = np.arange(0, 1 + radius_resolution, radius_resolution)
-               
-        if not self.files:
-            raise FileNotFoundError(f'No files found in {input_path}')
         
     def _split_surfaces(self, r: np.ndarray, values: np.ndarray):
         
@@ -72,6 +69,10 @@ class SpanToRadiusConverter:
         '''
         
         self.files = sorted(glob.glob(os.path.join(self.input_path, '*.csv')))
+        
+        if not self.files:
+            raise FileNotFoundError(f'No files found in {self.input_path}')
+        
         N = len(self.files)
         
         chord = np.linspace(1, 0, N)
