@@ -118,7 +118,7 @@ class SpanToRadiusConverter:
         self.r_min = np.min(all_r)
         self.r_max = np.max(all_r)
         
-        self.r_target = np.arange
+        self.r_target = np.arange(self.r_min, self.r_max + self.radius_resolution, self.radius_resolution)
         
     def interpolate(self):
         
