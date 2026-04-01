@@ -3,7 +3,7 @@ import glob
 import h5py
 import numpy as np
 import pandas as pd
-import scipy.interpolate as interp1d
+from scipy.interpolate import interp1d
 
 class SpanToRadiusConverter:
     
