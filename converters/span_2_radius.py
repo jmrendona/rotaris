@@ -11,7 +11,7 @@ class SpanToRadiusConverter:
     Convert spanwise alligned sliced data to cylindrical (r, chord) dataset.
     '''
     
-    def __init__(self, input_path: str, output_path: str, variable_col: str, span_col: str, chord_length: float, radius_resolution=0.01):
+    def __init__(self, input_path: str, output_path: str, variable_col: str, span_col: str, chord_length=None, radius_resolution=0.01):
         
         '''
         Parameters
@@ -90,8 +90,8 @@ class SpanToRadiusConverter:
             
             df = pd.read_csv(f)
             
-            x = df[self.span_col].values
-            values = df[self.variable_col].values
+            x = pd.to_numeric(df[self.span_col].values, errors='coerce').to_numpy()
+            values = pd.to_numeric(df[self.variable_col].values, errors='coerce').to_numpy()
             y = self.chords[i]
             
             r = np.sqrt(x**2 + y**2)
