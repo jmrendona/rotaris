@@ -90,8 +90,13 @@ class SpanToRadiusConverter:
             
             df = pd.read_csv(f)
             
-            x = pd.to_numeric(df[self.span_col].values, errors='coerce').to_numpy()
-            values = pd.to_numeric(df[self.variable_col].values, errors='coerce').to_numpy()
+            x = pd.to_numeric(df[self.span_col].values, errors='coerce')
+            values = pd.to_numeric(df[self.variable_col].values, errors='coerce')
+            
+            mask = ~np.isnan(x) & ~np.isnan(values)
+            x = x[mask]
+            values = values[mask]
+            
             y = self.chords[i]
             
             r = np.sqrt(x**2 + y**2)
@@ -113,7 +118,7 @@ class SpanToRadiusConverter:
         self.r_min = np.min(all_r)
         self.r_max = np.max(all_r)
         
-        self.r_target = np.arange(self.r_min, self.r_max + self.radius_resolution, self.radius_resolution)
+        self.r_target = np.arange
         
     def interpolate(self):
         
