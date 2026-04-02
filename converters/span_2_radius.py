@@ -115,10 +115,19 @@ class SpanToRadiusConverter:
         Build a common radius grid for all surfaces based on the minimum and maximum radius across all datasets.
         '''
         
-        all_r = np.concatenate(self.all_r)
+        r_min_list = []
+        r_max_list = []
         
-        self.r_min = np.min(all_r)
-        self.r_max = np.max(all_r)
+        for (r_upper, _), (r_lower, _) in zip(self.upper_surfaces, self.lower_surfaces):
+            r_min_list.append(min(np.min(r_upper), np.min(r_lower)))
+            r_max_list.append(max(np.max(r_upper), np.max(r_lower)))
+        
+        
+        self.r_min = np.min(r_min_list)
+        self.r_max = np.max(r_max_list)
+        
+        if self.r_max < self.r_min:
+            raise ValueError('Invalid radius range: r_max is less than r_min')
         
         self.r_target = np.arange(self.r_min, self.r_max + self.radius_resolution, self.radius_resolution)
         
