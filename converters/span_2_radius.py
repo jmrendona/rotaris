@@ -3,7 +3,7 @@ import glob
 import h5py
 import numpy as np
 import pandas as pd
-from scipy.interpolate import interp1d
+import scipy.interpolate as interp1d
 
 class SpanToRadiusConverter:
     
@@ -36,31 +36,33 @@ class SpanToRadiusConverter:
         self.radius_resolution = radius_resolution
         self.r_target = np.arange(0, 1 + radius_resolution, radius_resolution)
         
-    def _split_surfaces(self, x: np.ndarray, values: np.ndarray):
+    def _split_surfaces(self, r: np.ndarray, values: np.ndarray):
         
         '''
         Split the dataset into upper and lower surfaces based on the radius coordinate.\n
         With this suction and pressure side are separated using a differentiation method.
         '''
         
-        diff = np.diff(x)
-        split_index = np.argmax(np.abs(diff))
+        split_index = np.argmax(r)
         
-        x_upper = x[:split_index + 1]
+        r_upper = r[:split_index + 1]
         values_upper = values[:split_index + 1]
         
-        x_lower = x[split_index + 1:]
+        r_lower = r[split_index + 1:]
+        r_lower = r_lower[::-1]
         values_lower = values[split_index + 1:]
+        values_lower = values_lower[::-1]
         
-        if x_upper[0] > x_upper[-1]:
-            x_upper = x_upper[::-1]
+        
+        if r_upper[0] > r_upper[-1]:
+            r_upper = r_upper[::-1]
             values_upper = values_upper[::-1]
             
-        if x_lower[0] > x_lower[-1]:
-            x_lower = x_lower[::-1]
+        if r_lower[0] > r_lower[-1]:
+            r_lower = r_lower[::-1]
             values_lower = values_lower[::-1]
             
-        return (x_upper, values_upper), (x_lower, values_lower)
+        return (r_upper, values_upper), (r_lower, values_lower)
     
     def read(self):
         
@@ -97,16 +99,13 @@ class SpanToRadiusConverter:
             x = x[mask]
             values = values[mask]
             
-            (x_upper, values_upper), (x_lower, values_lower) = self._split_surfaces(x, values)
-            
             y = self.chords[i]
             
-            r_upper = np.sqrt(x_upper**2 + y**2)
-            r_lower = np.sqrt(x_lower**2 + y**2)
+            r = np.sqrt(x**2 + y**2)
+            self.all_r.append(r)
             
-            self.all_r.append(r_upper)
-            self.all_r.append(r_lower)
-             
+            (r_upper, values_upper), (r_lower, values_lower) = self._split_surfaces(r, values)
+            
             self.upper_surfaces.append((r_upper, values_upper))
             self.lower_surfaces.append((r_lower, values_lower))
             
