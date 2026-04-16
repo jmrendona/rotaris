@@ -62,7 +62,7 @@ class ForcesCSVConverter:
         stats = {}
         
         for color, column in self.color_columns.items():
-            values = df[column].to_numpy()
+            values = df[column][:-1].to_numpy()
             stats[color] = {
                 'mean': np.mean(values),
                 'std': np.std(values)
@@ -120,19 +120,19 @@ class ForcesCSVConverter:
             
             for i, z in enumerate(self.positions):
                 strip_group = strips_group.create_group(f'Strip_{i:05d}')
-                strip_group.attributes['Position'] = z
+                strip_group.attrs['Position'] = z
                 
                 forces_grp = strip_group.create_group('Forces')
-            for force in ['axial', 'tangential', 'radial']:
-                forces_grp.create_dataset(force, shape=(self.num_files,), dtype=np.float64)
+                for force in ['axial', 'tangential', 'radial']:
+                    forces_grp.create_dataset(force, shape=(self.num_files,), dtype=np.float64)
                 
             # Fill data with timesteps
             
             for t, file in enumerate(self.files):
-                 df = pd.read_csv(file)
+                df = pd.read_csv(file)
                  
-                 for i in range(self.num_nodes):
-                     for color, col in self.color_columns.items():
-                         force_name = self.color_to_force[color]
-                         h5f[f'Strips/Strip_{i:05d}/Forces/{force_name}'][t] = df[col].iloc[i]
+                for i in range(self.num_nodes):
+                    for color, col in self.color_columns.items():
+                        force_name = self.color_to_force[color]
+                        h5f[f'Strips/Strip_{i:05d}/Forces/{force_name}'][t] = df[col].iloc[i]
                 
