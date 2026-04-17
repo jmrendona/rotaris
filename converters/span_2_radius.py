@@ -92,19 +92,33 @@ class SpanToRadiusConverter:
             
             df = pd.read_csv(f)
             
+            y = self.chords[i]
             x = pd.to_numeric(df[self.span_col].values, errors='coerce')
             values = pd.to_numeric(df[self.variable_col].values, errors='coerce')
             
-            mask = ~np.isnan(x) & ~np.isnan(values)
-            x = x[mask]
-            values = values[mask]
+            nan_indices = np.where(np.isnan(x))[0]
             
-            y = self.chords[i]
+            if len(nan_indices) > 0:
+                
+                split_idex = nan_indices[0]
+                x_upper = x[:split_idex]
+                values_upper = values[:split_idex]
+                r_upper = np.sqrt(x_upper**2 + y**2)
+
+                x_lower = x[split_idex + 1:]
+                values_lower = values[split_idex + 1:]
+                r_lower = np.sqrt(x_lower**2 + y**2)
+                
+            else:
+                
+                mask = ~np.isnan(x) & ~np.isnan(values)
+                x = x[mask]
+                values = values[mask]
             
-            r = np.sqrt(x**2 + y**2)
-            self.all_r.append(r)
-            
-            (r_upper, values_upper), (r_lower, values_lower) = self._split_surfaces(r, values)
+                r = np.sqrt(x**2 + y**2)
+                self.all_r.append(r)
+                
+                (r_upper, values_upper), (r_lower, values_lower) = self._split_surfaces(r, values)
             
             self.upper_surfaces.append((r_upper, values_upper))
             self.lower_surfaces.append((r_lower, values_lower))
