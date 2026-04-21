@@ -1,3 +1,4 @@
+import os
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
@@ -23,6 +24,7 @@ class BladePostProcessor:
         '''
         
         self.filename = filename
+        self.path = os.path.dirname(filename)
         self.rpm = rpm
         self.pref = pref
         self.rho_ref = rho_ref
@@ -213,4 +215,4 @@ class BladePostProcessor:
         plt.grid(True)
         plt.legend()
         plt.tight_layout()
-        plt.show()
+        plt.savefig(os.path.join(self.path,f'{var_name}_radii_plot.png'), dpi=600)
