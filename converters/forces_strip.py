@@ -45,8 +45,8 @@ class ForcesCSVConverter:
         
         df = pd.read_csv(self.files[0])
         
-        self.positions = df['Positions[Length:m]'].to_numpy()
-        self.num_nodes = len(self.positions)
+        self.positions = df['Positions[Length:m]'][:-1].to_numpy()
+        self.num_nodes = len(self.positions) - 1
         
     def _detect_component_mapping(self,df):
         

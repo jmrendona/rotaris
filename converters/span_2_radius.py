@@ -77,8 +77,8 @@ class SpanToRadiusConverter:
         
         N = len(self.files)
         
-        chord = np.linspace(1, 0, N)
-        
+        chord = np.linspace(0, 1, N) # 0, 1 if extraction is done LE -> TE, otherwise 1, 0 for TE -> LE
+                
         if self.chord_length is not None:
             chord = chord * self.chord_length
             
