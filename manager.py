@@ -26,7 +26,7 @@ from bladeprocessor.blades_postproc import BladePostProcessor
 
 # ------------- Post processing ------------- #
 
-blade_cp = BladePostProcessor('/storage/renj3003/Rotor_alone/UdeS_Case/6e-5_6000rpm/data/cp/pstatic_radius.h5', rpm = 6000, pref = 101325, rho_ref = 1.204)
+blade_cp = BladePostProcessor('/storage/renj3003/Rotor_alone/UdeS_Case/6e-5_6000rpm/data/cp/pstatic_radius.h5', rpm = 6000, pref = 101325, rho_ref = 1.205)
 
-blade_cp.plot_radii(var_name = 'pressure', idx_list = [100, 200, 300, 400], mode = 'cp')
+blade_cp.plot_radii(var_name = 'pressure', idx_list = [110, 220, 332, 400, 420], mode = 'cp')
 

@@ -9,9 +9,10 @@ plt.rcParams.update({
     "text.usetex": True,           # Usa LaTeX real (requiere instalación)
     "font.family": "serif",        # Usa fuentes serif (estilo LaTeX)
     "font.serif": ["Computer Modern"],
-    "axes.labelsize": 12,          # Tamaño de etiquetas de ejes
-    "xtick.labelsize": 10,         # Tamaño de los números en X
-    "ytick.labelsize": 10          # Tamaño de los números en Y
+    "axes.labelsize": 14,          # Tamaño de etiquetas de ejes
+    "xtick.labelsize": 12,         # Tamaño de los números en X
+    "ytick.labelsize": 12,          # Tamaño de los números en Y
+    "legend.fontsize": 14          # Tamaño de la legenda
 })
 
 class BladePostProcessor:
@@ -181,10 +182,10 @@ class BladePostProcessor:
         if idx_list is None:
             raise ValueError("Either 'radii' or 'idx_list' must be provided.")
         
-        normalize = Normalize(vmin=0, vmax=len(idx_list) + 4)
-        colormap = cm.Greys_r
+        normalize = Normalize(vmin=0, vmax=len(idx_list))
+        colormap = cm.cividis
         
-        plt.figure(figsize=(6, 6))
+        plt.figure(figsize=(8, 6))
         v_it = 0
         
         for idx in idx_list:
@@ -213,12 +214,12 @@ class BladePostProcessor:
             else:
                 ylabel = var_name
             
-            plt.plot(self.chord/np.max(abs(self.chord)), -upper_curve, '*', label=f'r={r_local:.3f} m', color = colormap(normalize(v_it)))
-            plt.plot(self.chord/np.max(abs(self.chord)), -lower_curve, '*', color = colormap(normalize(v_it)))
+            plt.plot(self.chord/np.max(abs(self.chord)), -upper_curve, 'o', label=f'r={r_local:.3f} m', color = colormap(normalize(v_it)))
+            plt.plot(self.chord/np.max(abs(self.chord)), -lower_curve, 'o', color = colormap(normalize(v_it)))
             
             v_it += 1
         
-        plt.xlabel('Chord $x/c$')
+        plt.xlabel('$x/c$')
         plt.ylabel(ylabel)
         plt.grid(True)
         plt.legend()
