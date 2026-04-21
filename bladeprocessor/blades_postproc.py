@@ -1,7 +1,9 @@
 import os
 import h5py
 import numpy as np
+import matplotlib.cm as cm
 import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
 
 plt.rcParams.update({
     "text.usetex": True,           # Usa LaTeX real (requiere instalación)
@@ -179,7 +181,11 @@ class BladePostProcessor:
         if idx_list is None:
             raise ValueError("Either 'radii' or 'idx_list' must be provided.")
         
-        plt.figure(figsize=(10, 6))
+        normalize = Normalize(vmin=0, vmax=len(idx_list) + 4)
+        colormap = cm.Greys_r
+        
+        plt.figure(figsize=(6, 6))
+        v_it = 0
         
         for idx in idx_list:
             
@@ -207,8 +213,10 @@ class BladePostProcessor:
             else:
                 ylabel = var_name
             
-            plt.plot(upper_curve, '*', label=f'r={r_local:.3f} m')
-            plt.plot(lower_curve, '*')
+            plt.plot(self.chord/np.max(abs(self.chord)), -upper_curve, '*', label=f'r={r_local:.3f} m', color = colormap(normalize(v_it)))
+            plt.plot(self.chord/np.max(abs(self.chord)), -lower_curve, '*', color = colormap(normalize(v_it)))
+            
+            v_it += 1
         
         plt.xlabel('Chord $x/c$')
         plt.ylabel(ylabel)
