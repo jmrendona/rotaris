@@ -207,8 +207,8 @@ class BladePostProcessor:
             else:
                 ylabel = var_name
             
-            plt.plot(upper_curve, label=f'r={r_local:.3f} m', linestyle='*')
-            plt.plot(lower_curve, linestyle='*')
+            plt.plot(upper_curve, '*', label=f'r={r_local:.3f} m')
+            plt.plot(lower_curve, '*')
         
         plt.xlabel('Chord $x/c$')
         plt.ylabel(ylabel)
