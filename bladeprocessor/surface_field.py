@@ -44,11 +44,12 @@ class SurfaceField:
         cases with different meshes.
     '''
 
-    def __init__(self, filename: str, var_name: str = None, r_tip: float = None):
+    def __init__(self, filename: str, var_name: str = None, r_tip: float = None, c_ref: float = None):
 
         self.filename = filename
         self.var_name = var_name or os.path.splitext(os.path.basename(filename))[0]
         self.r_tip = r_tip
+        self.c_ref = c_ref
         self.radius = None
         self.chord = None
         self.data = {}
@@ -121,22 +122,45 @@ class SurfaceField:
 
         return self.radius / r_tip
 
-    def physical_aspect(self):
-        
+    def chord_ref(self):
+
         '''
-        Compute the physical aspect ratio of the blade surface, defined as
-        the ratio of the maximum chord length to the tip radius.
+        Resolve the reference chord length used to normalize x/c.
 
         Returns
         -------
         float
-            Physical aspect ratio (max chord / tip radius).
+            self.c_ref if provided, otherwise max(chord) from this file
+            (with a warning, since it may not match a physically meaningful
+            reference chord and can misalign comparisons across cases).
+        '''
+
+        c_ref = self.c_ref
+
+        if c_ref is None:
+            c_ref = np.nanmax(self.chord)
+            warnings.warn(
+                f"'{self.var_name}': c_ref not provided, using max(chord)={c_ref:.6g} m. "
+                "Pass c_ref explicitly to keep x/c consistent (and planform shape intact) across cases."
+            )
+
+        return c_ref
+
+    def physical_aspect(self):
+        
+        '''
+        Compute the physical aspect ratio of the blade surface, defined as
+        the ratio of the reference chord length to the tip radius.
+
+        Returns
+        -------
+        float
+            Physical aspect ratio (c_ref / r_tip).
         '''
 
         r_tip = self.r_tip if self.r_tip is not None else np.nanmax(self.radius)
-        max_chord = np.nanmax(self.local_chord_length('Upper'))  # Assuming upper surface for max chord
 
-        return max_chord / r_tip
+        return self.chord_ref() / r_tip
 
     def to_common_grid(self, r_target: np.ndarray, x_target: np.ndarray, surface: str = 'Upper'):
 
@@ -146,7 +170,7 @@ class SurfaceField:
         native mesh.
 
         Each radial station is first normalized in the chordwise direction
-        (x/c, using that station's own local chord length) and resampled
+        (x/c, using the fixed reference chord chord_ref()) and resampled
         onto x_target, then the result is resampled across stations onto
         r_target using r/R.
 
@@ -166,23 +190,19 @@ class SurfaceField:
         '''
 
         d = self.data[surface]
-        local_chord = self.local_chord_length(surface)
         r_over_R = self.r_over_R()
+        c_ref = self.chord_ref()
 
         chordwise = np.full((d.shape[0], len(x_target)), np.nan)
 
         for i in range(d.shape[0]):
-
-            lc = local_chord[i]
-            if not np.isfinite(lc) or lc <= 0:
-                continue
 
             row = d[i]
             valid = ~np.isnan(row)
             if valid.sum() < 2:
                 continue
 
-            xc_valid = self.chord[valid] / lc
+            xc_valid = self.chord[valid] / c_ref
             chordwise[i] = np.interp(x_target, xc_valid, row[valid], left=np.nan, right=np.nan)
 
         out = np.full((len(r_target), len(x_target)), np.nan)
