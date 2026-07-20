@@ -121,6 +121,23 @@ class SurfaceField:
 
         return self.radius / r_tip
 
+    def physical_aspect(self):
+        
+        '''
+        Compute the physical aspect ratio of the blade surface, defined as
+        the ratio of the maximum chord length to the tip radius.
+
+        Returns
+        -------
+        float
+            Physical aspect ratio (max chord / tip radius).
+        '''
+
+        r_tip = self.r_tip if self.r_tip is not None else np.nanmax(self.radius)
+        max_chord = np.nanmax(self.local_chord_length('Upper'))  # Assuming upper surface for max chord
+
+        return max_chord / r_tip
+
     def to_common_grid(self, r_target: np.ndarray, x_target: np.ndarray, surface: str = 'Upper'):
 
         '''
@@ -219,7 +236,7 @@ class SurfaceField:
         '''
 
         if ax is None:
-            fig, ax = plt.subplots(figsize=(10, 5))
+            fig, ax = plt.subplots(figsize=(14, 7))
         else:
             fig = ax.figure
 
@@ -235,6 +252,7 @@ class SurfaceField:
             xlabel, ylabel = r'Radius [m]', r'Chord [m]'
 
         contour = ax.contourf(r_axis, x_axis, field.T, levels=levels, cmap=cmap)
+        ax.set_aspect('equal' if not normalize else self.physical_aspect(), adjustable='box')
         cbar = fig.colorbar(contour, ax=ax, pad=0.02)
         cbar.set_label(cbar_label or self.var_name)
         ax.set_xlabel(xlabel)
@@ -293,16 +311,26 @@ class SurfaceFieldComparator:
 
         return self.field(name_a, surface) - self.field(name_b, surface)
 
-    def plot_cases(self, surface: str = 'Upper', levels=100, cmap: str = 'viridis',
+    def plot_cases(self, surface: str = 'Upper', reference: str = None, levels=100, cmap: str = 'viridis',
                    cbar_label: str = None, savepath: str = None, dpi: int = 600):
 
         '''
         Plot every case side by side on a shared color scale for direct
         visual comparison.
+
+        Parameters
+        ----------
+        reference : str, optional
+            Case label whose physical_aspect() sets the (r/R, x/c) aspect
+            ratio for all panels. Defaults to the first case. Only exact
+            for cases that share the same chord/radius geometry (e.g.
+            geometrically scaled rotors), which is the intended use here.
         '''
 
         names = list(self.cases.keys())
         n = len(names)
+        reference = reference or names[0]
+        aspect = self.cases[reference].physical_aspect()
 
         fig, axes = plt.subplots(1, n, figsize=(6 * n, 5), sharey=True, squeeze=False)
         axes = axes[0]
@@ -315,6 +343,7 @@ class SurfaceFieldComparator:
         contour = None
         for ax, name in zip(axes, names):
             contour = ax.contourf(self.r_target, self.x_target, fields[name].T, levels=contour_levels, cmap=cmap)
+            ax.set_aspect(aspect, adjustable='box')
             ax.set_xlabel(r'$r/R$')
             ax.set_title(name)
 
@@ -327,18 +356,27 @@ class SurfaceFieldComparator:
 
         return fig, axes
 
-    def plot_delta(self, name_a: str, name_b: str, surface: str = 'Upper', levels=100, cmap: str = 'RdBu_r',
-                   symmetric: bool = True, cbar_label: str = None, title: str = None, ax=None,
-                   savepath: str = None, dpi: int = 600):
+    def plot_delta(self, name_a: str, name_b: str, surface: str = 'Upper', reference: str = None, levels=100,
+                   cmap: str = 'RdBu_r', symmetric: bool = True, cbar_label: str = None, title: str = None,
+                   ax=None, savepath: str = None, dpi: int = 600):
 
         '''
         Plot the delta field (name_a - name_b) on the shared normalized grid.
+
+        Parameters
+        ----------
+        reference : str, optional
+            Case label whose physical_aspect() sets the (r/R, x/c) aspect
+            ratio. Defaults to name_a.
         '''
 
         if ax is None:
-            fig, ax = plt.subplots(figsize=(10, 5))
+            fig, ax = plt.subplots(figsize=(14, 7))
         else:
             fig = ax.figure
+
+        reference = reference or name_a
+        aspect = self.cases[reference].physical_aspect()
 
         d = self.delta(name_a, name_b, surface)
 
@@ -351,6 +389,7 @@ class SurfaceFieldComparator:
         contour_levels = np.linspace(vmin, vmax, levels) if isinstance(levels, int) else levels
 
         contour = ax.contourf(self.r_target, self.x_target, d.T, levels=contour_levels, cmap=cmap)
+        ax.set_aspect(aspect, adjustable='box')
         cbar = fig.colorbar(contour, ax=ax, pad=0.02)
         cbar.set_label(cbar_label or f'$\\Delta$ ({name_a} $-$ {name_b})')
         ax.set_xlabel(r'$r/R$')
