@@ -251,9 +251,9 @@ class SurfaceField:
             field = self.data[surface]
             xlabel, ylabel = r'Radius [m]', r'Chord [m]'
 
-        contour = ax.contourf(r_axis, x_axis, field.T, levels=levels, cmap=cmap)
+        contour = ax.contourf(r_axis, x_axis, field.T, levels=levels, cmap=cmap, extend='both')
         ax.set_aspect('equal' if not normalize else self.physical_aspect(), adjustable='box')
-        cbar = fig.colorbar(contour, ax=ax, pad=0.02)
+        cbar = fig.colorbar(contour, ax=ax, orientation='horizontal', pad=0.15)
         cbar.set_label(cbar_label or self.var_name)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
@@ -332,7 +332,7 @@ class SurfaceFieldComparator:
         reference = reference or names[0]
         aspect = self.cases[reference].physical_aspect()
 
-        fig, axes = plt.subplots(1, n, figsize=(6 * n, 5), sharey=True, squeeze=False)
+        fig, axes = plt.subplots(1, n, figsize=(6 * n, 3), sharey=True, squeeze=False)
         axes = axes[0]
 
         fields = {name: self.field(name, surface) for name in names}
@@ -342,13 +342,14 @@ class SurfaceFieldComparator:
 
         contour = None
         for ax, name in zip(axes, names):
-            contour = ax.contourf(self.r_target, self.x_target, fields[name].T, levels=contour_levels, cmap=cmap)
+            contour = ax.contourf(self.r_target, self.x_target, fields[name].T, levels=contour_levels, cmap=cmap, extend='both')
             ax.set_aspect(aspect, adjustable='box')
             ax.set_xlabel(r'$r/R$')
+            ax.set
             ax.set_title(name)
 
         axes[0].set_ylabel(r'$x/c$')
-        cbar = fig.colorbar(contour, ax=list(axes), pad=0.02)
+        cbar = fig.colorbar(contour, ax=list(axes), orientation='horizontal' , pad=0.4)
         cbar.set_label(cbar_label or self.cases[names[0]].var_name)
 
         if savepath:
@@ -388,9 +389,9 @@ class SurfaceFieldComparator:
 
         contour_levels = np.linspace(vmin, vmax, levels) if isinstance(levels, int) else levels
 
-        contour = ax.contourf(self.r_target, self.x_target, d.T, levels=contour_levels, cmap=cmap)
+        contour = ax.contourf(self.r_target, self.x_target, d.T, levels=contour_levels, cmap=cmap, extend='both')
         ax.set_aspect(aspect, adjustable='box')
-        cbar = fig.colorbar(contour, ax=ax, pad=0.02)
+        cbar = fig.colorbar(contour, ax=ax, orientation='horizontal', pad=0.015)
         cbar.set_label(cbar_label or f'$\\Delta$ ({name_a} $-$ {name_b})')
         ax.set_xlabel(r'$r/R$')
         ax.set_ylabel(r'$x/c$')
