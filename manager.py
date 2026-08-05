@@ -39,7 +39,8 @@ from bladeprocessor.surface_field import SurfaceField, SurfaceFieldComparator
 case_2025 = SurfaceField(
 	"/storage/renj3003/rotor-alone/UdeS_Case/6e-5_6000rpm/data/cp/pstatic_cartesian.h5",
 	var_name = 'pstatic',
-	r_tip = 0.125
+	r_tip = 0.125,
+	c_ref = 0.025
 )
 
 case_2025T = SurfaceField(

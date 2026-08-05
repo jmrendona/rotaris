@@ -2,6 +2,7 @@ import os
 import pdb
 import glob
 import h5py
+import warnings
 import numpy as np
 import pandas as pd
 from scipy.interpolate import interp1d
@@ -12,8 +13,8 @@ class SpanConverter:
     Convert spanwise alligned sliced data to cylindrical (r, chord) dataset.
     '''
     
-    def __init__(self, input_path: str, output_path: str, variable_col: str, span_col: str, chord_length=None, resolution=0.01, coordinate_system='polar', surface_split=True):
-        
+    def __init__(self, input_path: str, output_path: str, variable_col: str, span_col: str, chord_length=None, resolution=0.01, coordinate_system='polar', surface_split=True, hub_radius=None, tip_radius=None):
+
         '''
         Parameters
         ----------
@@ -31,8 +32,12 @@ class SpanConverter:
             The coordinate system to use for the output dataset, by default 'polar'.
         surface_split : bool, optional
             Whether to split the surfaces into upper and lower parts, by default True.
+        hub_radius, tip_radius : float, optional
+            Known physical hub/tip radius, used only to sanity-check each
+            file's upper/lower split (warns if a split looks wrong). Not
+            used to perform the split itself.
         '''
-        
+
         self.input_path = input_path
         self.output_path = output_path
         self.variable_col = variable_col
@@ -44,6 +49,8 @@ class SpanConverter:
         self.resolution = resolution
         self.coord_target = None
         self.surface_split = surface_split
+        self.hub_radius = hub_radius
+        self.tip_radius = tip_radius
        
     def _compute_coordinate(self, x, y):
         
@@ -61,32 +68,105 @@ class SpanConverter:
         else:
             raise ValueError("coordinate_system must be either 'polar' or 'cartesian'")
      
+    def _find_turn_index(self, coord: np.ndarray) -> int:
+
+        '''
+        Find the interior turning point of a hub<->tip<->hub loop trace.
+
+        A clean loop starts and ends near the SAME location (wherever the
+        extraction began), and passes through the opposite extreme exactly
+        once, somewhere in the middle. So whichever of argmax/argmin sits
+        strictly inside the array (not at index 0 or the last index) is
+        the true turn: a tip if the trace starts/ends at the hub, or a hub
+        if the trace starts/ends at the tip.
+
+        Returns
+        -------
+        int
+            Index of the turning point.
+        '''
+
+        n = len(coord)
+        i_max, i_min = int(np.argmax(coord)), int(np.argmin(coord))
+
+        max_interior = 0 < i_max < n - 1
+        min_interior = 0 < i_min < n - 1
+
+        if max_interior and not min_interior:
+            return i_max
+        if min_interior and not max_interior:
+            return i_min
+
+        raise ValueError(
+            "Could not find an unambiguous interior turning point "
+            f"(argmax at {i_max}, argmin at {i_min}, out of {n} points)."
+        )
+
+    def _validate_split(self, coord_upper: np.ndarray, coord_lower: np.ndarray):
+
+        '''
+        Warn if the split surfaces don't roughly span [hub_radius, tip_radius].
+        Only runs if both bounds were provided; used as a safety net to
+        catch a bad split, not to perform the split itself.
+        '''
+
+        if self.hub_radius is None or self.tip_radius is None:
+            return
+
+        tol = 0.05 * (self.tip_radius - self.hub_radius)
+
+        for label, c in (('upper', coord_upper), ('lower', coord_lower)):
+            if abs(c.min() - self.hub_radius) > tol or abs(c.max() - self.tip_radius) > tol:
+                warnings.warn(
+                    f"{label} surface spans [{c.min():.5g}, {c.max():.5g}], expected roughly "
+                    f"[{self.hub_radius:.5g}, {self.tip_radius:.5g}]. Possible bad split for this file."
+                )
+
+    def _check_start_side_consistency(self, filename: str, coord: np.ndarray):
+
+        '''
+        Track which end of the coordinate range each file's trace starts
+        from (near the max or near the min), and warn as soon as a file
+        breaks the pattern set by the first file. Assumes the extraction
+        method is the same for every file in a batch, so the start side
+        should never flip within one conversion run.
+        '''
+
+        starts_high = abs(coord[0] - coord.max()) < abs(coord[0] - coord.min())
+
+        if not hasattr(self, 'start_sides'):
+            self.start_sides = []
+
+        if self.start_sides and starts_high != self.start_sides[-1][1]:
+            prev_filename, _ = self.start_sides[-1]
+            warnings.warn(
+                f"'{filename}' starts at the opposite end of the coordinate range compared to "
+                f"'{prev_filename}'. Extraction direction may not be consistent across files."
+            )
+
+        self.start_sides.append((filename, starts_high))
+
     def _split_surfaces(self, coord: np.ndarray, values: np.ndarray):
-        
+
         '''
-        Split the dataset into upper and lower surfaces based on the radius coordinate.\n
-        With this suction and pressure side are separated using a differentiation method.
+        Split a single hub<->tip<->hub loop trace into two surfaces, each
+        sorted ascending by coord, regardless of which end the trace
+        starts from.
         '''
-        
-        split_index = np.argmax(coord)
-        
-        coord_upper = coord[:split_index + 1]
-        values_upper = values[:split_index + 1]
-        
-        coord_lower = coord[split_index + 1:]
-        coord_lower = coord_lower[::-1]
-        values_lower = values[split_index + 1:]
-        values_lower = values_lower[::-1]
-        
-        
-        if coord_upper[0] > coord_upper[-1]:
-            coord_upper = coord_upper[::-1]
-            values_upper = values_upper[::-1]
-            
-        if coord_lower[0] > coord_lower[-1]:
-            coord_lower = coord_lower[::-1]
-            values_lower = values_lower[::-1]
-            
+
+        split_index = self._find_turn_index(coord)
+
+        coord_a, values_a = coord[:split_index + 1], values[:split_index + 1]
+        coord_b, values_b = coord[split_index + 1:], values[split_index + 1:]
+
+        order_a = np.argsort(coord_a)
+        order_b = np.argsort(coord_b)
+
+        coord_upper, values_upper = coord_a[order_a], values_a[order_a]
+        coord_lower, values_lower = coord_b[order_b], values_b[order_b]
+
+        self._validate_split(coord_upper, coord_lower)
+
         return (coord_upper, values_upper), (coord_lower, values_lower)
     
     def read(self):
@@ -114,52 +194,31 @@ class SpanConverter:
         self.all_coord = []
         
         for i, f in enumerate(self.files):
-            
+
             df = pd.read_csv(f)
-            
+
             y = self.chords[i]
             x = pd.to_numeric(df[self.span_col].values, errors='coerce')
             values = pd.to_numeric(df[self.variable_col].values, errors='coerce')
-            
-            nan_indices = np.where(np.isnan(x))[0]
-            
-            if self.surface_split is True:
-                if len(nan_indices) > 0:
-                    
-                    split_idex = nan_indices[0]
-                    x_upper = x[:split_idex]
-                    values_upper = values[:split_idex]
-                    coord_upper = self._convert_to_radius(x_upper, y)
 
-                    x_lower = x[split_idex + 1:]
-                    values_lower = values[split_idex + 1:]
-                    coord_lower = self._convert_to_radius(x_lower, y)
-                    
-                else:
-                    
-                    mask = ~np.isnan(x) & ~np.isnan(values)
-                    x = x[mask]
-                    values = values[mask]
-                
-                    coord = self._compute_coordinate(x, y)
-                    self.all_coord.append(coord)
-                    print(f'File {i}/200') 
-                    (coord_upper, values_upper), (coord_lower, values_lower) = self._split_surfaces(coord, values)
-                
+            # '*,*' (or any unparsable entry) means BOTH columns are invalid
+            # for that row, never a real upper/lower separator - drop those
+            # rows before any split logic runs.
+            mask = ~np.isnan(x) & ~np.isnan(values)
+            x = x[mask]
+            values = values[mask]
+
+            coord = self._compute_coordinate(x, y)
+            self.all_coord.append(coord)
+            print(f'File {i + 1}/{N}')
+
+            if self.surface_split:
+                self._check_start_side_consistency(f, coord)
+                (coord_upper, values_upper), (coord_lower, values_lower) = self._split_surfaces(coord, values)
                 self.upper_surfaces.append((coord_upper, values_upper))
                 self.lower_surfaces.append((coord_lower, values_lower))
-
             else:
-                    
-                    mask = ~np.isnan(x) & ~np.isnan(values)
-                    x = x[mask]
-                    values = values[mask]
-                
-                    coord = self._compute_coordinate(x, y)
-                    self.all_coord.append(coord)
-                    print(f'File {i}/200') 
-                    
-                    self.upper_surfaces.append((coord, values))
+                self.upper_surfaces.append((coord, values))
 
             
     def build_coordinate_grid(self):
