@@ -148,13 +148,27 @@ nodes have no internet access, so the Python venv `run_conversion.sh`
 expects (`~/rotaris-venv`) has to be built from a **login node** first:
 
 ```bash
-module load StdEnv/2023 python/3.11 scipy-stack/2023b
-python -m venv --system-site-packages ~/rotaris-venv
+module load StdEnv/2023 python/3.11 scipy-stack/2023b vtk
+virtualenv --no-download --system-site-packages ~/rotaris-venv
 source ~/rotaris-venv/bin/activate
+pip install --no-index --upgrade pip
 pip install pyvista
 ```
 
-After that, `run_conversion.sh` just reuses it.
+Use `virtualenv --no-download`, not `python -m venv` - Alliance's `python`
+module ships without `ensurepip` bundled, so `python -m venv` fails trying
+to fetch pip from the internet during creation itself
+(`Error: Command '[...ensurepip...]' returned non-zero exit status 1`).
+`virtualenv` knows to skip that and pull pip from Alliance's own local wheel
+mirror instead (`pip install --no-index --upgrade pip`). `pyvista` turned
+out to already be in that same local mirror (cvmfs wheelhouse), so this
+whole block actually runs fine without real internet either way - it's
+still meant to run once from a login node, though, since compute nodes
+aren't guaranteed the same wheelhouse access. `run_conversion.sh` will
+refuse to run (with a clear message) if `~/rotaris-venv` doesn't exist yet,
+rather than trying to build it inside the batch job.
+
+After that, `run_conversion.sh` just reuses the venv.
 
 **Where things live**: `run_conversion.sh` locates `convert.py` via its own
 path, not your current directory - so the `rotaris/` folder (code) can sit
@@ -220,15 +234,22 @@ carries no frame axis for it, only for `measurements` - and every
 variable is written as a 2D dataset covering every frame in the file:
 
 ```
-Metadata/             lrf_axis_origin, lrf_axis_direction, frame_index
+Metadata/             lrf_axis_origin (meters), lrf_axis_direction, frame_index
                        (datasets, frame_index = arange(n_frames)); scale_*,
                        offset_*, lrf_angular_vel_lattice (attrs)
-Geometry/X,Y,Z         surfel centroid positions (1D, shape (n_points,))
-Geometry/NX,Normal_Y,Normal_Z, Area
+Geometry/X,Y,Z         surfel centroid positions, meters (1D, shape (n_points,))
+Geometry/NX,Normal_Y,Normal_Z, Area   normals (unit vectors) and area, m^2
 Data/<Variable_Name>   one dataset per .snc variable (spaces -> underscores),
                        shape (n_frames, n_points), each with attrs
                        lattice_unit_class, physical_units
 ```
+
+(Positions/area/`lrf_axis_origin` are scaled by `LatticeLength` before being
+written - fixed 2026-08-08, `to_h5()` used to write these in raw lattice
+units while `Data/<Variable_Name>` was already physical, an inconsistency
+nothing downstream had started depending on yet, found while building
+`bladeprocessor/friction_lines.py`, the first real consumer of this file's
+`Geometry` group.)
 
 With `surface_split=True`, `Geometry` and `Data` are each replaced by
 `Geometry/Upper`, `Geometry/Lower`, `Data/Upper`, `Data/Lower` (same
@@ -275,6 +296,78 @@ changes between frames, not shape) - noted as an assumption in
 mentioned as the more foolproof (but more storage-hungry) alternative,
 not implemented.
 
+## Wall shear / friction lines: `bladeprocessor/FrictionLines` - Equations
+
+`FrictionLines` consumes a `SNCReader.to_h5(..., surface_split=True)` file
+(the forces branch above - never the `pf2ens`/pressure branch, whose
+recomputed normals aren't trustworthy for this, see "Splitting into
+upper/lower surface"). Every quantity below is per-surfel unless noted.
+
+**Wall shear vector** (`wall_shear()`) - the surface force with its
+normal (pressure) component removed, leaving only the tangential
+(friction) part:
+
+```
+tau = F - (F . n) n
+```
+
+`F` is `Surface X/Y/Z-Force` (already Pa, from `SNCReader.to_h5()`), `n`
+is this surfel's own unit normal (`Geometry/NX,Normal_Y,Normal_Z`, from
+the raw `.snc` - not `pf2ens`'s recomputed one).
+
+**Skin friction coefficient** (`cf()`) - normalized by a LOCAL dynamic
+pressure, using each surfel's own radius, not one fixed velocity for the
+whole blade:
+
+```
+Cf = tau / q_ref
+q_ref = 0.5 * rho_ref * (omega * r)^2
+omega = rpm * 2*pi / 60
+```
+
+`r` is this surfel's physical radius from the rotor's rotation axis
+(`lrf_axis_origin`/`lrf_axis_direction`, the one place `FrictionLines`
+still uses the rotation axis rather than raw Cartesian position - see
+`_radius()`). This matches `BladePostProcessor.compute_cf()` elsewhere in
+this project (`U_ref(r) = omega * r`), rather than
+non-dimensionalizing by one global freestream/tip velocity. **Caveat**:
+`q_ref -> 0` as `r -> 0`, so `Cf` blows up near the rotation axis - some
+faces (e.g. `Rotor::Default-Segment`) include a sliver of hub/bore
+geometry right at `r~0`; exclude it (`span_min`/`span_max` in
+`friction_lines()`, or just don't query `cf_at_radii()` near `r=0`)
+before trusting an unrestricted `cf()` call.
+
+`component` picks which part of `tau` to report:
+
+```
+Cf (magnitude)  = |tau| / q_ref                    >= 0 always
+Cf (chordwise)  = tau[chord_axis] / q_ref           signed
+Cf (spanwise)   = tau[span_axis]  / q_ref           signed
+```
+
+Magnitude can never show a sign reversal (separation/reattachment) -
+it just dips toward zero. The signed components can, which is the
+point of having them (see `friction_lines_test_cf_chordwise_*.png`
+crossing zero mid-chord at the outer radii).
+
+**Local chordwise position** (`cf_at_radii()`) - for a thin band of
+surfels around a target radius (`|r - r_target| < tol`), the raw
+Cartesian chord coordinate (`chord_axis`, centered - see `_span_chord()`)
+is rescaled to `[0, 1]` using THAT BAND's own min/max:
+
+```
+x/c = (chord - chord_min) / (chord_max - chord_min)
+```
+
+This is a per-band, per-case rescaling, not a case-independent x/c (see
+the class docstring's caveat and README's "What's still open" below).
+The resulting `(x/c, Cf)` pairs are then averaged into `n_chord_bins`
+equal-width x/c bins (mean Cf per bin) - without this, a single radius
+band on a real `.snc` surface contains hundreds of thousands of raw,
+noisy points, which reads as a dense cloud rather than a curve once
+plotted; the point of `n_chord_bins` is turning that cloud into the
+single readable curve per radius that `plot_cf_radii()` draws.
+
 ## What's still open
 
 - Iso-radius / (r/R, x/c) resampling directly from raw `.snc` surfel
@@ -284,3 +377,13 @@ not implemented.
 - The additive constant for converting raw lattice `Static Pressure` to Pa
   remains unresolved and is not assumed to be case-independent - hence the
   hard requirement to use `pf2ens` for pressure rather than the raw file.
+- `FrictionLines`' span/chord axes are raw Cartesian columns
+  (`span_axis`/`chord_axis`), not derived from the rotor's rotation axis -
+  a rotation-axis-based derivation was tried and abandoned (see the class
+  docstring) because it assumes the chord line lies in the rotor disk
+  plane, which breaks on any blade with real geometric pitch/twist. The
+  Cartesian fallback works for every case in this project so far but
+  isn't automatically correct for a differently-oriented mesh, and
+  doesn't by itself handle a twisted blade's true local chord direction
+  either - a proper fix (e.g. per-station PCA of the point cloud) is not
+  implemented.

@@ -19,16 +19,19 @@ class SNCReader:
     vertices), normals, areas, all measured variables, and the rotor's
     rotation axis/angular velocity, all in one place.
 
-    NOTE on units: variable()/wall_shear-style raw access returns values
-    exactly as stored in the file (PowerFLOW "lattice units"). to_h5()
-    converts ForcePerArea-class variables (Surface X/Y/Z-Force, Skin
-    Friction) to physical units (Pa) using force_per_area_scale(),
-    validated against this file's own stored Skin Friction (correlation
-    ~0.999). Static Pressure is NOT converted - it needs PowerFLOW's
-    internal Cp-based translation (see the PowerVIZ User's Guide, Appendix
-    B), which isn't implemented here; use pf2ens for physical-unit
-    pressure instead, and treat Data/Static_Pressure in the output HDF5 as
-    still being in raw lattice units.
+    NOTE on units: methods on this class (surfel_centroids(), variable(),
+    lrf_axis_origin, etc.) return values exactly as stored in the file
+    (PowerFLOW "lattice units"). to_h5() converts what it can to physical
+    units before writing: positions/areas/lrf_axis_origin by
+    lattice_scales['LatticeLength'] (m / m^2), and ForcePerArea-class
+    variables (Surface X/Y/Z-Force, Skin Friction) by
+    force_per_area_scale() (Pa) - the latter validated against this file's
+    own stored Skin Friction (correlation ~0.999). Static Pressure is NOT
+    converted - it needs PowerFLOW's internal Cp-based translation (see
+    the PowerVIZ User's Guide, Appendix B), which isn't implemented here;
+    use pf2ens for physical-unit pressure instead, and treat
+    Data/Static_Pressure in the output HDF5 as still being in raw lattice
+    units.
     '''
 
     def __init__(self, filename: str):
@@ -245,6 +248,12 @@ class SNCReader:
         file, optionally restricted to surfels matching face_name (e.g.
         one rotor blade).
 
+        Positions, area and lrf_axis_origin are written in physical units
+        (meters / m^2), scaled by the file's own LatticeLength (matching
+        how Surface X/Y/Z-Force / Skin Friction are already scaled to Pa
+        below) - NOT the raw lattice units surfel_centroids()/
+        surfel_areas()/lrf_axis_origin return on their own.
+
         Each Data/<variable> dataset has shape (n_frames, n_points) -
         geometry (positions/normals/areas) is written once, since the
         raw .snc file carries no frame axis for it, only for
@@ -264,16 +273,17 @@ class SNCReader:
             default, by default False.
         '''
 
-        coords = self.surfel_centroids()
+        length_scale = self.lattice_scales['LatticeLength']
+        coords = self.surfel_centroids() * length_scale
         normals = self.surfel_normals()
-        areas = self.surfel_areas()
+        areas = self.surfel_areas() * length_scale ** 2
 
         base_mask = self.face_mask(face_name) if face_name is not None else np.ones(len(areas), dtype=bool)
 
         with h5py.File(output_path, 'w') as h5f:
 
             meta = h5f.create_group('Metadata')
-            meta.create_dataset('lrf_axis_origin', data=self.lrf_axis_origin)
+            meta.create_dataset('lrf_axis_origin', data=self.lrf_axis_origin * length_scale)
             meta.create_dataset('lrf_axis_direction', data=self.lrf_axis_direction)
             meta.create_dataset('frame_index', data=np.arange(self.n_frames))
             meta.attrs['lrf_angular_vel_lattice'] = self.lrf_angular_vel_lattice

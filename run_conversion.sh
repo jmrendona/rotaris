@@ -78,7 +78,15 @@ source /project/rrg-moreaust-ac/Env/powerflow_env.sh $use_pf_version
 #
 #   module load StdEnv/2023 gcc/12.3 python/3.11 vtk/9.4.2 scipy-stack/2023b
 #   python -m venv --system-site-packages ~/rotaris-venv
+# NOTE: Alliance/Compute Canada compute nodes have NO internet access, so the
+# block below will fail if this is the very first run and the venv doesn't
+# exist yet. Build it once from a LOGIN node before your first `sbatch`
+# submission:
+#
+#   module load StdEnv/2023 python/3.11 scipy-stack/2023b vtk
+#   virtualenv --no-download --system-site-packages ~/rotaris-venv
 #   source ~/rotaris-venv/bin/activate
+#   pip install --no-index --upgrade pip
 #   pip install pyvista
 #
 # After that, this script just reuses it - no internet needed on the compute
@@ -88,14 +96,23 @@ source /project/rrg-moreaust-ac/Env/powerflow_env.sh $use_pf_version
 # plain numpy) will actually be on PYTHONPATH.
 
 module load StdEnv/2023 gcc/12.3 python/3.11 vtk/9.4.2 scipy-stack/2023b
+# `virtualenv --no-download` (not `python -m venv`) matters here: Alliance's
+# python module ships without ensurepip bundled, so `python -m venv` fails
+# trying to fetch pip. `virtualenv` knows to skip that and pulls pip from
+# Alliance's own local wheel mirror instead (`--no-index`). pyvista turned
+# out to already be in that same local mirror (cvmfs wheelhouse), so this
+# whole block actually runs fine without real internet either way - it's
+# still meant to run once from a login node, though, since compute nodes
+# aren't guaranteed the same wheelhouse access.
+#
+# After that, this script just reuses the venv - no internet needed on the
+# compute node.
 
 VENV_DIR="$HOME/rotaris-venv"
 
 if [ ! -d "$VENV_DIR" ]; then
-    echo "No venv found at $VENV_DIR - creating one now (requires internet; see the note above if this fails)."
-    python -m venv --system-site-packages "$VENV_DIR"
-    source "$VENV_DIR/bin/activate"
-    pip install pyvista
+    echo "No venv found at $VENV_DIR - build it from a login node first, see the note above." >&2
+    exit 1
 else
     source "$VENV_DIR/bin/activate"
 fi
