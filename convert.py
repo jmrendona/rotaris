@@ -44,10 +44,17 @@ CLI entry point for the .snc -> HDF5 and .fnc -> HDF5 conversion branches
                                     geometry the .fnc measurement volume
                                     didn't exclude.
     convert.py fnc-plot       ...  quick-look contour plot from an already-
-                                    extracted fnc-meridional HDF5 file - no
-                                    re-extraction, just fnc_plane.plot_frame.
-                                    Automatically combines Data/valid with
-                                    Data/frozen if present.
+                                    extracted fnc-meridional/fnc-iso-radius
+                                    HDF5 file - no re-extraction, just
+                                    fnc_plane.plot_frame. Automatically
+                                    combines Data/valid with Data/frozen,
+                                    if present. NOTE: there is no working
+                                    data mask for rotor blades - only a
+                                    validated visual annotation
+                                    (fnc_plane.RotorBladePosition.
+                                    blade_azimuths_deg/blade_extents_deg,
+                                    Python API only, not wired into this
+                                    CLI) - see that class's docstring.
 
 Meant to be run as a cluster batch job - see run_conversion.sh. The fnc-*
 subcommands additionally need `pf2ens` on $PATH (PowerFLOW 6-2024-R1 -

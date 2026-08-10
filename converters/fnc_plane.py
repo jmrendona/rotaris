@@ -156,6 +156,38 @@ def parse_variable_names(nc_stats_path: str) -> dict:
     return names
 
 
+def parse_case_origin_mks(nc_stats_path: str) -> np.ndarray:
+
+    '''
+    Parse the physical-units (MKS) "Case Origin" out of saved
+    `exaritool nc-stats.ri -detail` output - the offset (meters) between
+    the lattice's raw/absolute coordinate origin and the origin
+    pf2ens/nc-stats.ri's own MKS coordinates are centered on. Needed to
+    align geometry read directly from a raw .snc file (SNCReader,
+    lrf_axis_origin etc. - in the lattice's raw/absolute frame) with
+    points/values extracted through this module (in pf2ens's
+    case-origin-centered frame) - see RotorBladePosition.
+
+    Returns
+    -------
+    np.ndarray, shape (3,)
+    '''
+
+    with open(nc_stats_path) as f:
+        text = f.read()
+
+    match = re.search(
+        r'Case Origin.*?\n\s*lattice:.*\n\s*dimless:.*\n\s*user:.*\n'
+        r'\s*mks:\s*([\-\d.eE]+)\s+([\-\d.eE]+)\s+([\-\d.eE]+)',
+        text,
+    )
+
+    if match is None:
+        raise ValueError(f"Could not find a 'Case Origin ... mks:' line in {nc_stats_path}")
+
+    return np.array([float(v) for v in match.groups()])
+
+
 def _rotate_about_axis(points: np.ndarray, axis: str, angle_deg: float) -> np.ndarray:
 
     '''Rotate an (N, 3) point array by angle_deg (degrees) about a global axis.'''
@@ -174,6 +206,22 @@ def _rotate_about_axis(points: np.ndarray, axis: str, angle_deg: float) -> np.nd
         raise ValueError("axis must be 'x', 'y', or 'z'")
 
     return points @ R.T
+
+
+def _split_wrapped_span(lo: float, hi: float) -> list:
+
+    '''
+    Split a (lo, hi) degree span - lo assumed already in [-180, 180), hi
+    possibly past 180 (i.e. the span wraps around the axis's +-180 cut) -
+    into one or two spans each fully inside [-180, 180]. Used for
+    plotting a blade's angular footprint (plot_frame's blade_extents_deg)
+    on a wrapped azimuth axis.
+    '''
+
+    if hi <= 180:
+        return [(lo, hi)]
+    return [(lo, 180.0), (-180.0, hi - 360)]
+
 
 
 def meridional_plane_points(angle_deg: float, axis: str = 'z', n_inplane: int = 100, n_axial: int = 100,
@@ -697,8 +745,191 @@ def _long_name(short_code: str) -> str:
     return _PF2ENS_LONG_NAMES.get(short_code, short_code)
 
 
+class RotorBladePosition:
+
+    '''
+    Predicts each rotor blade's instantaneous azimuth at any .fnc frame,
+    from the rotor's own .snc surface file - built because
+    vtkValidPointMask (FNCVolumeFrame.sample's 'valid') does NOT track
+    the blades' true position at all near mid-to-tip span: confirmed
+    empirically on Pk109_1e-4_VR12/SMR-VR8.fnc by comparing raw mesh
+    point positions between two frames ~95deg of real rotation apart
+    (100% bit-identical everywhere - this measurement volume is a fixed
+    Eulerian probe grid, as expected, so that alone isn't the problem),
+    and separately confirming the field VALUES do genuinely vary with
+    real physics at 99.997% of all points - so the blade's solid volume
+    just isn't being excluded from the exported data at all at these
+    radii, at any frame.
+
+    IDENTIFICATION ONLY - THERE IS NO WORKING DATA MASK FOR ROTOR BLADES
+    HERE. blade_azimuths_deg() (a single centroid line per blade) is
+    VALIDATED: overlaid on plot_frame() at r=0.2739m across frames
+    0/48/96 of Pk109_1e-4_VR12/SMR-VR8.fnc (~190deg of real rotation), it
+    matched the visible wake hot-spot exactly at every frame, correctly
+    relabeling which physical blade sits where as they cycle through -
+    the core calibration assumption (a .snc file's single stored,
+    frame-independent surfel geometry snapshot corresponds to
+    lrf_position_rad=0, the CDI-import/reference orientation) holds.
+    blade_angular_extent_deg()/blade_angular_extents_deg() (an azimuth-
+    only band per blade) is a reasonable visual annotation too, but
+    ignores axial position entirely.
+
+    An actual MASK (removing/NaN-ing values under the blade) was
+    attempted on top of this and removed again: an azimuth-only band
+    badly over-masked (a full inlet-to-outlet-height strip at every
+    blade azimuth), and a follow-up attempt at a real, axially-aware
+    filled cross-section (binning surfels' local axial envelope per
+    azimuth) never reliably matched what plot_frame's overlay clearly
+    showed - only visible/correct in cropped, zoomed-in checks, not
+    trustworthy at the full-plane scale a real workflow would use. If a
+    working mask is needed later, it still needs to be built (and
+    properly validated against zoomed, per-blade crops, not just overlay
+    lines) from scratch - don't assume any leftover method here does
+    that correctly.
+
+    Coordinate systems: SNCReader's raw outputs (surfel_centroids(),
+    lrf_axis_origin, etc.) are in the lattice's raw/absolute frame, NOT
+    the case-origin-centered frame extract_to_h5()'s query points and
+    pf2ens's own exports use - see parse_case_origin_mks(). Everything
+    this class computes (azimuth, radius, axial position) is relative to
+    lrf_axis_origin, so that offset cancels out and is never needed here.
+    '''
+
+    def __init__(self, snc_path: str, blade_face_prefix: str = 'Rotor-blade-'):
+
+        from converters.snc_reader import SNCReader
+
+        reader = SNCReader(snc_path)
+        try:
+            length_scale = reader.lattice_scales['LatticeLength']
+            coords = reader.surfel_centroids() * length_scale
+            self.axis_origin = reader.lrf_axis_origin * length_scale
+            self.axis_direction = reader.lrf_axis_direction / np.linalg.norm(reader.lrf_axis_direction)
+
+            axis_idx = int(np.argmax(np.abs(self.axis_direction)))
+            other_idx = [i for i in range(3) if i != axis_idx]
+
+            blade_names = sorted({
+                fname.split('::')[0].lstrip('/')
+                for fname in reader.face_names if blade_face_prefix in fname
+            })
+            if not blade_names:
+                raise ValueError(f"No face names matched '{blade_face_prefix}' in {snc_path}")
+
+            self.reference_azimuth_deg = {}
+            self._blade_cylindrical = {}
+
+            for name in blade_names:
+                mask = reader.face_mask(name)
+                rel = coords[mask] - self.axis_origin
+                radius = np.hypot(rel[:, other_idx[0]], rel[:, other_idx[1]])
+                azimuth = np.degrees(np.arctan2(rel[:, other_idx[1]], rel[:, other_idx[0]]))
+                axial = rel[:, axis_idx]
+
+                centroid_azimuth = float(
+                    np.degrees(np.arctan2(rel[:, other_idx[1]].mean(), rel[:, other_idx[0]].mean()))
+                )
+                self.reference_azimuth_deg[name] = centroid_azimuth
+                # unwrap each surfel's azimuth onto a contiguous branch near the centroid,
+                # so min()/max() below don't get confused by the -180/180 wrap
+                azimuth_unwrapped = ((azimuth - centroid_azimuth + 180) % 360 - 180) + centroid_azimuth
+                self._blade_cylindrical[name] = {
+                    'radius': radius, 'azimuth': azimuth_unwrapped, 'axial': axial,
+                }
+        finally:
+            reader.close()
+
+    def blade_azimuths_deg(self, lrf_position_rad: float) -> dict:
+
+        '''
+        Predicted CENTROID azimuth (degrees, in (-180, 180]) of every
+        blade at the given ABSOLUTE lrf_position_rad (e.g. one row of an
+        .fnc extraction's Metadata/lrf_position_rad). For the blade's
+        real angular footprint (width, not just a single line), see
+        blade_angular_extents_deg().
+        '''
+
+        theta_deg = np.degrees(lrf_position_rad)
+        return {
+            name: (ref + theta_deg + 180) % 360 - 180
+            for name, ref in self.reference_azimuth_deg.items()
+        }
+
+    def blade_angular_extent_deg(self, name: str, radius: float, radius_tol: float = 0.005,
+                                  axial_range: tuple = None):
+
+        '''
+        This blade's REFERENCE-orientation (lrf_position_rad=0) angular
+        footprint (min, max) degrees, from real surfel geometry within
+        radius_tol of `radius` (meters) - and, optionally, within
+        axial_range (meters) too.
+
+        NOTE: this collapses the blade's real shape down to a single
+        azimuth range, ignoring axial position. It's a visual annotation
+        only (plot_frame's blade_extents_deg overlay, doesn't touch any
+        data) - there is currently NO reliable, working data mask for
+        rotor blades in this module (an attempt was made and removed -
+        it either badly over-masked, when done as an azimuth-only band,
+        or under/inconsistently masked once made axially-aware, and
+        wasn't trustworthy enough to keep). If you need to actually
+        exclude blade-covered points from a value, that still needs to
+        be built (and validated) properly - don't rely on this method's
+        output as a mask.
+
+        Returns
+        -------
+        (float, float), or None if no surfels fall in that radius/axial
+        band (e.g. radius is beyond the blade tip, or radius_tol is too
+        tight for this grid's resolution).
+        '''
+
+        cyl = self._blade_cylindrical[name]
+        sel = np.abs(cyl['radius'] - radius) <= radius_tol
+        if axial_range is not None:
+            sel &= (cyl['axial'] >= axial_range[0]) & (cyl['axial'] <= axial_range[1])
+
+        if not sel.any():
+            return None
+
+        az = cyl['azimuth'][sel]
+        return float(az.min()), float(az.max())
+
+    def blade_angular_extents_deg(self, lrf_position_rad: float, radius: float,
+                                   radius_tol: float = 0.005, axial_range: tuple = None) -> dict:
+
+        '''
+        For every blade, predicted (min, max) azimuth degrees AT THE
+        GIVEN FRAME (rotated by lrf_position_rad) of real surfel geometry
+        within radius_tol of `radius` - see blade_angular_extent_deg().
+        The returned (lo, hi) preserves order and true angular width, but
+        hi may exceed 180 (i.e. the band wraps across +-180) - handle
+        that when plotting (see plot_frame's blade_extents_deg, and
+        _split_wrapped_span).
+
+        Returns
+        -------
+        dict[str, (float, float) or None]
+        '''
+
+        theta_deg = np.degrees(lrf_position_rad)
+        result = {}
+
+        for name in self._blade_cylindrical:
+            extent = self.blade_angular_extent_deg(name, radius, radius_tol, axial_range)
+            if extent is None:
+                result[name] = None
+                continue
+            lo, hi = extent
+            width = hi - lo
+            lo_shifted = (lo + theta_deg + 180) % 360 - 180
+            result[name] = (lo_shifted, lo_shifted + width)
+
+        return result
+
+
 def plot_frame(h5_path: str, variable: str, frame_index: int = 0, savepath: str = None,
-               cmap: str = 'turbo', levels=100, ax=None):
+               cmap: str = 'turbo', levels=100, ax=None, blade_azimuths_deg: dict = None,
+               blade_extents_deg: dict = None):
 
     '''
     Quick-look filled-contour plot of one frame's field on its native
@@ -742,6 +973,20 @@ def plot_frame(h5_path: str, variable: str, frame_index: int = 0, savepath: str 
         Passed to contourf.
     ax : matplotlib.axes.Axes, optional
         Axes to draw into. A new figure/axes is created if omitted.
+    blade_azimuths_deg : dict, optional
+        iso_radius plots only - {blade_name: azimuth_deg} to overlay as
+        vertical dashed lines (a single centroid position per blade),
+        e.g. from RotorBladePosition.blade_azimuths_deg(lrf_position_rad)
+        for this frame's own Metadata/lrf_position_rad.
+    blade_extents_deg : dict, optional
+        iso_radius plots only - {blade_name: (lo_deg, hi_deg) or None} to
+        overlay as shaded bands (the blade's real angular footprint, not
+        just its centroid) - e.g. from
+        RotorBladePosition.blade_angular_extents_deg(lrf_position_rad,
+        radius) for this frame's own Metadata/lrf_position_rad and this
+        plot's own Geometry radius. Validated (see RotorBladePosition's
+        docstring) against real wake structure on
+        Pk109_1e-4_VR12/SMR-VR8.fnc.
 
     Returns
     -------
@@ -815,6 +1060,28 @@ def plot_frame(h5_path: str, variable: str, frame_index: int = 0, savepath: str 
     ax.set_title(f'{variable}, frame {frame_index}, {title_extra}')
     if kind == 'meridional':
         ax.set_aspect('equal')  # both axes in meters - iso_radius mixes degrees and meters, leave auto
+
+    if blade_azimuths_deg:
+        if kind != 'iso_radius':
+            raise ValueError("blade_azimuths_deg overlay is only meaningful for kind='iso_radius'")
+        for name, az in blade_azimuths_deg.items():
+            ax.axvline(az, color='white', linestyle='--', linewidth=1.2, alpha=0.9)
+            ax.text(az, a.max(), name, color='white', fontsize=7, rotation=90,
+                    ha='right', va='top', alpha=0.9)
+
+    if blade_extents_deg:
+        if kind != 'iso_radius':
+            raise ValueError("blade_extents_deg overlay is only meaningful for kind='iso_radius'")
+        for name, extent in blade_extents_deg.items():
+            if extent is None:
+                continue
+            for lo, hi in _split_wrapped_span(*extent):
+                ax.axvspan(lo, hi, facecolor='none', edgecolor='black', hatch='///',
+                           linewidth=1.2, alpha=0.9, zorder=3)
+            ax.text(extent[0], a.max(), name, color='black', fontsize=7, rotation=90,
+                    ha='right', va='top', alpha=0.9,
+                    bbox=dict(boxstyle='round,pad=0.1', fc='white', alpha=0.7, lw=0))
+
     fig.tight_layout()
 
     if savepath:

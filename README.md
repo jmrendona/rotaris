@@ -100,6 +100,93 @@ frame = EnsightFrame("frame_0.case")
 pressure_pa = frame.variable('Static Pressure')
 ```
 
+## 3. Volumetric planes/cuts → `.fnc` (pf2ens + pyvista, see `converters/fnc_plane.py`)
+
+`.fnc` files are PowerFLOW's *volumetric* fluid measurement (as opposed to
+`.snc`'s surface measurement) - much larger, multi-resolution octree data.
+Same rule as pressure above: this goes through `pf2ens` (per frame) +
+`pyvista` sampling, never PowerVIZ, never a direct `.fnc` read.
+
+Two extraction "shapes" are what you'll normally want:
+
+- **`fnc-meridional`**: a single rotated hub-to-tip, inlet-to-outlet plane
+  at one fixed azimuth angle (e.g. "the plane through 0°").
+- **`fnc-iso-radius`**: a fixed-radius cylindrical cut, unrolled into an
+  azimuth-vs-axial-position 2D grid (e.g. "the cut at 85% span").
+
+Both take a `--variables` list of `pf2ens` short codes (run
+`pf2ens -d <fnc_path>` against your file to see what's available - e.g.
+`vmag,p,vx,vy,vz`) and a `--first`/`--last` frame range.
+
+### Masking - what actually works, and what does not
+
+**`--freeze-mask-variable vmag`** is the one masking option that is
+validated and safe to use. PowerFLOW never updates lattice cells inside
+solid, body-fixed geometry (e.g. the stator hub) - across frames their
+value barely changes, unlike real flow. This flag computes `Data/frozen`
+from that near-zero-variance signature and needs `--first`/`--last` to
+span at least 2 (ideally several, spread out) frames to be reliable.
+`fnc_plane.plot_frame()` (and `fnc-plot` below) automatically combines
+`Data/frozen` into the valid-point mask if it's present - you don't have
+to do anything extra to use it once it's in the file.
+
+**There is no working mask for the rotor blades.** `vtkValidPointMask`
+(pf2ens/pyvista's own solid-geometry flag) does not track the blades at
+all near mid-to-tip span - confirmed empirically, not assumed. A real,
+axially-aware blade mask was attempted (see `RotorBladePosition` in
+`fnc_plane.py`) and reverted after several rounds because it never held
+up as a trustworthy, full-plot-scale result. What *is* validated and
+available is **identification only**: `RotorBladePosition.blade_azimuths_deg()`
+draws a line at each blade's true instantaneous azimuth (matched against
+the real wake hot-spot across ~190° of rotation) - useful as a visual
+overlay so you know where a blade is in a plot, but it does not remove or
+flag any data. This is Python-API only, not wired into the CLI:
+
+```python
+from converters import fnc_plane
+
+blades = fnc_plane.RotorBladePosition('SMR-VR8.snc')  # rotor .snc, once
+# lrf_position_rad for a given frame comes from your extracted .h5's
+# Metadata/lrf_position_rad[frame_index]
+azimuths = blades.blade_azimuths_deg(lrf_position_rad=1.63)
+
+fnc_plane.plot_frame(
+    'iso_r85pct.h5', 'vmag', frame_index=0,
+    savepath='iso_r85pct_frame0_bladeoverlay.png',
+    blade_azimuths_deg=azimuths,   # only valid for kind='iso_radius' files
+)
+```
+
+### Commands
+
+```bash
+# one meridional plane at 0 degrees azimuth, frames 0-99, with stator-hub masking
+python convert.py fnc-meridional SMR-VR8.fnc plane_0deg.h5 \
+    --angle 0 --variables vmag,p --first 0 --last 99 \
+    --freeze-mask-variable vmag \
+    --plot plane_0deg_frame0.png --plot-frame 0
+
+# one iso-radius cut at r=0.274m (85% span for this case), frames 0-99, with masking
+python convert.py fnc-iso-radius SMR-VR8.fnc iso_r85pct.h5 \
+    --radius 0.274 --variables vmag,p --first 0 --last 99 \
+    --freeze-mask-variable vmag
+
+# several meridional planes in one command (shares one nc-stats.ri call)
+python convert.py fnc-meridional-sweep SMR-VR8.fnc planes_out/ \
+    --angle-start 0 --angle-end 350 --angle-step 10 \
+    --variables vmag,p --first 0 --last 99 --freeze-mask-variable vmag
+
+# quick-look plot from an already-extracted file (no re-extraction)
+python convert.py fnc-plot iso_r85pct.h5 vmag iso_r85pct_frame0.png --frame 0
+```
+
+`--first`/`--last` must span >= 2 frames (spread out, not adjacent) for
+`--freeze-mask-variable` to calibrate correctly - see `fnc_plane.py`'s
+notes on threshold calibration if the default `--freeze-rel-threshold
+0.01` over- or under-masks for your case. `fnc-freeze-mask` recomputes
+`Data/frozen` on an existing file post-hoc if you need to retune this
+without re-running the (expensive) `pf2ens` extraction.
+
 ## Using both together (see manager.py)
 
 ```python
@@ -125,6 +212,8 @@ don't mix per-point data across the two.
 ```bash
 python convert.py forces   <snc_path> <output.h5> [--face-name NAME] [--surface-split]
 python convert.py pressure <snc_path> <output.h5> --first N --last M [--surface-split] [--nc-stats FILE] [--reference-frame N] [--work-dir DIR]
+python convert.py fnc-meridional <fnc_path> <output.h5> --angle DEG --variables v1,v2 --first N --last M [--freeze-mask-variable vmag]
+python convert.py fnc-iso-radius <fnc_path> <output.h5> --radius M --variables v1,v2 --first N --last M [--freeze-mask-variable vmag]
 ```
 
 (`manager.py` is separate - ad-hoc, per-case scripting for whatever
@@ -138,7 +227,19 @@ task - see the comment at its top before changing that):
 ```bash
 sbatch run_conversion.sh forces   /path/case.snc /path/out.h5 --surface-split
 sbatch run_conversion.sh pressure /path/case.snc /path/out.h5 --first 0 --last 199 --surface-split
+sbatch run_conversion.sh fnc-meridional /path/case.fnc /path/plane_0deg.h5 \
+    --angle 0 --variables vmag,p --first 0 --last 99 --freeze-mask-variable vmag
+sbatch run_conversion.sh fnc-iso-radius /path/case.fnc /path/iso_r85pct.h5 \
+    --radius 0.274 --variables vmag,p --first 0 --last 99 --freeze-mask-variable vmag
 ```
+
+**Use `sbatch`, not a direct shell command, for any `fnc-*` extraction** -
+`.fnc` files are far larger than `.snc` (100s of GB to multi-TB) and each
+frame's `pf2ens` export/sample is real, sustained CPU+I/O work, not
+something to run on a login node. `fnc-plot` and `fnc-freeze-mask` are the
+only exceptions worth running directly in a shell (after loading the venv
+per below) - they only touch an already-extracted, comparatively small
+`.h5` file, no `pf2ens`/`.fnc` access at all.
 
 Everything after `run_conversion.sh` on the command line is forwarded
 straight to `convert.py`.
