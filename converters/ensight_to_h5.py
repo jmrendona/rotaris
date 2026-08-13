@@ -213,10 +213,19 @@ class EnsightSeriesWriter:
     if disk space allows, storing coords per frame is the more foolproof
     option and would just mean writing to Geometry/X etc. inside
     add_frame() the same way Data variables are written.
+
+    lrf_axis_origin / lrf_axis_direction (optional constructor args) are
+    written to Metadata if given - matching SNCReader.to_h5()'s schema, so
+    anything that needs the rotor's physical radius (e.g.
+    bladeprocessor.SurfaceVariable._radius()) works the same way against
+    either branch's output. convert_snc_to_h5() always supplies these
+    (it already opens a SNCReader on the same .snc for the surface_split
+    reference); pass them yourself if you construct this class directly
+    without going through convert_snc_to_h5().
     '''
 
     def __init__(self, output_path: str, variables: list = None, surface_split: bool = False,
-                 reference_positions=None, reference_upper=None):
+                 reference_positions=None, reference_upper=None, axis_origin=None, axis_direction=None):
 
         if surface_split and (reference_positions is None or reference_upper is None):
             raise ValueError(
@@ -230,6 +239,8 @@ class EnsightSeriesWriter:
         self.surface_split = surface_split
         self.reference_positions = reference_positions
         self.reference_upper = reference_upper
+        self.axis_origin = axis_origin
+        self.axis_direction = axis_direction
         self._h5f = h5py.File(output_path, 'w')
         self._data_groups = None
         self._masks = None
@@ -281,6 +292,10 @@ class EnsightSeriesWriter:
             self._meta_group.create_dataset(key, shape=(0,), maxshape=(None,), dtype='i8')
         for key in ('mid_ts', 'mid_s', 'lrf_position_rad'):
             self._meta_group.create_dataset(key, shape=(0,), maxshape=(None,), dtype='f8')
+        if self.axis_origin is not None:
+            self._meta_group.create_dataset('lrf_axis_origin', data=self.axis_origin)
+        if self.axis_direction is not None:
+            self._meta_group.create_dataset('lrf_axis_direction', data=self.axis_direction)
 
     def _append_row(self, dataset, value):
         dataset.resize(dataset.shape[0] + 1, axis=0)
@@ -388,9 +403,21 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
         If True, split into Upper/Lower surface groups using surfel
         classification borrowed from the raw .snc file, matched by
         nearest position (see EnsightFrame.surface_split and
-        raw_positions_to_ensight_frame), by default False. Opens
-        snc_path a second time (via SNCReader) to compute the reference
-        classification.
+        raw_positions_to_ensight_frame), by default False.
+
+    Note
+    ----
+    Opens snc_path a second time (via SNCReader) regardless of
+    surface_split, to copy lrf_axis_origin/lrf_axis_direction into the
+    output's Metadata (see EnsightSeriesWriter's docstring), re-centered
+    onto pf2ens's own bounding-box-midpoint convention the same way
+    Geometry/X,Y,Z already is (see raw_positions_to_ensight_frame() -
+    lrf_axis_origin is NOT pf2ens's coordinate origin, so this re-centering
+    is required, not optional, for radius-from-axis_origin to come out
+    correct downstream). This does read the full raw surfel cloud once
+    (surfel_centroids()) to compute that shift, even when
+    surface_split=False - not free, but avoids silently writing an
+    axis_origin inconsistent with this file's own geometry.
     '''
 
     reference_frame = first_frame if reference_frame is None else reference_frame
@@ -400,18 +427,32 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
     cleanup_work_dir = work_dir is None
     work_dir = work_dir or tempfile.mkdtemp(prefix='ensight_to_h5_')
 
+    ref_reader = SNCReader(snc_path)
+    axis_direction = ref_reader.lrf_axis_direction
+    axis_origin_raw = ref_reader.lrf_axis_origin * ref_reader.lattice_scales['LatticeLength']
+
+    # raw_positions_to_ensight_frame() re-centers positions on the mesh's own
+    # bounding-box midpoint (pf2ens's convention, NOT lrf_axis_origin - see
+    # that function's docstring). axis_origin needs the exact same shift to
+    # stay consistent with the (already re-centered) Geometry/X,Y,Z this
+    # writes - computed from the same raw surfel cloud either way, so this
+    # read isn't wasted even when surface_split=False also needs it.
+    raw_positions = ref_reader.surfel_centroids() * ref_reader.lattice_scales['LatticeLength']
+    bbox_center = (raw_positions.min(axis=0) + raw_positions.max(axis=0)) / 2
+    axis_origin = axis_origin_raw - bbox_center
+
     if surface_split:
-        ref_reader = SNCReader(snc_path)
-        reference_positions = ref_reader.surfel_centroids() * ref_reader.lattice_scales['LatticeLength']
-        reference_positions = raw_positions_to_ensight_frame(reference_positions)
+        reference_positions = raw_positions - bbox_center
         reference_upper = ref_reader.surface_split()
-        ref_reader.close()
     else:
         reference_positions = reference_upper = None
+
+    ref_reader.close()
 
     writer = EnsightSeriesWriter(
         output_path, variables=variables, surface_split=surface_split,
         reference_positions=reference_positions, reference_upper=reference_upper,
+        axis_origin=axis_origin, axis_direction=axis_direction,
     )
 
     try:

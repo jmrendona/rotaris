@@ -270,7 +270,8 @@ class FrictionLines:
         return value / q_ref
 
     def cf_at_radii(self, radii, surface: str = 'Upper', frame: int = None, component: str = None,
-                     tol: float = 0.0015, n_chord_bins: int = 150):
+                     tol: float = 0.0015, n_chord_bins: int = 150, span_min: float = None,
+                     span_max: float = None, reverse_chord: bool = False):
 
         '''
         Cf vs. local chordwise position, at each of several fixed radii,
@@ -308,6 +309,38 @@ class FrictionLines:
             raw surfel instead (unsorted-looking cloud) - useful mainly
             for inspecting the raw scatter this averaging is smoothing
             over.
+        span_min, span_max : float, optional
+            Keep only points with span_min <= span <= span_max (centered
+            Cartesian span - see _span_chord()), BEFORE computing this
+            band's chord min/max. REQUIRED in practice on any file with
+            more than one blade sharing the same radius range (e.g. one
+            face/file covering the whole rotor, as this project's own
+            .snc files do): without it, a radius band picks up every
+            blade's surfels, and x/c gets normalized against their
+            COMBINED chord range - confirmed to produce a spurious extra
+            peak at both x/c=0 AND x/c=1 (Cf's real near-edge rise gets
+            duplicated once per blade instead of appearing once), which
+            is exactly what friction_lines() already guards against with
+            its own span_min/span_max (see that method's docstring) - this
+            parameter was missing here even though the same underlying
+            data has the same two-blade problem; not caught until a real
+            plot (Cf vs. x/c at several radii) showed the extra peak. No
+            default here either: there's no reliable automatic value, it
+            depends on this case's own span layout.
+        reverse_chord : bool
+            If True, flip which raw chord extreme maps to x/c=0 vs. x/c=1.
+            The raw chord axis has no inherent leading/trailing-edge
+            orientation - x/c=0 was arbitrarily assigned to the minimum
+            chord value. Off by default, which put Cf's real near-LE peak
+            at x/c=1 instead of x/c=0 on this project's own case
+            (confirmed against images/cf/skin-friction_radii_plot.png, a
+            trusted reference plot with the peak at x/c=0) - the same
+            orientation ambiguity already documented for Cp
+            (SurfaceVariable.at_radii()'s reverse_chord). Check which
+            orientation is right per case: Cf should peak sharply near the
+            leading edge (thin boundary layer, high wall shear) and decay
+            toward the trailing edge - if that peak shows up at x/c=1
+            instead of x/c=0, set this to True.
 
         Returns
         -------
@@ -318,22 +351,33 @@ class FrictionLines:
         '''
 
         r = self._radius(surface)
-        _, chord = self._span_chord(surface)
+        span, chord = self._span_chord(surface)
         cf = self.cf(surface=surface, frame=frame, component=component)
+
+        span_mask = np.ones(len(span), dtype=bool)
+        if span_min is not None:
+            span_mask &= span >= span_min
+        if span_max is not None:
+            span_mask &= span <= span_max
 
         curves = {}
 
         for r_target in radii:
 
-            mask = np.abs(r - r_target) < tol
+            mask = span_mask & (np.abs(r - r_target) < tol)
             n_sel = int(mask.sum())
 
             if n_sel < 10:
-                raise ValueError(f"Only {n_sel} points within {tol} m of r={r_target} - widen tol or check r_target.")
+                raise ValueError(
+                    f"Only {n_sel} points within {tol} m of r={r_target} (after span_min/span_max "
+                    "cropping) - widen tol, check r_target, or check span_min/span_max."
+                )
 
             c = chord[mask]
             c_min, c_max = c.min(), c.max()
             xc = (c - c_min) / (c_max - c_min)
+            if reverse_chord:
+                xc = 1 - xc
             cf_sel = cf[mask]
 
             if n_chord_bins is None:
@@ -356,13 +400,19 @@ class FrictionLines:
         return curves
 
     def plot_cf_radii(self, radii, surface: str = 'Upper', frame: int = None, component: str = None,
-                       tol: float = 0.0015, n_chord_bins: int = 150, ax=None, savepath: str = None,
-                       dpi: int = 150):
+                       tol: float = 0.0015, n_chord_bins: int = 150, span_min: float = None,
+                       span_max: float = None, reverse_chord: bool = False, cmap: str = 'cividis',
+                       ax=None, savepath: str = None, dpi: int = 150):
 
         '''
         Plot Cf vs. local chordwise position for several radii on one set
         of axes. See cf_at_radii() for what the two axes mean, its caveat
-        on the chordwise coordinate, and what n_chord_bins does.
+        on the chordwise coordinate, what n_chord_bins does, why
+        span_min/span_max matter (isolating one blade on a multi-blade
+        file - required in practice, see cf_at_radii()'s docstring for
+        the two-blade artifact this avoids), and why reverse_chord matters
+        (x/c has no inherent LE/TE orientation - check per case; Cf should
+        peak near the leading edge, x/c=0 by default here).
 
         Plotted as a line by default (n_chord_bins set): cf_at_radii()'s
         per-bin averaging already turns the raw, noisy surfel cloud into a
@@ -374,7 +424,9 @@ class FrictionLines:
 
         A horizontal zero line is added whenever component is not None,
         since the point of a signed component is spotting where curves
-        cross it.
+        cross it. Default colormap cividis (not viridis) and a grid, to
+        match this project's other radius-colored plots (SurfaceVariable's
+        plot_at_radii()/plot_cp_radii()).
 
         Returns
         -------
@@ -382,14 +434,15 @@ class FrictionLines:
         '''
 
         curves = self.cf_at_radii(radii, surface=surface, frame=frame, component=component, tol=tol,
-                                   n_chord_bins=n_chord_bins)
+                                   n_chord_bins=n_chord_bins, span_min=span_min, span_max=span_max,
+                                   reverse_chord=reverse_chord)
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(8, 6))
         else:
             fig = ax.figure
 
-        colors = plt.cm.viridis(np.linspace(0, 1, len(curves)))
+        colors = plt.cm.get_cmap(cmap)(np.linspace(0, 1, len(curves)))
 
         for color, (r_target, (xc, cf_curve)) in zip(colors, curves.items()):
             if n_chord_bins is None:
@@ -406,6 +459,7 @@ class FrictionLines:
         ax.set_xlabel('x/c (local, per-radius - see cf_at_radii)')
         ax.set_ylabel(cf_label)
         ax.set_title(f'{surface} surface - {cf_label} - {case_label}')
+        ax.grid(True)
         ax.legend()
         fig.tight_layout()
 

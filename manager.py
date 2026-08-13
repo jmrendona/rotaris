@@ -4,6 +4,7 @@ from converters.span_2_radius import SpanConverter
 from bladeprocessor.blades_postproc import BladePostProcessor
 from bladeprocessor.surface_field import SurfaceField, SurfaceFieldComparator
 from bladeprocessor.friction_lines import FrictionLines
+from bladeprocessor.surface_variable import SurfaceVariable
 
 # ------------- Convertors ------------- #
 
@@ -84,15 +85,21 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #cf_mag = fl.cf(surface='Upper', frame=None, component=None)
 #cf_chordwise_frame0 = fl.cf(surface='Upper', frame=0, component='chordwise')
 
-# Cf vs local x/c at several radii, one plot per call - instantaneous and average:
+# Cf vs local x/c at several radii, one plot per call - instantaneous and
+# average. span_min isolates one blade (REQUIRED in practice - without it,
+# a radius band mixes both blades' chord ranges and produces a spurious
+# double peak, see README.md); reverse_chord fixes which end is the
+# leading vs. trailing edge (no automatic detection - check per case, Cf
+# should peak sharply near x/c=0 and decay toward x/c=1; if it's flipped,
+# set reverse_chord=True - see README.md's "Two bugs found and fixed"):
 #fl.plot_cf_radii(
 #    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
-#    surface='Upper', frame=None, component=None,
+#    surface='Upper', frame=None, component=None, span_min=0.02, reverse_chord=True,
 #    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/cf_radii_avg.png',
 #)
 #fl.plot_cf_radii(
 #    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
-#    surface='Upper', frame=0, component='chordwise',
+#    surface='Upper', frame=0, component='chordwise', span_min=0.02, reverse_chord=True,
 #    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/cf_radii_chordwise_frame0.png',
 #)
 
@@ -103,4 +110,111 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #fl.friction_lines(
 #    frame=None, span_min=0.03,
 #    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/friction_lines_avg.png',
+#)
+
+# ------------- Any surface variable at radii (Cp, y+, RMS, ...) ------------- #
+#
+# Input: a convert_snc_to_h5(..., surface_split=True) file - the pressure
+# branch, for Cp (needs pf2ens's Static Pressure, see README.md, "2. Static
+# Pressure"). Works just as well against a SNCReader.to_h5() forces-branch
+# file for any variable stored there instead (Skin_Friction, y+ if
+# present, etc.) - see README.md, "Any surface variable at radii".
+
+#sv = SurfaceVariable(
+#    '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/pressure/pressure_rotor.h5',
+#    r_tip=0.125,
+#    rho_ref=1.22523,
+#    rpm=6000,
+#    pref=101325,
+#)
+
+# Raw access to any stored variable - instantaneous, mean, or rms/raw_rms:
+#yplus_mean = sv.variable('y+', surface='Upper', frame=None, stat='mean')
+#yplus_frame0 = sv.variable('y+', surface='Upper', frame=0)  # stat ignored once frame is set
+
+# Cp (same LOCAL q_ref normalization as FrictionLines.cf() - see README.md's
+# "Equations" section), one frame, the average, or its RMS fluctuation:
+#cp_mean = sv.cp(surface='Upper', frame=None, stat='mean')
+#cp_frame0 = sv.cp(surface='Upper', frame=0)
+#cp_rms = sv.cp(surface='Upper', frame=None, stat='rms')
+
+# Cp vs local x/c at several radii, BOTH surfaces in one plot - span_min
+# isolates one blade half (see friction_lines() above for why), and
+# reverse_chord fixes which end is the leading vs. trailing edge (no
+# automatic detection - check per case, see the method's docstring):
+#sv.plot_cp_radii(
+#    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+#    frame=None, stat='mean', span_min=0.03, reverse_chord=True,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cp/cp_radii_avg.png',
+#)
+#sv.plot_cp_radii(
+#    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+#    frame=0, span_min=0.03, reverse_chord=True,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cp/cp_radii_frame0.png',
+#)
+
+# ------------- Any surface variable over the whole blade + case comparison ------------- #
+#
+# Generalizes friction_lines() (above) to any scalar field, and
+# to_common_grid()/field() lets a SurfaceVariable slot into the existing
+# SurfaceField/SurfaceFieldComparator machinery for cross-case deltas -
+# see README.md, "Whole-blade surface plot" / "Cross-case comparison".
+
+# Whole-blade -Cp scatter, both surfaces:
+#sv.plot_variable_surface(
+#    lambda s: -sv.cp(surface=s, stat='mean'),
+#    cbar_label='-Cp', span_min=0.03,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cp/cp_surface_avg.png',
+#)
+
+# Cp resampled onto a common (r/R, x/c) grid, compared against a second
+# case with the same geometry (c_ref must be passed explicitly - see
+# README.md for why):
+#sv_2025 = SurfaceVariable(
+#    '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/pressure/pressure_rotor.h5',
+#    r_tip=0.125, rho_ref=1.22523, rpm=6000, pref=101325,
+#)
+#sv_2026 = SurfaceVariable(
+#    '/storage/renj3003/rotor-alone/15e-6_6000rpm/data/pressure/pressure_rotor.h5',
+#    r_tip=0.125, rho_ref=1.22523, rpm=6000, pref=101325,
+#)
+
+#field_2025 = sv_2025.field(lambda s: sv_2025.cp(surface=s, stat='mean'),
+#                            var_name='Cp 2025', c_ref=0.025, span_min=0.03)
+#field_2026 = sv_2026.field(lambda s: sv_2026.cp(surface=s, stat='mean'),
+#                            var_name='Cp 2026', c_ref=0.025, span_min=0.03)
+
+#comparator_sv = SurfaceFieldComparator({'2025': field_2025, '2026': field_2026})
+#comparator_sv.plot_cases(cbar_label='Cp', savepath='/storage/renj3003/rotor-alone/Comparison/images/cp/cp_comparison.png')
+#comparator_sv.plot_delta('2025', '2026', cbar_label='Cp delta', savepath='/storage/renj3003/rotor-alone/Comparison/images/cp/cp_delta.png')
+
+# Pressure fluctuation p'(frame) = p(frame) - p_mean, one blade contour
+# per frame - needs a multi-frame file to show a real signal (a
+# single-frame file gives exactly 0 everywhere, since p(frame) == p_mean):
+#for frame in range(sv.n_frames):
+#    sv.plot_pressure_fluctuation(
+#        frame, span_min=0.03,
+#        savepath=f'/storage/renj3003/rotor-alone/6e-5_6000rpm/images/pfluct/p_fluct_frame{frame:03d}.png',
+#    )
+
+# Prms needs no new method - it's already variable(stat='rms'):
+#sv.plot_variable_surface(
+#    lambda s: sv.variable('static_pressure', surface=s, stat='rms'),
+#    cbar_label='$P_{rms}$ [Pa]', span_min=0.03,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/pfluct/p_rms_surface.png',
+#)
+
+# Point time trace + Welch periodogram (wall pressure fluctuations at one
+# location, given as % of r/R and x/c - see README.md, "Point time trace").
+# Needs a real time axis: pass dt explicitly if this file has no usable
+# Metadata/mid_s (see README.md for when that's populated):
+#sv.plot_timetrace(
+#    'static_pressure', span_pct=80, chord_pct=90, surface='Upper',
+#    ylabel='Static pressure [Pa]', dt=0.000056,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/spectra/p_timetrace_80_90.png',
+#)
+#sv.plot_periodogram(
+#    'static_pressure', span_pct=80, chord_pct=90, surface='Upper',
+#    ylabel='PSD [Pa$^2$/Hz]', dt=0.000056,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/spectra/p_periodogram_80_90.png',
 #)

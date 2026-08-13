@@ -378,6 +378,18 @@ Data/<variable>                one 2D dataset per variable,
 Metadata/frame_index, start_ts, end_ts, mid_ts, mid_s, lrf_position_rad
                                 1D, shape (n_frames,) - row i describes
                                 Data's row i
+Metadata/lrf_axis_origin, lrf_axis_direction
+                                frame-independent (rotation axis doesn't
+                                change), meters - matches SNCReader.to_h5()'s
+                                schema, always populated by
+                                convert_snc_to_h5(). lrf_axis_origin is
+                                re-centered onto pf2ens's own bounding-box
+                                convention (same shift Geometry/X,Y,Z
+                                already gets - lrf_axis_origin is NOT
+                                pf2ens's coordinate origin, see
+                                raw_positions_to_ensight_frame()), which
+                                needs reading the full raw surfel cloud
+                                once, even when surface_split=False
 ```
 
 With `surface_split=True`: `Geometry/Upper`, `Geometry/Lower`,
@@ -469,6 +481,289 @@ noisy points, which reads as a dense cloud rather than a curve once
 plotted; the point of `n_chord_bins` is turning that cloud into the
 single readable curve per radius that `plot_cf_radii()` draws.
 
+**Two bugs found and fixed in `cf_at_radii()`/`plot_cf_radii()`** (this
+project's own `2f_SMF_forces_rotor.snc` case, a 2-bladed rotor with both
+blades lumped into a single `/Rotor::Default-Segment` face):
+
+1. **Two-blade chord mixing.** `cf_at_radii()` originally had no
+   `span_min`/`span_max` (unlike `friction_lines()`), so a radius band
+   picked up both blades' surfels at once (span runs symmetrically from
+   -0.125 to +0.125 m here, radius ~= `|span|`, so `r_target` matches
+   both `span=+r_target` and `span=-r_target`) - normalizing x/c against
+   their COMBINED chord range produced a spurious extra peak at both
+   x/c=0 AND x/c=1 instead of once, near the real leading edge (see
+   `friction_lines_test_cf_mag_avg.png`'s before/after - confirmed
+   against `images/cf/skin-friction_radii_plot.png`, a trusted reference
+   with a single clean peak). Fixed by adding the same `span_min`/
+   `span_max` cropping `friction_lines()` already had; this case needed
+   `span_min=0.02` to clear its hub-region point cluster (found via a
+   histogram of `_span_chord()`'s span - no reliable automatic value,
+   check per case).
+2. **Flipped LE/TE orientation.** Even after fixing (1), the peak showed
+   up at x/c=1 instead of x/c=0 - the same orientation ambiguity already
+   documented for Cp (`SurfaceVariable.at_radii()`'s `reverse_chord`):
+   x/c=0 is arbitrarily assigned to whichever raw chord extreme happens
+   to be the minimum value, with no inherent LE/TE meaning. Added the
+   same `reverse_chord` parameter here; this case needed
+   `reverse_chord=True` to match the trusted reference (Cf peaking
+   sharply near x/c=0, decaying toward x/c=1).
+
+`plot_cf_radii()` also now defaults to `cividis` (not `viridis`) and
+draws a grid, matching `SurfaceVariable`'s radius-colored plots.
+
+## Any surface variable at radii: `bladeprocessor/SurfaceVariable`
+
+Generalizes `FrictionLines.cf_at_radii()`/`plot_cf_radii()` beyond wall
+shear/Cf to **any** named variable stored under `Data/<surface>/<name>` -
+Cp, `y+`, RMS statistics of anything, or a raw variable as-is. Works
+against either data branch's HDF5 output, since both share the same
+schema (`Geometry/Upper,Lower` positions, `Data/Upper,Lower/<var>` with a
+frame axis, `Metadata/lrf_axis_origin,lrf_axis_direction`):
+
+- `SNCReader.to_h5(..., surface_split=True)` (forces branch)
+- `convert_snc_to_h5(..., surface_split=True)` (pressure branch)
+
+**Not** for wall shear/Cf itself - that needs normals and the
+`tau = F - (F.n)n` derivation, still `FrictionLines`' job. Span/chord/
+radius conventions (raw Cartesian `span_axis`/`chord_axis`, rotation-
+axis-based radius) are identical to `FrictionLines` - same caveats apply
+(assumes little blade twist).
+
+```python
+from bladeprocessor.surface_variable import SurfaceVariable
+
+sv = SurfaceVariable('pressure_case.h5', r_tip=0.125, rho_ref=1.22523, rpm=6000, pref=101325)
+
+# raw access to any stored variable - instantaneous, mean, or rms/raw_rms:
+yplus_mean = sv.variable('y+', surface='Upper', frame=None, stat='mean')
+yplus_frame0 = sv.variable('y+', surface='Upper', frame=0)  # stat ignored when frame is set
+
+# Cp, normalized the same way FrictionLines.cf() normalizes Cf (see below):
+cp_mean = sv.cp(surface='Upper', stat='mean')
+cp_rms = sv.cp(surface='Upper', stat='rms')
+
+# both surfaces at several radii, one plot:
+sv.plot_cp_radii([0.045, 0.072, 0.100, 0.117, 0.122], stat='mean',
+                  span_min=0.03, reverse_chord=True, savepath='cp_radii.png')
+```
+
+**Cp normalization** - identical convention to `FrictionLines.cf()`
+(local `q_ref`, not one fixed velocity for the whole blade):
+
+```
+Cp = (p - pref) / q_ref
+q_ref = 0.5 * rho_ref * (omega * r)^2
+```
+
+`pref` is only needed for `stat='mean'`/instantaneous - a constant offset
+doesn't change a fluctuation's `rms`/`raw_rms`, so those work without it.
+
+**Instantaneous vs. average vs. RMS** - every method takes the same
+`frame`/`stat` pair `FrictionLines` uses: `frame=<int>` for one frame
+directly (`stat` ignored - a statistic across frames isn't meaningful for
+a single one), `frame=None` (default) reduces across every frame via
+`stat` (`'mean'`, `'rms'` = fluctuation std about the mean, or
+`'raw_rms'` = `sqrt(mean(x^2))`, includes any nonzero mean - see
+`variable()`'s docstring for when you'd want which). Validated: the
+`rms`/`raw_rms` reduction formulas match `np.std`/`sqrt(mean(x^2))`
+exactly (synthetic check); only one real frame was available locally to
+validate `stat='mean'`/instantaneous against real data, so `rms` itself
+hasn't been checked against a real multi-frame case yet.
+
+**Real bugs found and fixed while validating this against real Cp data**
+(not data issues - all in the code):
+
+- **Two-blade mixing**: a radius band on a file covering a whole
+  multi-bladed rotor picks up every blade at that radius at once: `x/c`
+  then gets normalized against the combined chord range of all of them,
+  producing a garbled curve. Same issue `FrictionLines.friction_lines()`
+  already had `span_min`/`span_max` for - `at_radii()`/`plot_at_radii()`/
+  `plot_cp_radii()` now have the same parameters, with the same caveat:
+  no reliable automatic value, pass what's right for your case's mesh
+  (e.g. `span_min=0.03` for the case this was validated against).
+- **x/c orientation**: the raw chord axis has no inherent leading/
+  trailing-edge meaning - `x/c=0` was arbitrarily assigned to the minimum
+  chord value, which came out backwards for the validated case (Kutta-
+  condition-near-zero end at `x/c=0`, sharp LE stagnation+suction-peak
+  signature at `x/c=1`). `reverse_chord=True` flips it - check per case
+  (Cp should return to ~0 approaching the trailing edge and show the
+  sharp stagnation/suction-peak feature at the leading edge; if that's at
+  `x/c=1` instead, flip it).
+- **Sign**: `plot_cp_radii()` labeled its y-axis `$-C_p$` but was
+  plotting raw `+Cp`, unnegated - a real sign bug, not a display choice
+  (fixed: `stat='mean'`/instantaneous now correctly negates; `rms`/
+  `raw_rms` don't, since those are already non-negative and negating
+  them would be wrong). **`BladePostProcessor.plot_radii()` elsewhere in
+  this project has the identical bug** - labels `$-C_p$` but never
+  negates - confirmed by reading that method directly, not fixed there
+  (different class, out of scope here) - worth knowing if comparing
+  against or reusing that tool's past output/figures.
+
+**Plot style**: points (scatter), never a connected line, even when
+`n_chord_bins` bin-averages the data (already smooth) - a line whose end
+sits wherever a crop/percentile cut it off visually reads as "the curve
+is missing" past that point; discrete points don't imply continuation.
+Default colormap `cividis` (not `viridis`), one legend entry per radius
+covering both surfaces (same color, two branches - matches this
+project's established `-Cp`-radii plot style).
+
+### Whole-blade surface plot: `plot_variable_surface()`
+
+Generalizes `FrictionLines.friction_lines()` beyond Cf to any scalar
+field (static pressure, Cp, `y+`, ...) - same style (dense scatter, not
+interpolated onto a grid - see that method's docstring for why), one row
+per surface, colors clipped to a percentile range (two-sided here, since
+a general field like Cp can be negative, unlike Cf magnitude):
+
+```python
+sv.plot_variable_surface(
+    lambda s: -sv.cp(surface=s, stat='mean'),  # note the negation - see "Sign" above
+    cbar_label='-Cp', span_min=0.03,
+    savepath='cp_surface.png',
+)
+```
+
+An optional `get_vector` callable overlays a direction quiver (e.g. for a
+surface velocity field), same as `friction_lines()`'s wall-shear quiver.
+
+### Cross-case comparison: `to_common_grid()` / `field()` / `SurfaceVariableField`
+
+Resamples any per-surfel field onto a shared `(r/R, x/c)` grid - same
+purpose, convention, and two-stage algorithm (per-radius-band onto x/c,
+then across bands onto r/R) as `SurfaceField.to_common_grid()`
+(`bladeprocessor/surface_field.py`), built directly from a raw surfel
+cloud instead of a pre-resampled `(Radius, Chord)` file. Only meaningful
+for cases known to share the same geometry, or ones that are properly
+scalable in both span and chord (same caveat `SurfaceField` already
+carries).
+
+Rather than reimplement comparison/delta plotting, `SurfaceVariable.field()`
+wraps a `(SurfaceVariable, get_values)` pair as a `SurfaceVariableField` -
+an object that duck-types `SurfaceField`'s interface (`to_common_grid()`,
+`physical_aspect()`, `var_name`) closely enough to drop straight into the
+existing `SurfaceFieldComparator`, **unmodified** - works interchangeably
+against another `SurfaceVariableField` or an actual `SurfaceField`:
+
+```python
+from bladeprocessor.surface_field import SurfaceFieldComparator
+
+field_2025 = sv_2025.field(lambda s: sv_2025.cp(surface=s, stat='mean'),
+                            var_name='Cp 2025', c_ref=0.025, span_min=0.03)
+field_2026 = sv_2026.field(lambda s: sv_2026.cp(surface=s, stat='mean'),
+                            var_name='Cp 2026', c_ref=0.025, span_min=0.03)
+
+comparator = SurfaceFieldComparator({'2025': field_2025, '2026': field_2026})
+comparator.plot_cases(cbar_label='Cp', savepath='cp_comparison.png')
+comparator.plot_delta('2025', '2026', cbar_label='Cp delta', savepath='cp_delta.png')
+```
+
+`c_ref` (unlike `SurfaceField`, which can fall back to `max(chord)` from
+its own file) must be passed explicitly - raw surfel data has no native
+chord axis to infer one from, and using the same physical `c_ref` across
+every case being compared is what keeps `x/c` meaning the same thing in
+each.
+
+**Validated**: resampling a real Cp field and comparing it against
+itself (same `SurfaceVariable`, same `get_values`) through the full
+`SurfaceFieldComparator` pipeline gives exactly `0.0` delta wherever both
+sides have data, and `plot_cases()` renders both (identical) panels
+correctly - confirms the duck-typed integration works end-to-end.
+`plot_delta()` itself hit a **pre-existing bug in `SurfaceFieldComparator`**
+(`surface_field.py`, not part of this class): when a delta is exactly
+zero everywhere (only possible in a degenerate self-comparison like this
+test), `symmetric=True`'s `vmax = max(abs(delta)) = 0` makes
+`contour_levels` a repeated `0`, and matplotlib rejects non-increasing
+contour levels. Not hit by any real two-different-cases comparison, and
+not fixed here (different class) - worth knowing if a genuinely-zero
+delta ever comes up for real.
+
+### Pressure fluctuation: `pressure_fluctuation()` / `plot_pressure_fluctuation()`
+
+`p'(frame) = p(frame) - p_mean`, where `p_mean` is the mean over every
+frame in the file - the same mean `variable(stat='rms')` uses internally
+for `Prms = sqrt(mean(p'^2))`, so this fluctuation is consistent with
+that statistic rather than some other baseline. Dimensional [Pa], not
+normalized by `q_ref` (unlike `cp()`) - the fluctuation's own sign/shape
+is the point here, not a cross-radius comparison.
+
+```python
+# one frame's fluctuation as a blade contour:
+sv.plot_pressure_fluctuation(frame=0, span_min=0.03, savepath='p_fluct_frame0.png')
+
+# one image per frame, e.g. for an animation:
+for frame in range(sv.n_frames):
+    sv.plot_pressure_fluctuation(frame, span_min=0.03, savepath=f'p_fluct_frame{frame:03d}.png')
+```
+
+`Prms` itself needs no new code - it's already `variable('static_pressure', stat='rms')`
+(or `cp(stat='rms')` for the normalized version), usable directly with
+`plot_variable_surface()`/`plot_at_radii()`.
+
+**Validated**: on a real (single-frame) file, `pressure_fluctuation(0)`
+returns exactly `0.0` everywhere, as expected (`p(frame) == p_mean` when
+there's only one frame) - real signal will show up once compared against
+a multi-frame case.
+
+### Point time trace + Welch periodogram: `timetrace()` / `periodogram()`
+
+Wall pressure fluctuations at a single point over time, and their
+spectrum - `timetrace()` pulls `Data/<surface>/<name>` at ONE raw surfel
+across every frame in the file; `periodogram()` wraps
+`scipy.signal.welch` on top of that. Works for any variable stored in
+the file (pressure, `y+`, forces, ...), not just pressure.
+
+The point is given as `(span_pct, chord_pct)` percentages (0-100) of
+`r/R` and `x/c` - the SAME `x/c` convention as `at_radii()`/
+`to_common_grid()` (local, per-radius-band, percentile-normalized -
+see `chord_percentile`/`reverse_chord` there). The nearest available raw
+surfel is used (not an interpolated value) - `_nearest_point()` returns
+the requested vs. actual `(r, x/c)`, and every method here reports the
+actual location in its `point_info`/plot title, since the nearest surfel
+generally won't sit exactly on the target:
+
+```python
+t, p, info = sv.timetrace('static_pressure', span_pct=80, chord_pct=90, surface='Upper')
+print(info)  # {'idx': ..., 'r': 0.100..., 'xc': 0.901..., 'surface': 'Upper'}
+
+sv.plot_timetrace('static_pressure', span_pct=80, chord_pct=90, surface='Upper',
+                   ylabel='Static pressure [Pa]', savepath='p_timetrace.png')
+
+freq, psd, info = sv.periodogram('static_pressure', span_pct=80, chord_pct=90, surface='Upper')
+sv.plot_periodogram('static_pressure', span_pct=80, chord_pct=90, surface='Upper',
+                     ylabel='PSD [Pa$^2$/Hz]', savepath='p_periodogram.png')
+```
+
+**Time axis / sampling rate**: needs a real physical timestep, which
+these files don't always have -
+`convert_snc_to_h5()` (`converters/ensight_to_h5.py`) writes
+`Metadata/mid_s` (real time in seconds) ONLY when an `nc_stats` file was
+supplied at conversion time; `SNCReader.to_h5()` never writes any time
+info at all. `timetrace()` falls back, in order: explicit `dt` argument
+(assumes uniform spacing) -> `Metadata/mid_s` if present -> the raw
+integer frame index (fine for just looking at a trace's shape, not a
+real time axis). `periodogram()` is stricter - it needs `fs`, `dt`, or a
+usable `Metadata/mid_s`; without one of those it raises rather than
+silently plotting a meaningless frequency axis.
+
+`nperseg` (Welch segment length) defaults to `min(256, n_frames)`, not
+scipy's own bare 256 - with only a handful of frames (a likely case
+while more data is still being generated - this whole feature's
+motivating use case) scipy would silently clip 256 down to `n_frames`
+anyway; doing it explicitly here avoids that surprise.
+
+**Validated** against a synthetic file built with the exact same schema
+(`Geometry/Upper,Lower` + `Data/Upper,Lower/<name>` with a frame axis +
+`Metadata/lrf_axis_origin,lrf_axis_direction,frame_index,mid_s`) as a
+real `to_h5()`/`convert_snc_to_h5()` output, since no real multi-frame
+file was available locally: a point's requested `(80%, 90%)` location
+resolved to the correct nearby raw surfel (`r/R=0.802`, `x/c=0.901`);
+`timetrace()` correctly picked up `Metadata/mid_s` for its time axis
+(`dt=0.001` s, matching the synthetic sampling rate) with no `dt`
+argument passed; a 50 Hz sine injected into the synthetic signal (plus
+noise) came back as a sharp, correctly-located peak at `50.8` Hz (off by
+one Welch frequency bin - as expected, not exact) in `periodogram()`'s
+output, with a flat noise floor everywhere else.
+
 ## What's still open
 
 - Iso-radius / (r/R, x/c) resampling directly from raw `.snc` surfel
@@ -488,3 +783,12 @@ single readable curve per radius that `plot_cf_radii()` draws.
   doesn't by itself handle a twisted blade's true local chord direction
   either - a proper fix (e.g. per-station PCA of the point cloud) is not
   implemented.
+- `SurfaceVariable`'s `reverse_chord` (which end of the raw chord axis is
+  the leading vs. trailing edge) has no automatic detection - it's
+  arbitrary per case, currently determined by eye (checking whether the
+  Kutta-condition/near-zero-Cp end and the stagnation-point/suction-peak
+  end land where expected) rather than computed from anything in the
+  file. `SurfaceVariable.cp(stat='rms')` is implemented and its reduction
+  formula is validated synthetically, but hasn't yet been checked against
+  a real multi-frame pressure file - only one real frame was available
+  locally when this was built.
