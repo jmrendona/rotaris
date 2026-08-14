@@ -209,7 +209,7 @@ class SNCReader:
         geo.create_dataset('X', data=coords[mask, 0])
         geo.create_dataset('Y', data=coords[mask, 1])
         geo.create_dataset('Z', data=coords[mask, 2])
-        geo.create_dataset('NX', data=normals[mask, 0])
+        geo.create_dataset('Normal_X', data=normals[mask, 0])
         geo.create_dataset('Normal_Y', data=normals[mask, 1])
         geo.create_dataset('Normal_Z', data=normals[mask, 2])
         geo.create_dataset('Area', data=areas[mask])

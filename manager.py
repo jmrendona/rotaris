@@ -112,6 +112,51 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/friction_lines_avg.png',
 #)
 
+# Separation/reattachment line (chordwise-Cf sign crossings) - restricted
+# to one blade section via span_min/span_max like everything else here;
+# reverse_chord must match what plot_cf_radii()/cf_at_radii() needed on
+# this case (see README.md, "Separation/reattachment line"):
+#sep_points = fl.separation_line(surface='Upper', frame=None, span_min=0.02, reverse_chord=True)
+#fl.save_separation_line(sep_points, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/cf/separation_line.txt')
+
+# Overlaid directly on friction_lines() (separation in red, reattachment in cyan):
+#fl.friction_lines(
+#    surface='Upper', frame=None, span_min=0.02, show_separation_line=True,
+#    separation_line_kwargs={'reverse_chord': True},
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/friction_lines_separation.png',
+#)
+
+# Spanwise migration-reversal line (spanwise-Cf sign crossings - a
+# DIFFERENT physical phenomenon from separation/reattachment above, see
+# README.md, "Spanwise migration-reversal line"). edge_crop (default
+# 0.05) excludes crossings too close to the LE/TE - real LE noise on
+# this case, found and fixed this way after two amplitude-based filter
+# attempts backfired (see the README section and migration_line()'s own
+# docstring for the full story):
+#mig_points = fl.migration_line(surface='Upper', frame=None, span_min=0.02, reverse_chord=True)
+#fl.save_migration_line(mig_points, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/cf/migration_line.txt')
+
+#fl.friction_lines(
+#    surface='Upper', frame=None, span_min=0.02, show_migration_line=True,
+#    migration_line_kwargs={'reverse_chord': True},
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/friction_lines_migration.png',
+#)
+
+# Vortex-footprint critical points (node/saddle/focus - see README.md,
+# "Vortex-footprint critical points"; 'focus' = actual vortex core, e.g.
+# a leading-edge or corner/horseshoe vortex, not just an ordinary
+# separation/reattachment feature). No reverse_chord - works in raw
+# physical (span, chord) coordinates, not x/c:
+#crit_points = fl.critical_points(surface='Upper', frame=None, span_min=0.02)
+#fl.save_critical_points(crit_points, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/cf/critical_points.txt')
+#print('Poincare index N+F-S =', fl.poincare_index(crit_points))  # see README.md - NOT expected to be 2 on this open, cropped selection
+
+# show_critical_points_index=True annotates the figure itself with N+F-S:
+#fl.friction_lines(
+#    surface='Upper', frame=None, span_min=0.02, show_critical_points=True, show_critical_points_index=True,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/friction_lines_critical_points.png',
+#)
+
 # ------------- Any surface variable at radii (Cp, y+, RMS, ...) ------------- #
 #
 # Input: a convert_snc_to_h5(..., surface_split=True) file - the pressure

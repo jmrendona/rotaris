@@ -465,7 +465,7 @@ class SurfaceVariable:
                 ax.scatter(xc, v, s=marker_size, color=color, label=label)
                 first = False
 
-        ax.set_xlabel(r'Chord $x/c$')
+        ax.set_xlabel(r'$x/c$ [-]')
         ax.set_ylabel(ylabel)
         ax.grid(True)
         ax.legend()
@@ -521,7 +521,7 @@ class SurfaceVariable:
         sign = 1 if is_rms else -1
         get_values = lambda s: sign * self.cp(surface=s, frame=frame, stat=stat,
                                                pressure_variable=pressure_variable)
-        ylabel = r'$C_{p,rms}$' if is_rms else r'$-C_p$'
+        ylabel = r'$C_{p,rms}$ [-]' if is_rms else r'$-C_p$ [-]'
 
         return self.plot_at_radii(radii, get_values, ylabel, surface=surface, tol=tol,
                                    n_chord_bins=n_chord_bins, span_min=span_min, span_max=span_max,
@@ -976,10 +976,8 @@ class SurfaceVariable:
 
             ax.set_ylabel('chord [m]')
             ax.set_aspect('equal')
-            ax.set_title(surf)
 
         axes[-1].set_xlabel('span [m]')
-        fig.suptitle(cbar_label)
         fig.tight_layout()
 
         if savepath:

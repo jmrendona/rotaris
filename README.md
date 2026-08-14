@@ -1,144 +1,44 @@
-# rotaris — `.snc` extraction pipeline
+# Rotaris
 
-Two data sources, each used only for what's been validated:
+Python based post-procesing tool for rotor simulations whose data was computed from PowerFLOW solver.
 
-## 1. Forces, Skin Friction, Normals, Geometry → `SNCReader` (raw `.snc`)
+## 1. Volumetric planes/cuts → `.fnc` (pf2ens + pyvista, see `converters/fnc_plane.py`)
 
-`converters/snc_reader.py` reads a PowerFLOW surface measurement `.snc`
-file directly (it's NetCDF) and converts it to a compact HDF5.
-
-- `Surface X/Y/Z-Force` and `Skin Friction` are converted to physical units
-  (Pa) automatically in `to_h5()`, using the file's own lattice scale
-  factors. Validated against the file's own stored `Skin Friction`:
-  correlation ~0.999.
-- Surfel normals, centroids (positions), areas, and rotor axis/RPM
-  metadata come along with it.
-- `Static Pressure` is deliberately **not** converted here (see below) -
-  it's written raw, flagged `physical_units=False`.
-
-No cluster-side extraction step is needed for this - the `.snc` file
-itself is the input:
-
-```python
-from converters.snc_reader import SNCReader
-
-reader = SNCReader("forces_rotor.snc")
-reader.to_h5("forces_rotor.h5")
-```
-
-## 2. Static Pressure → `pf2ens` (do not derive it from raw `.snc`)
-
-PowerFLOW translates static pressure between lattice and real units through
-an internal Cp-based mechanism that could not be reverse-engineered from
-the file's own stored scale factors - two attempts both failed (wrong
-absolute level, and separately wrong spatial/chordwise shape). `pf2ens`
-does this conversion correctly and is the only source trusted for pressure.
-
-### Running this on the cluster
-
-**You do not run `pf2ens` yourself.** `convert_snc_to_h5()` (in
-`converters/ensight_to_h5.py`) calls it for you internally, once per
-frame, and deletes each frame's intermediate EnSight export (~800 MB)
-before moving to the next one, so nothing piles up on disk. All you run
-is this one Python function (or the equivalent CLI command).
-
-**Prerequisites**: `pf2ens` must be on `$PATH` - it already is inside
-the PowerFLOW module environment you'd normally load to run/post-process
-a case on the cluster. The Python environment needs `h5py`, `numpy`,
-`scipy`, and `pyvista` installed.
-
-Python:
-
-```python
-from converters.ensight_to_h5 import convert_snc_to_h5
-
-convert_snc_to_h5(
-    snc_path='pressure_rotor.snc',    # input: raw PowerFLOW measurement file
-    output_path='pressure_rotor.h5',  # output: one combined HDF5 file, all frames
-    first_frame=0,                    # first frame index to convert (inclusive)
-    last_frame=199,                   # last frame index to convert (inclusive)
-    surface_split=True,               # optional: also split into Upper/Lower groups
-)
-```
-
-Or the same thing from the command line, no Python script needed:
-
-```bash
-python converters/ensight_to_h5.py pressure_rotor.snc pressure_rotor.h5 \
-    --first 0 --last 199 --surface-split
-```
-
-What each piece means:
-- `snc_path` / `output_path`: input `.snc` and output `.h5` paths.
-- `--first` / `--last` (or `first_frame`/`last_frame`): inclusive frame
-  range to convert - has to match frames that actually exist in the
-  file. Check with `SNCReader(snc_path).n_frames` if unsure.
-- `--surface-split`: optional. Splits into `Upper`/`Lower` groups (see
-  below) - opens `snc_path` a second time internally to borrow its
-  validated classification; no extra input file needed from you.
-- `--nc-stats`: optional. If you've separately saved
-  `exaritool nc-stats.ri <file>.snc -detail > nc_stats.txt`, pass
-  `--nc-stats nc_stats.txt` to also fill in real per-frame timing and
-  `LRF_position(rad)` in the output's `Metadata` group. Without it,
-  those fields are left blank.
-- `--work-dir`: optional, where intermediate `pf2ens` exports are
-  written per frame (default: an auto-cleaned temp directory).
-- `--reference-frame`: optional, which frame's geometry gets stored
-  (default: `--first`).
-
-For inspecting a single already-extracted frame by hand (e.g. while
-debugging), you can still call `pf2ens` directly and read the result:
-
-```bash
-pf2ens -f <frame> -b frame_<frame> <pressure_measurement>.snc
-```
-
-```python
-from converters.ensight_to_h5 import EnsightFrame
-
-frame = EnsightFrame("frame_0.case")
-pressure_pa = frame.variable('Static Pressure')
-```
-
-## 3. Volumetric planes/cuts → `.fnc` (pf2ens + pyvista, see `converters/fnc_plane.py`)
-
-`.fnc` files are PowerFLOW's *volumetric* fluid measurement (as opposed to
-`.snc`'s surface measurement) - much larger, multi-resolution octree data.
+`.fnc` files are PowerFLOW's fluid measurement with a multi-resolution octree data.
 Same rule as pressure above: this goes through `pf2ens` (per frame) +
 `pyvista` sampling, never PowerVIZ, never a direct `.fnc` read.
 
-Two extraction "shapes" are what you'll normally want:
+Two extraction "shapes" are implemented so far:
 
 - **`fnc-meridional`**: a single rotated hub-to-tip, inlet-to-outlet plane
-  at one fixed azimuth angle (e.g. "the plane through 0°").
+  at one fixed azimuth angle.
 - **`fnc-iso-radius`**: a fixed-radius cylindrical cut, unrolled into an
-  azimuth-vs-axial-position 2D grid (e.g. "the cut at 85% span").
+  azimuth-vs-axial-position 2D grid.
 
 Both take a `--variables` list of `pf2ens` short codes (run
-`pf2ens -d <fnc_path>` against your file to see what's available - e.g.
+`pf2ens -d <fnc_path>` against your file to see what's available, e.g.
 `vmag,p,vx,vy,vz`) and a `--first`/`--last` frame range.
 
-### Masking - what actually works, and what does not
+### Masking the obtained images
 
 **`--freeze-mask-variable vmag`** is the one masking option that is
-validated and safe to use. PowerFLOW never updates lattice cells inside
-solid, body-fixed geometry (e.g. the stator hub) - across frames their
+validated and safe to use. PowerFLOW initialize all the computational
+domain (including inside the solids) with the lattice reference values.
+These, nertheless, are never updates when located inside
+solid, body-fixed geometry. This leaves that across frames their
 value barely changes, unlike real flow. This flag computes `Data/frozen`
 from that near-zero-variance signature and needs `--first`/`--last` to
 span at least 2 (ideally several, spread out) frames to be reliable.
 `fnc_plane.plot_frame()` (and `fnc-plot` below) automatically combines
-`Data/frozen` into the valid-point mask if it's present - you don't have
-to do anything extra to use it once it's in the file.
+`Data/frozen` into the valid-point mask if it's present.
 
 **There is no working mask for the rotor blades.** `vtkValidPointMask`
 (pf2ens/pyvista's own solid-geometry flag) does not track the blades at
-all near mid-to-tip span - confirmed empirically, not assumed. A real,
-axially-aware blade mask was attempted (see `RotorBladePosition` in
-`fnc_plane.py`) and reverted after several rounds because it never held
-up as a trustworthy, full-plot-scale result. What *is* validated and
-available is **identification only**: `RotorBladePosition.blade_azimuths_deg()`
-draws a line at each blade's true instantaneous azimuth (matched against
-the real wake hot-spot across ~190° of rotation) - useful as a visual
+all near mid-to-tip span yet. A real, axially-aware blade mask was attempted
+(see `RotorBladePosition` in `fnc_plane.py`) and reverted after several 
+rounds because it never held up as a trustworthy, full-plot-scale result. 
+What *is* validated and available is **identification only**: `RotorBladePosition.blade_azimuths_deg()` that
+draws a line at each blade's true instantaneous azimuth. This is useful as a visual
 overlay so you know where a blade is in a plot, but it does not remove or
 flag any data. This is Python-API only, not wired into the CLI:
 
@@ -181,11 +81,109 @@ python convert.py fnc-plot iso_r85pct.h5 vmag iso_r85pct_frame0.png --frame 0
 ```
 
 `--first`/`--last` must span >= 2 frames (spread out, not adjacent) for
-`--freeze-mask-variable` to calibrate correctly - see `fnc_plane.py`'s
+`--freeze-mask-variable` to calibrate correctly. See `fnc_plane.py`'s
 notes on threshold calibration if the default `--freeze-rel-threshold
 0.01` over- or under-masks for your case. `fnc-freeze-mask` recomputes
 `Data/frozen` on an existing file post-hoc if you need to retune this
-without re-running the (expensive) `pf2ens` extraction.
+without re-running the `pf2ens` extraction.
+
+## 2. Conversion Forces, Normals, Geometry → `SNCReader` (raw `.snc`)
+
+`converters/snc_reader.py` reads a PowerFLOW surface measurement `.snc`
+file directly (NetCDF) and converts it to a compact HDF5.
+
+- `Surface X/Y/Z-Force` and `Skin Friction` are converted to physical units
+  (Pa) automatically in `to_h5()`, using the file's own lattice scale
+  factors. Validated against the file's own stored `Skin Friction` with a of
+  correlation ~0.999.
+- Surfel normals, centroids, areas, and rotor axis/RPM
+  metadata come along with it.
+- `Static Pressure` is deliberately **not** converted here (see below).
+  It's written in Lattice Units, flagged `physical_units=False`.
+
+No cluster-side extraction step is needed. The `.snc` file
+itself is the input:
+
+```python
+from converters.snc_reader import SNCReader
+
+reader = SNCReader("forces_rotor.snc")
+reader.to_h5("forces_rotor.h5")
+```
+
+## 3. Static Pressure → `pf2ens` (do not derive it from raw `.snc`)
+
+PowerFLOW translates static pressure between lattice and real units through
+an internal Cp-based mechanism that could not be reverse-engineered from
+the file's own stored scale factors. `pf2ens`
+does this conversion correctly and is the only source trusted for pressure.
+
+### Running this on the cluster
+
+**You do not run `pf2ens` yourself.** `convert_snc_to_h5()` (in
+`converters/ensight_to_h5.py`) calls it for you internally, once per
+frame, and deletes each frame's intermediate EnSight export (~800 MB)
+before moving to the next one, so nothing piles up on disk. All you run
+is this one Python function (or the equivalent CLI command).
+
+**Prerequisites**: `pf2ens` must be on `$PATH`. It already is inside
+the PowerFLOW module environment you'd normally load to run/post-process
+a case on the cluster. The Python environment needs `h5py`, `numpy`,
+`scipy`, and `pyvista` installed.
+
+Python:
+
+```python
+from converters.ensight_to_h5 import convert_snc_to_h5
+
+convert_snc_to_h5(
+    snc_path='pressure_rotor.snc',    # input: raw PowerFLOW measurement file
+    output_path='pressure_rotor.h5',  # output: one combined HDF5 file, all frames
+    first_frame=0,                    # first frame index to convert (inclusive)
+    last_frame=199,                   # last frame index to convert (inclusive)
+    surface_split=True,               # optional: also split into Upper/Lower groups
+)
+```
+
+Or the same thing from the command line, no Python script needed:
+
+```bash
+python converters/ensight_to_h5.py pressure_rotor.snc pressure_rotor.h5 \
+    --first 0 --last 199 --surface-split
+```
+
+What each piece means:
+- `snc_path` / `output_path`: input `.snc` and output `.h5` paths.
+- `--first` / `--last` (or `first_frame`/`last_frame`): inclusive frame
+  range to convert. It has to match frames what actually exist in the
+  file. Check with `SNCReader(snc_path).n_frames` if unsure or with 
+  `exafile` build-in tool from PowerFLOW.
+- `--surface-split`: optional. Splits into `Upper`/`Lower` groups. Opens `snc_path` a    
+second time internally to borrow its
+  validated classification. No extra input file needed.
+- `--nc-stats`: optional. If you've separately saved
+  `exaritool nc-stats.ri <file>.snc -detail > nc_stats.txt`, pass
+  `--nc-stats nc_stats.txt` to also fill in real per-frame timing and
+  `LRF_position(rad)` in the output's `Metadata` group. Without it,
+  those fields are left blank.
+- `--work-dir`: optional, where intermediate `pf2ens` exports are
+  written per frame (default: an auto-cleaned temp directory).
+- `--reference-frame`: optional, which frame's geometry gets stored
+  (default: `--first`).
+
+For inspecting a single already-extracted frame by hand (e.g. while
+debugging), you can still call `pf2ens` directly and read the result:
+
+```bash
+pf2ens -f <frame> -b frame_<frame> <pressure_measurement>.snc
+```
+
+```python
+from converters.ensight_to_h5 import EnsightFrame
+
+frame = EnsightFrame("frame_0.case")
+pressure_pa = frame.variable('Static Pressure')
+```
 
 ## Using both together (see manager.py)
 
@@ -210,22 +208,18 @@ don't mix per-point data across the two.
 `convert.py` is a CLI wrapping both branches above, one subcommand each:
 
 ```bash
-python convert.py forces   <snc_path> <output.h5> [--face-name NAME] [--surface-split]
+python convert.py forces <snc_path> <output.h5> [--face-name NAME] [--surface-split]
 python convert.py pressure <snc_path> <output.h5> --first N --last M [--surface-split] [--nc-stats FILE] [--reference-frame N] [--work-dir DIR]
 python convert.py fnc-meridional <fnc_path> <output.h5> --angle DEG --variables v1,v2 --first N --last M [--freeze-mask-variable vmag]
 python convert.py fnc-iso-radius <fnc_path> <output.h5> --radius M --variables v1,v2 --first N --last M [--freeze-mask-variable vmag]
 ```
 
-(`manager.py` is separate - ad-hoc, per-case scripting for whatever
-conversion/post-processing is being worked on at the time, not meant to be
-run as-is. `convert.py` is the stable, general entry point.)
-
 `run_conversion.sh` submits either subcommand as a single-node SLURM batch
-job (nothing here is parallelized, so it only ever requests one node/one
-task - see the comment at its top before changing that):
+job. Nothing here is parallelized, so it only ever requests one node/one
+task:
 
 ```bash
-sbatch run_conversion.sh forces   /path/case.snc /path/out.h5 --surface-split
+sbatch run_conversion.sh forces /path/case.snc /path/out.h5 --surface-split
 sbatch run_conversion.sh pressure /path/case.snc /path/out.h5 --first 0 --last 199 --surface-split
 sbatch run_conversion.sh fnc-meridional /path/case.fnc /path/plane_0deg.h5 \
     --angle 0 --variables vmag,p --first 0 --last 99 --freeze-mask-variable vmag
@@ -233,19 +227,18 @@ sbatch run_conversion.sh fnc-iso-radius /path/case.fnc /path/iso_r85pct.h5 \
     --radius 0.274 --variables vmag,p --first 0 --last 99 --freeze-mask-variable vmag
 ```
 
-**Use `sbatch`, not a direct shell command, for any `fnc-*` extraction** -
-`.fnc` files are far larger than `.snc` (100s of GB to multi-TB) and each
-frame's `pf2ens` export/sample is real, sustained CPU+I/O work, not
-something to run on a login node. `fnc-plot` and `fnc-freeze-mask` are the
-only exceptions worth running directly in a shell (after loading the venv
-per below) - they only touch an already-extracted, comparatively small
-`.h5` file, no `pf2ens`/`.fnc` access at all.
+**Use `sbatch`, not a direct shell command, for any `fnc-*` extraction**.
+`.fnc` files are far larger than `.snc` making it not something suitable 
+to run on a login node. `fnc-plot` and `fnc-freeze-mask` are the
+only exceptions worth running directly in a shell as they only touch an 
+already-extracted, comparatively small `.h5` file, no `pf2ens`/`.fnc` access at all.
 
 Everything after `run_conversion.sh` on the command line is forwarded
 straight to `convert.py`.
 
-**One-time setup, before the first `sbatch` submission**: Alliance compute
-nodes have no internet access, so the Python venv `run_conversion.sh`
+### One-time setup, before the first `sbatch` submission: 
+
+Alliance compute nodes have no internet access, so the Python venv `run_conversion.sh`
 expects (`~/rotaris-venv`) has to be built from a **login node** first:
 
 ```bash
@@ -256,55 +249,39 @@ pip install --no-index --upgrade pip
 pip install pyvista
 ```
 
-Use `virtualenv --no-download`, not `python -m venv` - Alliance's `python`
-module ships without `ensurepip` bundled, so `python -m venv` fails trying
-to fetch pip from the internet during creation itself
-(`Error: Command '[...ensurepip...]' returned non-zero exit status 1`).
-`virtualenv` knows to skip that and pull pip from Alliance's own local wheel
-mirror instead (`pip install --no-index --upgrade pip`). `pyvista` turned
-out to already be in that same local mirror (cvmfs wheelhouse), so this
-whole block actually runs fine without real internet either way - it's
-still meant to run once from a login node, though, since compute nodes
-aren't guaranteed the same wheelhouse access. `run_conversion.sh` will
-refuse to run (with a clear message) if `~/rotaris-venv` doesn't exist yet,
-rather than trying to build it inside the batch job.
-
+`run_conversion.sh` will refuse to run (with a clear message) if `~/rotaris-venv`
+doesn't exist yet, rather than trying to build it inside the batch job.
 After that, `run_conversion.sh` just reuses the venv.
 
 **Where things live**: `run_conversion.sh` locates `convert.py` via its own
-path, not your current directory - so the `rotaris/` folder (code) can sit
+path, not your current directory, letting the `rotaris/` folder sit
 anywhere, e.g. `$HOME`, and you can `sbatch ~/rotaris/run_conversion.sh ...`
 from wherever you want the job's data/logs to land (typically `$SCRATCH` or
-your `/project` allocation), no need to `cd` into the code folder first.
+your `/project` allocation). No need to `cd` into the code folder first.
 SLURM's `--output`/`--error` logs land in whatever directory you ran
 `sbatch` from, and `<snc_path>`/`<output>` are resolved relative to that
-same directory (or use absolute paths to be unambiguous).
+same directory.
 
 `--time`/`--mem`/`--cpus-per-task` at the top of `run_conversion.sh` are
-placeholder guesses, not measured against a real case yet - adjust once
-you've seen actual usage.
+placeholder that need to be adjusted before running depending on the case.
 
 ## Splitting into upper/lower surface
 
+Manage the division between suction and pressure side of the interest geometry.
 Needed for anything that requires knowing which side of the blade a point
-is on (e.g. skin-friction lines). Position-based splitting (e.g. `Y > 0`)
-is unreliable near the leading/trailing edges, where thickness goes to
-zero - validated: two independent methods agree only ~55% of the time in
-that zone (a coin flip).
+is on (e.g. skin-friction lines).
 
-- **`SNCReader.surface_split()`**: sign of the surfel normal's component
-  along the rotation axis (`lrf_axis_direction`). Validated: its own
-  ambiguous zone is ~45x narrower than position-based. This is the
-  trusted classification - use it directly for raw-`.snc`-derived data
+- **`SNCReader.surface_split()`**: uses the sign of the surfel normal's component
+  along the rotation axis (`lrf_axis_direction`). This is the
+  trusted classification used directly for raw-`.snc`-derived data
   (`to_h5(..., surface_split=True)` writes separate `Geometry/Upper`,
   `Geometry/Lower`, `Data/Upper`, `Data/Lower` groups).
-- **`EnsightFrame.surface_split()`**: do **not** recompute this from
-  pf2ens's own mesh - `pf2ens` splits complex surfels into quads/trias
+- **`EnsightFrame.surface_split()`**: do **not** use the geometry from
+  pf2ens's own mesh as `pf2ens` splits complex surfels into quads/trias
   for EnSight compatibility, which breaks mesh connectivity enough that
-  VTK's `compute_normals()` becomes locally inconsistent (validated:
-  ~52% agreement with ground truth, i.e. useless, even away from the
-  edges). Instead, classification is borrowed from the raw `.snc` file
-  via nearest-neighbor position matching:
+  VTK's `compute_normals()` becomes locally inconsistent. Instead, 
+  classification is borrowed from the raw `.snc` file via nearest-neighbor 
+  position matching:
 
   ```python
   from converters.snc_reader import SNCReader
@@ -318,69 +295,56 @@ that zone (a coin flip).
   ```
 
   `raw_positions_to_ensight_frame()` matters: pf2ens centers each axis on
-  the mesh's own bounding-box midpoint, not on `lrf_axis_origin` - the two
-  only coincide (by symmetry) for the axes perpendicular to the rotation
-  axis. Skipping this re-centering silently breaks the nearest-neighbor
-  match on the axis-aligned coordinate.
+  the mesh's own bounding-box midpoint, not on `lrf_axis_origin`. Skipping 
+  this re-centering silently breaks the nearest-neighbor match on the 
+  axis-aligned coordinate. As the two only coincide (by symmetry) for the 
+  axes perpendicular to the rotation axis.
 
   `convert_snc_to_h5(..., surface_split=True)` (and `--surface-split` on
-  the CLI) does all of this automatically.
+  the CLI) already handles all of this automatically.
 
 ## Output file structure
 
 ### `SNCReader.to_h5()` - all frames in the file, one `.h5` file
 
-Geometry (positions/normals/areas) is written once - the raw `.snc` file
-carries no frame axis for it, only for `measurements` - and every
+Geometry (positions/normals/areas) is written once. Every
 variable is written as a 2D dataset covering every frame in the file:
 
 ```
-Metadata/             lrf_axis_origin (meters), lrf_axis_direction, frame_index
+Metadata/              lrf_axis_origin (meters), lrf_axis_direction, frame_index
                        (datasets, frame_index = arange(n_frames)); scale_*,
                        offset_*, lrf_angular_vel_lattice (attrs)
 Geometry/X,Y,Z         surfel centroid positions, meters (1D, shape (n_points,))
-Geometry/NX,Normal_Y,Normal_Z, Area   normals (unit vectors) and area, m^2
+Geometry/Normal_X,Normal_Y,Normal_Z, Area   normals (unit vectors) and area, m^2
 Data/<Variable_Name>   one dataset per .snc variable (spaces -> underscores),
                        shape (n_frames, n_points), each with attrs
                        lattice_unit_class, physical_units
 ```
 
-(Positions/area/`lrf_axis_origin` are scaled by `LatticeLength` before being
-written - fixed 2026-08-08, `to_h5()` used to write these in raw lattice
-units while `Data/<Variable_Name>` was already physical, an inconsistency
-nothing downstream had started depending on yet, found while building
-`bladeprocessor/friction_lines.py`, the first real consumer of this file's
-`Geometry` group.)
-
 With `surface_split=True`, `Geometry` and `Data` are each replaced by
-`Geometry/Upper`, `Geometry/Lower`, `Data/Upper`, `Data/Lower` (same
-datasets underneath, just partitioned by surfel). `n_frames` is read
+`Geometry/Upper`, `Geometry/Lower`, `Data/Upper`, `Data/Lower`. `n_frames` is read
 directly from the file (`reader.n_frames`, from `measurements`' first
-axis) - no argument needed, `to_h5()` always writes every frame present.
-
-Validated on a real 2-frame file: `Data/Upper/Skin_Friction` came out
-shape `(2, 13319966)`, frame 0's mean matched the earlier single-frame
-result exactly (9.6861 N/m²), frame 1 close by as expected for a
-consecutive timestep.
+axis). `to_h5()` always writes every frame present without the need of an additional
+argument.
 
 ### `EnsightSeriesWriter` / `convert_snc_to_h5()` - multi-frame
 
-**One `.h5` file total, not one per frame and not one group per frame.**
+One `.h5` file total, not one per frame and not one group per frame.
 Frames are rows in shared 2D datasets:
 
 ```
-Geometry/X,Y,Z                 written ONCE, from the is_reference=True
-                                frame (1D, shape (n_points,)) - no
+Geometry/X,Y,Z                  written ONCE, from the is_reference=True
+                                frame (1D, shape (n_points,)). No
                                 normals (see below)
-Data/<variable>                one 2D dataset per variable,
-                                shape (n_frames, n_points) - each
+Data/<variable>                 one 2D dataset per variable,
+                                shape (n_frames, n_points). Each
                                 add_frame() call appends a row
 Metadata/frame_index, start_ts, end_ts, mid_ts, mid_s, lrf_position_rad
-                                1D, shape (n_frames,) - row i describes
+                                1D, shape (n_frames,). Row i describes
                                 Data's row i
 Metadata/lrf_axis_origin, lrf_axis_direction
                                 frame-independent (rotation axis doesn't
-                                change), meters - matches SNCReader.to_h5()'s
+                                change), meters. Matches SNCReader.to_h5()'s
                                 schema, always populated by
                                 convert_snc_to_h5(). lrf_axis_origin is
                                 re-centered onto pf2ens's own bounding-box
@@ -397,22 +361,22 @@ With `surface_split=True`: `Geometry/Upper`, `Geometry/Lower`,
 shape underneath).
 
 **No normals are written here**, on purpose: this writer exists for
-`pf2ens`-derived variables (chiefly `Static Pressure`), which don't need
-normals, and `EnsightFrame.normals()` isn't reliable enough to propagate
-downstream for anything else - see the section above and
-`EnsightFrame.normals()`'s docstring. Upper/lower classification always
+`pf2ens` derived variables, which don't need
+normals. `EnsightFrame.normals()` isn't reliable enough to propagate
+downstream for anything else  (see the section above and
+`EnsightFrame.normals()`'s docstring). Upper/lower classification always
 comes from `SNCReader.surface_split()` (raw `.snc` normals) instead.
 
 Storing geometry once assumes the blade is rigid (only orientation
-changes between frames, not shape) - noted as an assumption in
+changes between frames, not shape). Noted as an assumption in
 `EnsightSeriesWriter`'s docstring, with per-frame geometry storage
-mentioned as the more foolproof (but more storage-hungry) alternative,
+mentioned as the more foolproof (but more storage consuming) alternative,
 not implemented.
 
 ## Wall shear / friction lines: `bladeprocessor/FrictionLines` - Equations
 
 `FrictionLines` consumes a `SNCReader.to_h5(..., surface_split=True)` file
-(the forces branch above - never the `pf2ens`/pressure branch, whose
+(the forces branch above, never the `pf2ens`/pressure branch, whose
 recomputed normals aren't trustworthy for this, see "Splitting into
 upper/lower surface"). Every quantity below is per-surfel unless noted.
 
@@ -425,12 +389,11 @@ tau = F - (F . n) n
 ```
 
 `F` is `Surface X/Y/Z-Force` (already Pa, from `SNCReader.to_h5()`), `n`
-is this surfel's own unit normal (`Geometry/NX,Normal_Y,Normal_Z`, from
-the raw `.snc` - not `pf2ens`'s recomputed one).
+is this surfel's own unit normal (`Geometry/Normal_X,Normal_Y,Normal_Z`, from
+the raw `.snc`).
 
-**Skin friction coefficient** (`cf()`) - normalized by a LOCAL dynamic
-pressure, using each surfel's own radius, not one fixed velocity for the
-whole blade:
+**Skin friction coefficient** (`cf()`) - normalized by the local dynamic
+pressure, using each surfel's own radius:
 
 ```
 Cf = tau / q_ref
@@ -440,13 +403,13 @@ omega = rpm * 2*pi / 60
 
 `r` is this surfel's physical radius from the rotor's rotation axis
 (`lrf_axis_origin`/`lrf_axis_direction`, the one place `FrictionLines`
-still uses the rotation axis rather than raw Cartesian position - see
+still uses the rotation axis rather than raw Cartesian position, see
 `_radius()`). This matches `BladePostProcessor.compute_cf()` elsewhere in
 this project (`U_ref(r) = omega * r`), rather than
 non-dimensionalizing by one global freestream/tip velocity. **Caveat**:
-`q_ref -> 0` as `r -> 0`, so `Cf` blows up near the rotation axis - some
-faces (e.g. `Rotor::Default-Segment`) include a sliver of hub/bore
-geometry right at `r~0`; exclude it (`span_min`/`span_max` in
+`q_ref -> 0` as `r -> 0`, so `Cf` blows up near the rotation axis. Some
+faces include a hub geometry right at `r~0` if no entities are defined. 
+If that is the case it can be excluded (`span_min`/`span_max` in
 `friction_lines()`, or just don't query `cf_at_radii()` near `r=0`)
 before trusting an unrestricted `cf()` call.
 
@@ -458,15 +421,14 @@ Cf (chordwise)  = tau[chord_axis] / q_ref           signed
 Cf (spanwise)   = tau[span_axis]  / q_ref           signed
 ```
 
-Magnitude can never show a sign reversal (separation/reattachment) -
-it just dips toward zero. The signed components can, which is the
+Magnitude just dips towards zero but can never show a sign reversal
+(separation/reattachment). The signed components can, which is the
 point of having them (see `friction_lines_test_cf_chordwise_*.png`
 crossing zero mid-chord at the outer radii).
 
-**Local chordwise position** (`cf_at_radii()`) - for a thin band of
+**Local chordwise position** (`cf_at_radii()`): for a thin band of
 surfels around a target radius (`|r - r_target| < tol`), the raw
-Cartesian chord coordinate (`chord_axis`, centered - see `_span_chord()`)
-is rescaled to `[0, 1]` using THAT BAND's own min/max:
+Cartesian chord coordinate is rescaled to `[0, 1]` using that band's own min/max:
 
 ```
 x/c = (chord - chord_min) / (chord_max - chord_min)
@@ -475,10 +437,10 @@ x/c = (chord - chord_min) / (chord_max - chord_min)
 This is a per-band, per-case rescaling, not a case-independent x/c (see
 the class docstring's caveat and README's "What's still open" below).
 The resulting `(x/c, Cf)` pairs are then averaged into `n_chord_bins`
-equal-width x/c bins (mean Cf per bin) - without this, a single radius
+equal-width x/c bins  to obtain a mean Cf per bin. Without this, a single radius
 band on a real `.snc` surface contains hundreds of thousands of raw,
 noisy points, which reads as a dense cloud rather than a curve once
-plotted; the point of `n_chord_bins` is turning that cloud into the
+plotted. The point of `n_chord_bins` is turning that cloud into the
 single readable curve per radius that `plot_cf_radii()` draws.
 
 **Two bugs found and fixed in `cf_at_radii()`/`plot_cf_radii()`** (this
@@ -510,6 +472,324 @@ blades lumped into a single `/Rotor::Default-Segment` face):
 
 `plot_cf_radii()` also now defaults to `cividis` (not `viridis`) and
 draws a grid, matching `SurfaceVariable`'s radius-colored plots.
+`friction_lines()`'s default colormap was switched to `cividis` too, for
+the same consistency.
+
+### Separation/reattachment line: `separation_line()` / `plot_separation_line()` / `save_separation_line()`
+
+Every span location where chordwise Cf (`tau[chord_axis] / q_ref`)
+crosses zero - the near-wall flow reversal signature the signed `cf()`
+component was already meant to reveal (see "Equations" above: magnitude
+can only dip toward zero, the signed component actually crosses it).
+Restricted to ONE blade section via `span_min`/`span_max`, same reason as
+`cf_at_radii()`/`friction_lines()` - a multi-blade file's span axis mixes
+chord ranges across blades otherwise, corrupting the x/c each crossing's
+chord position is measured against.
+
+Method: partitions the (cropped) span range into `n_span_bins` bins
+(default 200 - dense, since this traces a continuous line, not a
+handful of spot-check stations like `cf_at_radii()`); within each,
+chordwise Cf is averaged into `n_chord_bins` x/c bins (default 200)
+using the SAME per-band, percentile-normalized x/c convention as
+`cf_at_radii()` (pass the same `reverse_chord` you use there/in
+`plot_cf_radii()`, or the two disagree on which end is the leading
+edge); adjacent bins with a sign change are linearly interpolated to
+localize each crossing. A span bin can produce zero, one, or several
+crossings (e.g. a bubble followed by another further aft); all are kept.
+
+**Labeling is NOT based on the raw sign of Cf.** Which physical direction
+counts as "positive" chordwise Cf depends on how this mesh's
+`chord_axis` happens to be oriented in the `.snc` file - an arbitrary
+modeling choice, not a physical convention - so a fixed "+ to - means
+separation" rule is only right for one of the two possible axis
+orientations, and silently wrong (reattachment appearing to precede its
+own separation, which isn't physically possible) for the other. This is
+exactly what showed up in an earlier version of
+`friction_lines_test_separation_overlay.png`. Instead, crossings within
+each span bin are labeled purely by ORDER along x/c: the 1st, 3rd, 5th,
+... is `'separation'` (entering a reversed-flow region), the 2nd, 4th,
+6th, ... is `'reattachment'` (leaving it) - always alternating, always
+paired, regardless of which raw sign happens to mean "attached" on this
+mesh. Each matched pair shares a `pair_id` (a bin with an odd number of
+crossings leaves one unpaired, `pair_id=-1` - the region it opened
+extends past the resolved x/c range rather than closing within it, e.g.
+all the way to the trailing edge - a real open region, not a bug).
+
+```python
+points = fl.separation_line(surface='Upper', frame=None, span_min=0.02, reverse_chord=True)
+# [{'span': ..., 'chord': ..., 'r': ..., 'xc': ..., 'kind': 'separation'|'reattachment', 'pair_id': ...}, ...]
+
+fl.save_separation_line(points, 'separation_line.txt')  # span_m, chord_m, r_m, xc, kind, pair_id - tab-separated
+
+# overlay on friction_lines() directly:
+fl.friction_lines(surface='Upper', frame=None, span_min=0.02, show_separation_line=True,
+                   separation_line_kwargs={'reverse_chord': True}, savepath='friction_lines_sep.png')
+
+# or on any existing (span, chord) Axes:
+fl.plot_separation_line(ax, points)
+```
+
+`plot_separation_line()` draws large, black-edged, high-contrast markers
+(separation in red, reattachment in cyan), sized to stay visible against
+`friction_lines()`'s dense background scatter. `connect_pairs=True`
+optionally draws a line between each matched pair marking the reversed-
+flow region's chordwise extent at that span station - off by default,
+since on a dense case the connecting lines packed side by side read as a
+solid black wall rather than individually legible segments (checked
+visually against this project's own case, `friction_lines_test_separation_overlay.png` -
+markers alone read cleanly, connected version didn't).
+
+**Validated** against this project's own case (`span_min=0.02,
+reverse_chord=True`, matching the values `plot_cf_radii()` needed - see
+above): 107 crossings found at the default (higher) resolution, all
+correctly alternating separation/reattachment by construction (order-
+based labeling can't produce a reattachment before its separation,
+unlike the earlier sign-based version) - clustered near the root
+(span~0.02-0.028, just past the hub cutoff) and the tip
+(span~0.108-0.123), almost none mid-span - consistent with
+`friction_lines_test_cf_chordwise_avg.png`, where chordwise Cf stays
+negative across nearly all of mid-span at every sampled radius and only
+gets close to zero near the edges; root/tip 3D effects (hub
+interference, tip vortex) producing more flow reversal than a cleaner
+mid-span region is also physically expected.
+
+### Spanwise migration-reversal line: `migration_line()` / `plot_migration_line()` / `save_migration_line()`
+
+Every location where SPANWISE Cf (`tau[span_axis] / q_ref`) crosses zero
+- where near-wall flow switches between migrating toward the tip
+("outward", e.g. classic centrifugal pumping in a rotating boundary
+layer) and migrating toward the root ("inward"). This is a DIFFERENT
+physical phenomenon from separation/reattachment (that's the chordwise
+component reversing along the chord; this is the spanwise component
+reversing along the span), kept as its own method rather than a mode on
+`separation_line()`. Same per-span-band binning architecture and
+`span_min`/`span_max`/`reverse_chord` requirements as `separation_line()`.
+
+**Labeling is physically grounded, unlike `separation_line()`'s.**
+Chordwise Cf's sign has no fixed physical meaning (it depends on this
+mesh's arbitrary `chord_axis` orientation - see `reverse_chord` above),
+but spanwise Cf's sign can be: span is used as-is, the raw absolute
+Cartesian coordinate, and `span_min`/`span_max` already isolates one
+blade running from the hub outward - so on that selected half, increasing
+span consistently means "toward the tip". A crossing from positive to
+negative spanwise Cf is labeled `'inward'`; negative to positive is
+`'outward'` - unless this mesh's span_axis happens to point the opposite
+way on whichever half was cropped, in which case `flip_direction=True`
+swaps the meaning (no way to detect this automatically - check per case).
+
+```python
+points = fl.migration_line(surface='Upper', frame=None, span_min=0.02, reverse_chord=True)
+fl.save_migration_line(points, 'migration_line.txt')  # span_m, chord_m, r_m, xc, kind, pair_id
+
+fl.friction_lines(surface='Upper', frame=None, span_min=0.02, show_migration_line=True,
+                   migration_line_kwargs={'reverse_chord': True}, savepath='friction_lines_mig.png')
+```
+
+**A real debugging story worth recording** (found while validating this
+tool on this project's own case): a first, unfiltered version showed a
+dense band of rapidly-alternating `'outward'`/`'inward'` crossings
+running right along the leading edge - not a real migration boundary.
+Right at the LE, near-wall flow is nearly pure chordwise, so spanwise Cf
+sits close to zero AND swings hard over a very short x/c distance there,
+flipping sign from bin to bin for no meaningful reason. Two amplitude-
+based filter attempts to suppress this both backfired:
+1. Requiring both bracketing chord bins' `|Cf|` to exceed a fraction of
+   that SPAN BIN'S OWN curve max - a large unrelated LE excursion in one
+   bin inflated its own threshold enough to asymmetrically kill the
+   smaller-magnitude half of an otherwise genuine pair elsewhere in that
+   same bin, silently producing one-sided output (confirmed: 68
+   crossings, ALL `'inward'`, zero `'outward'`).
+2. Requiring it relative to ONE global scale (90th percentile of `|Cf|`
+   over the whole case) instead - the LE's own large gradient dominated
+   that global scale too, so the filter ended up keeping only the single
+   largest (LE-adjacent) crossing per bin and discarding the genuine
+   mid-chord/tip-region signal entirely (confirmed: every surviving
+   crossing sat at `xc < 0.007`).
+
+The fix that actually worked: `edge_crop` (same idea as
+`SurfaceVariable.at_radii()`'s parameter of the same name) excludes
+crossings by POSITION (within `edge_crop` of x/c=0 or x/c=1) rather than
+by amplitude - sidesteps both failure modes, since it no longer matters
+how large the LE's own Cf swing is. **Final validated result**
+(`edge_crop=0.05`, the default): 313 crossings, `{'outward': 187,
+'inward': 126}`, spanning `xc` 0.05-0.95 (no longer stuck at the LE) and
+span 0.079-0.125, 0 alternation violations (verified: within any span
+bin, consecutive crossings never repeat the same kind, as a continuous
+signal crossing zero repeatedly must). The rendered overlay
+(`friction_lines_test_migration_overlay.png`) shows a physically
+coherent picture: a mixed outward/inward cluster near the tip
+(span~0.105-0.125, overlapping where `separation_line()`/
+`critical_points()` also find structure) plus a smooth, single-kind
+(`'outward'`) line further inboard (span~0.08-0.105) - too consistent
+along span to be noise, likely a real recovery boundary.
+
+### Vortex-footprint critical points: `critical_points()` / `plot_critical_points()` / `save_critical_points()`
+
+Locations where the ENTIRE wall-shear vector (chordwise Cf, spanwise Cf)
+vanishes simultaneously - not just one component's zero crossing.
+Per Lighthill's theorem (see Tobak & Peake, 1982, "Topology of
+Three-Dimensional Separated Flows"), any point a real 3D flow's surface
+streamlines converge to, diverge from, or spiral around MUST be a point
+of zero skin friction - so genuine 3D structures, including vortex
+footprints specifically, can be located this way.
+
+Unlike `separation_line()`/`migration_line()` (which bin per span band
+using a LOCALLY renormalized x/c), this bins the raw surfel cloud onto a
+genuine 2D grid in ABSOLUTE physical `(span, chord)` coordinates [m] - a
+real 2D neighborhood search needs a consistent coordinate system across
+neighboring cells. No `reverse_chord` parameter as a result - raw
+physical chord already has a real, consistent geometric meaning on its
+own.
+
+Method: bins the cropped selection onto an `n_span_bins x n_chord_bins`
+grid (mean chordwise/spanwise Cf and Cf magnitude per cell, cells with
+fewer than `min_count` surfels treated as unreliable); candidates are
+cells whose Cf magnitude is both in the bottom `magnitude_percentile`%
+of the grid AND a local minimum among their (reliable) neighbors; each
+candidate is classified via the local Jacobian of `(chordwise Cf,
+spanwise Cf)` w.r.t. `(chord, span)` (central finite differences), using
+its eigenvalues:
+- `'node'` - real eigenvalues, same sign - lines converge to/diverge
+  from this point (a 3D separation/attachment node)
+- `'saddle'` - real eigenvalues, opposite sign - lines pass through/
+  around it (a typical reattachment saddle)
+- `'focus'` - complex eigenvalues - lines SPIRAL around it - the actual
+  footprint of a vortex core (LEV, corner/horseshoe vortex, ...), not
+  just an ordinary separation/reattachment feature
+
+```python
+points = fl.critical_points(surface='Upper', frame=None, span_min=0.02)
+fl.save_critical_points(points, 'critical_points.txt')  # span_m, chord_m, r_m, cf_mag, kind
+
+fl.friction_lines(surface='Upper', frame=None, span_min=0.02, show_critical_points=True,
+                   savepath='friction_lines_crit.png')
+```
+
+#### Theory: why eigenvalues tell you node vs. saddle vs. focus
+
+A surface streamline (a "skin-friction line" - the pattern the
+`friction_lines()` quiver traces) is an integral curve of the wall-shear
+vector field: parametrize the curve by an arclength-like variable `t`,
+and it satisfies
+
+```
+d(chord)/dt = u(chord, span)      where  u = Cf_chordwise
+d(span)/dt  = v(chord, span)      where  v = Cf_spanwise
+```
+
+`t` here isn't physical time - it's just how far you've walked along the
+surface following the local wall-shear direction. A critical point
+`(chord_0, span_0)` is where `u = v = 0` simultaneously: the direction
+field is undefined there (every direction is "downhill" equally), which
+is exactly why real streamlines converge to it, diverge from it, or
+spiral around it, instead of just passing through like everywhere else.
+
+Near such a point, Taylor-expand `(u, v)` to first order (the
+higher-order terms vanish fastest as you approach the point, so the
+LINEAR part determines the local picture):
+
+```
+[u]   [du/dchord  du/dspan] [chord - chord_0]
+[v] ~ [dv/dchord  dv/dspan] [span  - span_0 ]  =  J * (x - x_0)
+```
+
+`J` (the 2x2 Jacobian `critical_points()` estimates by central finite
+differences on the grid) turns the messy nonlinear flow near the point
+into a simple LINEAR system, `dx/dt = J x` (relative to `x_0`) - and the
+solutions of a linear system like this are completely characterized by
+`J`'s eigenvalues `lambda_1, lambda_2` (roots of
+`lambda^2 - tr(J) lambda + det(J) = 0`, where `tr(J)` is the trace and
+`det(J)` the determinant):
+
+| `tr(J)^2 - 4 det(J)` | eigenvalues | pattern | `kind` |
+|---|---|---|---|
+| `> 0`, `det(J) > 0` | real, same sign | every line converges to (`tr(J)<0`) or diverges from (`tr(J)>0`) the point | `'node'` |
+| `> 0`, `det(J) < 0` | real, opposite sign | lines converge along one direction, diverge along the other - only 2 lines actually touch the point, everything else is deflected around it | `'saddle'` |
+| `< 0` | complex conjugate pair, `lambda = a +/- bi` | the `bi` part is a ROTATION - lines spiral in (`a<0`) or out (`a>0`) around the point | `'focus'` |
+
+Physically:
+- A **node** is where surface flow genuinely collects (a 3D
+  reattachment point flow spreads out FROM, or an attachment point it
+  converges TO) - no rotation, just pure convergence/divergence.
+- A **saddle** is the generic "flow gets redirected around an obstacle"
+  point - most reattachment LINES (as opposed to points) are built from
+  chains of these; only 2 special streamlines actually reach it.
+- A **focus** is the ONLY one of the three with genuine rotation baked
+  into its linearization (`b != 0`, a nonzero imaginary part) - which is
+  precisely the mathematical signature of a vortex: the near-wall flow
+  doesn't just converge or get deflected, it winds around the point.
+  This is why `'focus'` - not `'node'` or `'saddle'` - is the marker
+  that actually means "vortex footprint" (leading-edge vortex, corner/
+  horseshoe vortex, ...) rather than an ordinary separation/reattachment
+  feature.
+
+This eigenvalue classification is the standard tool for this kind of
+analysis - see Tobak & Peake (1982), "Topology of Three-Dimensional
+Separated Flows", already cited above, or Poincaré's original
+classification of singular points of planar vector fields, which this
+is a direct application of.
+
+#### Theory: the Poincaré-Hopf check - `poincare_index()`
+
+Each critical point carries an "index": +1 for a `'node'` or a `'focus'`
+(the vector field's direction winds around the point once, in the SAME
+sense you walk around it), -1 for a `'saddle'` (winds around once in the
+OPPOSITE sense). `poincare_index(points)` sums these:
+
+```
+index = N + F - S
+```
+
+(`N`, `F`, `S` = counts of node/focus/saddle points). The **Poincaré-Hopf
+theorem** says that for a vector field on a CLOSED surface (no boundary
+- e.g. a full blade's entire skin, both surfaces and the tip cap,
+stitched into one topological sphere), this sum must equal the surface's
+Euler characteristic `chi` - `2` for anything sphere-like (genus 0), the
+same `2` in `V - E + F = 2` for a polyhedron. It's a real constraint: no
+matter how complicated the surface flow pattern looks, the critical
+points occurring on a closed surface can't be arranged arbitrarily -
+their indices are forced to sum to `chi`.
+
+**This project's `critical_points()` runs on an OPEN patch** - one
+surface (Upper or Lower), further cropped by `span_min`/`span_max`, not
+a closed surface - so there is no reason `N + F - S` should come out to
+`2` here, and it usually won't (this project's own case: `N=10, F=14,
+S=10`, `index = 14`). `show_critical_points_index=True` on
+`friction_lines()` (or calling `poincare_index()` directly) reports the
+number as a text box on the figure regardless, annotated `"(closed-
+surface value)"` only in the special case it happens to equal 2 - it's a
+genuine diagnostic (e.g. a useful self-consistency check across a
+resolution change - if the SAME underlying flow gives a wildly different
+index at a different `n_span_bins`/`n_chord_bins`, that's a sign the grid
+is under-resolving something, not that the flow changed), not a
+pass/fail test on this kind of open selection.
+
+```python
+crit_points = fl.critical_points(surface='Upper', frame=None, span_min=0.02)
+fl.poincare_index(crit_points)  # -> 14 on this project's own case
+
+fl.friction_lines(surface='Upper', frame=None, span_min=0.02,
+                   show_critical_points=True, show_critical_points_index=True,
+                   savepath='friction_lines_crit_index.png')
+```
+
+This is a real but approximate, resolution- and noise-sensitive tool -
+treat results as candidates to inspect against `friction_lines()`'s own
+quiver pattern, not as ground truth by themselves.
+
+**Validated** against this project's own case: 34 critical points found
+(`{'node': 10, 'saddle': 10, 'focus': 14}`), all sitting in the same
+low-Cf (dark blue) region near the tip (span~0.06-0.125) where the
+quiver pattern visibly converges/diverges/spirals - the same region
+`separation_line()` and `migration_line()` independently flagged as
+structurally interesting, three different methods agreeing on where the
+3D activity is (`friction_lines_test_critical_points.png`).
+
+`friction_lines()` gained matching `show_migration_line`/
+`migration_line_kwargs` and `show_critical_points`/
+`critical_points_kwargs` toggles, same pattern as
+`show_separation_line`/`separation_line_kwargs` - any combination can be
+shown together (up to the user; more than one overlay at once gets busy).
 
 ## Any surface variable at radii: `bladeprocessor/SurfaceVariable`
 
