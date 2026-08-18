@@ -5,6 +5,7 @@ from bladeprocessor.blades_postproc import BladePostProcessor
 from bladeprocessor.surface_field import SurfaceField, SurfaceFieldComparator
 from bladeprocessor.friction_lines import FrictionLines
 from bladeprocessor.surface_variable import SurfaceVariable
+from bladeprocessor.strip_forces import StripForces
 
 # ------------- Convertors ------------- #
 
@@ -101,6 +102,19 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 #    surface='Upper', frame=0, component='chordwise', span_min=0.02, reverse_chord=True,
 #    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/cf_radii_chordwise_frame0.png',
+#)
+
+# Cf unsteadiness (RMS fluctuation about the mean - see README.md, "Cf
+# unsteadiness"): flags transition/wandering separation lines/moving
+# vortex cores that the mean Cf field alone can miss.
+#fl.plot_cf_radii(
+#    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+#    surface='Upper', frame=None, stat='rms', span_min=0.02, reverse_chord=True,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/cf_rms_radii_avg.png',
+#)
+#fl.friction_lines(
+#    surface='Upper', frame=None, stat='rms', span_min=0.02,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/cf_rms_map.png',
 #)
 
 # Friction lines (Upper+Lower stacked by default) - span_min isolates one
@@ -263,3 +277,103 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #    ylabel='PSD [Pa$^2$/Hz]', dt=0.000056,
 #    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/spectra/p_periodogram_80_90.png',
 #)
+
+# ------------- Strip forces (Hanson's method input) ------------- #
+#
+# Per-radial-strip, time-resolved axial/radial/tangential force, computed
+# directly from a SNCReader.to_h5() file - replaces the manual PowerVIZ
+# "Force Graph" CSV export (ForcesCSVConverter above). span_min isolates
+# one blade (see README.md, "Strip forces" - same reason as everywhere
+# else in this project). Check flip_axial/flip_tangential against what
+# you expect physically before trusting the sign.
+
+#sf = StripForces(
+#    '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/forces/forces_rotor.h5',
+#    r_tip=0.125,
+#)
+
+#result = sf.compute(span_min=0.02, n_span_bins=20)
+#sf.save(result, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/forces/strip_forces.h5', dt=0.000056)
+
+#sf.plot_bar_forces(
+#    result, show_totals=True,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_forces_bar.png',
+#)
+
+# Chordwise-subdivided (non-compact-chord case - see README.md):
+#result_2d = sf.compute(span_min=0.02, n_span_bins=20, n_chord_bins=5)
+#sf.save(result_2d, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/forces/strip_forces_2d.h5', dt=0.000056)
+
+# Integrated totals (thrust/torque/radial/tangential force, independent of
+# strip binning - see README.md, "Integrated totals"). result['totals']
+# is guaranteed consistent with the span_min/span_max compute() above
+# used; total_loads() is the same thing as a standalone call:
+#print('thrust [N]:', result['totals']['thrust'].mean())
+#print('torque [N.m]:', result['totals']['torque'].mean())
+#totals = sf.total_loads(span_min=0.02)  # standalone, no strip binning needed
+
+# Thrust/torque coefficients (propeller convention, C_F = F/(rho*n_rot^2*D^4),
+# C_Q = Q/(rho*n_rot^2*D^5) - see README.md, "Thrust/torque coefficients").
+# n_rot is rev/s, NOT RPM:
+#sf.plot_bar_forces(
+#    result, show_totals=True, rho=1.22523, n_rot=6000 / 60, diameter=0.25,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_forces_bar_coeffs.png',
+#)
+
+# Physical radius instead of r/R on the x-axis:
+#sf.plot_bar_forces(
+#    result, show_totals=True, normalize_radius=False,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_forces_bar_radius.png',
+#)
+
+# ------------- Time domain / phase-locked / harmonics (Hanson's method) ------------- #
+#
+# Only meaningful on an "inst" (multi-frame/transient) file - see
+# README.md, "Average vs. instantaneous cases". Needs rpm (set on
+# StripForces itself, not compute()) for phase_lock()/harmonics().
+
+#sf_inst = StripForces(
+#    '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/forces/forces_rotor_transient.h5',
+#    r_tip=0.125, rpm=6000,
+#)
+#result_inst = sf_inst.compute(span_min=0.02, n_span_bins=20)
+
+# Raw per-strip time trace (see README.md, "Time trace"):
+#sf_inst.plot_time_trace(
+#    result_inst, dt=0.000056, component='axial', strips=[0, 4, 9, 14, 19],
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_time_trace.png',
+#)
+
+# Phase-locked (revolution-folded) force vs azimuth (see README.md,
+# "Phase-locked (revolution-folded) forces"):
+#phase_locked = sf_inst.phase_lock(result_inst, dt=0.000056, n_azimuth_bins=72)
+#sf_inst.plot_vs_angle(
+#    phase_locked, component='axial', strips=[0, 4, 9, 14, 19],
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_vs_angle.png',
+#)
+
+# Harmonics of the rotation frequency - Hanson's method's actual |F_n(r)|
+# input (see README.md, "Harmonics (Hanson's method's actual input)"):
+#h = sf_inst.harmonics(result_inst, dt=0.000056, component='axial', n_harmonics=17)
+#sf_inst.plot_harmonics(
+#    h, strips=[0, 4, 9, 14, 19],
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_harmonics.png',
+#)
+
+# With phase (needed before actually handing this to Hanson's model, or
+# to check a harmonic's peak azimuth against a known physical cause -
+# see README.md, "Phase"):
+#h_phase = sf_inst.harmonics(result_inst, dt=0.000056, component='axial', n_harmonics=17, return_phase=True)
+#sf_inst.plot_harmonics(
+#    h_phase, strips=[0, 4, 9, 14, 19], show_phase=True,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_harmonics_phase.png',
+#)
+#peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
+
+# Reconstruction check against phase_lock()'s own empirical curve:
+#phase_locked = sf_inst.phase_lock(result_inst, dt=0.000056, n_azimuth_bins=72)
+#az, recon = sf_inst.reconstruct_from_harmonics(h_phase, azimuth_deg=phase_locked['azimuth_deg'])
+
+# Hanson-model-ready output file (radius/chord/harmonic/magnitude/phase,
+# self-contained, no need for this class or the .snc-derived file again):
+#sf_inst.save_harmonics(h_phase, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/forces/strip_harmonics.h5')

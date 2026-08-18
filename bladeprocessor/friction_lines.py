@@ -8,7 +8,8 @@ plt.rcParams.update({
     "font.serif": ["Computer Modern"],
     "axes.labelsize": 18,
     "xtick.labelsize": 16,
-    "ytick.labelsize": 16
+    "ytick.labelsize": 16,
+    "legend.fontsize": 18
 })
 
 
@@ -225,7 +226,48 @@ class FrictionLines:
 
         return F - f_normal[:, None] * normals
 
-    def cf(self, surface: str = 'Upper', frame: int = None, component: str = None):
+    def _wall_shear_all_frames(self, surface: str):
+
+        '''
+        Wall shear vector at EVERY frame, unreduced - shape
+        (n_frames, n_points, 3). Only used internally by cf()'s
+        stat='rms'/'raw_rms' path (see cf()'s docstring for why this
+        can't just reduce wall_shear()'s own mean-force-vector result:
+        tau = F - (F.n)n is linear in F, so mean(tau) == tau(mean(F))
+        exactly - that's why wall_shear(frame=None)'s existing mean
+        behavior needed no change - but Cf's MAGNITUDE (or a signed
+        component) is a nonlinear function of tau, so its RMS has to be
+        computed from the actual per-frame Cf values, not backed out of
+        a pre-reduced tau).
+        '''
+
+        F = self.surfaces[surface]['force']  # (n_frames, n_points, 3)
+        normals = self.surfaces[surface]['normals']  # (n_points, 3)
+        f_normal = np.einsum('fpc,pc->fp', F, normals)
+
+        return F - f_normal[..., None] * normals[None, :, :]
+
+    def _cf_value(self, tau, component: str):
+
+        '''
+        Magnitude or signed component of a wall-shear array, working on
+        either a single frame's tau (n_points, 3) or every frame's
+        (n_frames, n_points, 3) - always the array's LAST axis is the
+        (x, y, z) one, so this indexes/reduces on axis=-1 rather than a
+        hardcoded axis=1. Shared by cf()'s frame/mean/rms paths so the
+        magnitude-vs-component logic isn't duplicated three times.
+        '''
+
+        if component is None:
+            return np.linalg.norm(tau, axis=-1)
+        elif component == 'chordwise':
+            return tau[..., self.chord_axis]
+        elif component == 'spanwise':
+            return tau[..., self.span_axis]
+        else:
+            raise ValueError(f"Unknown component '{component}' - use None, 'chordwise', or 'spanwise'.")
+
+    def cf(self, surface: str = 'Upper', frame: int = None, component: str = None, stat: str = 'mean'):
 
         '''
         Skin friction coefficient at every surfel, Cf = tau / q_ref, with
@@ -246,6 +288,29 @@ class FrictionLines:
             'spanwise': signed tau[span_axis] / q_ref - crosses zero where
             near-wall flow reverses along the span (e.g. centrifugal
             pumping vs. inward migration).
+        stat : 'mean', 'rms', or 'raw_rms'
+            Only used when frame is None - same convention as
+            SurfaceVariable.variable(). 'mean' (default): time-average.
+            'rms': fluctuation RMS about the mean - the CONVENTIONAL
+            "how unsteady is this" statistic (e.g. flags transition,
+            an unsteady separation/reattachment line whose position
+            wanders in time, or a vortex core - see one of
+            critical_points()'s 'focus' points - that moves around
+            rather than sitting still; none of which necessarily show up
+            in the MEAN Cf field at all). 'raw_rms': sqrt(mean(Cf^2)),
+            includes any nonzero mean - rarely what you want, provided
+            for completeness (see SurfaceVariable.variable()'s docstring
+            for the same distinction).
+
+            Computed on the SCALAR Cf itself (magnitude or the requested
+            signed component) frame by frame, THEN reduced - NOT by
+            reducing the wall-shear VECTOR first and taking its
+            magnitude/component afterward. Those differ: extracting a
+            magnitude (or a single component) is a nonlinear operation,
+            so RMS(|tau|) != |RMS(tau)| in general (unlike the mean,
+            which commutes with the linear tau = F - (F.n)n projection -
+            that's why wall_shear(frame=None)'s plain mean needed no
+            change to support this).
 
         Returns
         -------
@@ -255,22 +320,28 @@ class FrictionLines:
         if self.rho_ref is None or self.rpm is None:
             raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cf.")
 
-        tau = self.wall_shear(surface=surface, frame=frame)
         q_ref = self._q_ref(surface)
 
-        if component is None:
-            value = np.linalg.norm(tau, axis=1)
-        elif component == 'chordwise':
-            value = tau[:, self.chord_axis]
-        elif component == 'spanwise':
-            value = tau[:, self.span_axis]
-        else:
-            raise ValueError(f"Unknown component '{component}' - use None, 'chordwise', or 'spanwise'.")
+        if frame is not None:
+            tau = self.wall_shear(surface=surface, frame=frame)
+            return self._cf_value(tau, component) / q_ref
 
-        return value / q_ref
+        if stat == 'mean':
+            tau = self.wall_shear(surface=surface, frame=None)
+            return self._cf_value(tau, component) / q_ref
+
+        tau_all = self._wall_shear_all_frames(surface)  # (n_frames, n_points, 3)
+        cf_all = self._cf_value(tau_all, component) / q_ref[None, :]  # (n_frames, n_points)
+
+        if stat == 'rms':
+            return np.sqrt(((cf_all - cf_all.mean(axis=0)) ** 2).mean(axis=0))
+        elif stat == 'raw_rms':
+            return np.sqrt((cf_all ** 2).mean(axis=0))
+        else:
+            raise ValueError(f"Unknown stat '{stat}' - use 'mean', 'rms', or 'raw_rms'.")
 
     def cf_at_radii(self, radii, surface: str = 'Upper', frame: int = None, component: str = None,
-                     tol: float = 0.0015, n_chord_bins: int = 150, span_min: float = None,
+                     stat: str = 'mean', tol: float = 0.0015, n_chord_bins: int = 150, span_min: float = None,
                      span_max: float = None, reverse_chord: bool = False):
 
         '''
@@ -302,6 +373,11 @@ class FrictionLines:
         radii : array-like of float
             Target physical radii [m] (from the rotation axis - see
             _radius()).
+        stat : 'mean', 'rms', or 'raw_rms'
+            Only used when frame is None - forwarded to cf() (see that
+            method's docstring - 'rms' is the actual "Cf unsteadiness"
+            statistic, computed on the scalar Cf itself, not backed out
+            of a reduced wall-shear vector).
         tol : float
             Half-width [m] of the radius band selected around each target.
         n_chord_bins : int or None
@@ -352,7 +428,7 @@ class FrictionLines:
 
         r = self._radius(surface)
         span, chord = self._span_chord(surface)
-        cf = self.cf(surface=surface, frame=frame, component=component)
+        cf = self.cf(surface=surface, frame=frame, component=component, stat=stat)
 
         span_mask = np.ones(len(span), dtype=bool)
         if span_min is not None:
@@ -400,7 +476,7 @@ class FrictionLines:
         return curves
 
     def plot_cf_radii(self, radii, surface: str = 'Upper', frame: int = None, component: str = None,
-                       tol: float = 0.0015, n_chord_bins: int = 150, span_min: float = None,
+                       stat: str = 'mean', tol: float = 0.0015, n_chord_bins: int = 150, span_min: float = None,
                        span_max: float = None, reverse_chord: bool = False, cmap: str = 'cividis',
                        ax=None, savepath: str = None, dpi: int = 150):
 
@@ -413,6 +489,14 @@ class FrictionLines:
         the two-blade artifact this avoids), and why reverse_chord matters
         (x/c has no inherent LE/TE orientation - check per case; Cf should
         peak near the leading edge, x/c=0 by default here).
+
+        stat : 'mean', 'rms', or 'raw_rms'
+            Only used when frame is None - forwarded to cf_at_radii()/
+            cf() (see cf()'s docstring - 'rms' is the Cf unsteadiness
+            statistic: transition, a wandering separation/reattachment
+            line, or a moving vortex core can all show up here even when
+            the MEAN Cf field looks unremarkable). The y-label switches
+            to $C_{f,rms}$/$C_{f,raw\\_rms}$ accordingly.
 
         Plotted as a line by default (n_chord_bins set): cf_at_radii()'s
         per-bin averaging already turns the raw, noisy surfel cloud into a
@@ -433,7 +517,7 @@ class FrictionLines:
         (fig, ax)
         '''
 
-        curves = self.cf_at_radii(radii, surface=surface, frame=frame, component=component, tol=tol,
+        curves = self.cf_at_radii(radii, surface=surface, frame=frame, component=component, stat=stat, tol=tol,
                                    n_chord_bins=n_chord_bins, span_min=span_min, span_max=span_max,
                                    reverse_chord=reverse_chord)
 
@@ -453,7 +537,16 @@ class FrictionLines:
         if component is not None:
             ax.axhline(0, color='k', linewidth=0.8, zorder=0)
 
-        cf_label = {None: r'$C_f$', 'chordwise': r'$C_{f,c}$', 'spanwise': r'$C_{f,s}$'}[component]
+        subscripts = []
+        if component == 'chordwise':
+            subscripts.append('c')
+        elif component == 'spanwise':
+            subscripts.append('s')
+        if stat == 'rms':
+            subscripts.append('rms')
+        elif stat == 'raw_rms':
+            subscripts.append(r'raw\_rms')
+        cf_label = f"$C_{{f,{','.join(subscripts)}}}$" if subscripts else r'$C_f$'
 
         ax.set_xlabel(r'$x/c$ [-]')
         ax.set_ylabel(f'{cf_label} [-]')
@@ -1272,10 +1365,10 @@ class FrictionLines:
         ax.text(0.02, 0.02, f'$N+F-S = {index}${note}', transform=ax.transAxes, fontsize=11,
                 va='bottom', ha='left', bbox=dict(facecolor='white', edgecolor='black', alpha=0.85))
 
-    def friction_lines(self, surface=('Upper', 'Lower'), frame: int = None, span_min: float = None,
-                        span_max: float = None, cf_clip_percentile: float = 99, n_arrows: int = 2000,
-                        marker_size: float = 1, cmap: str = 'cividis', cbar_label: str = r'$C_f$ [-]',
-                        show_separation_line: bool = False, separation_line_kwargs: dict = None,
+    def friction_lines(self, surface=('Upper', 'Lower'), frame: int = None, stat: str = 'mean',
+                        span_min: float = None, span_max: float = None, cf_clip_percentile: float = 99,
+                        n_arrows: int = 2000, marker_size: float = 1, cmap: str = 'cividis',
+                        cbar_label: str = None, show_separation_line: bool = False, separation_line_kwargs: dict = None,
                         show_migration_line: bool = False, migration_line_kwargs: dict = None,
                         show_critical_points: bool = False, critical_points_kwargs: dict = None,
                         show_critical_points_index: bool = False,
@@ -1300,6 +1393,17 @@ class FrictionLines:
         surface : str or tuple of str
             'Upper', 'Lower', or a tuple of both (default) for a stacked
             two-row figure sharing the span (x) axis.
+        stat : 'mean', 'rms', or 'raw_rms'
+            Only used when frame is None - forwarded to cf() for the
+            COLOR field (Cf magnitude) only, see cf()'s docstring ('rms'
+            is the Cf unsteadiness statistic - transition, a wandering
+            separation/reattachment line, or a moving vortex core can
+            show up here even where the mean field looks unremarkable).
+            The direction QUIVER always uses the MEAN chordwise/spanwise
+            direction regardless of this setting - an "RMS direction"
+            isn't a meaningful vector (magnitude-only statistics don't
+            have a sign to point), so the arrows stay a mean-flow
+            reference frame no matter what's being colored.
         span_min, span_max : float, optional
             Keep only points with span_min <= span <= span_max (centered
             Cartesian span - see _span_chord()). Use this to cut away the
@@ -1362,15 +1466,20 @@ class FrictionLines:
         if figsize is None:
             figsize = (14, 4.5 * len(surfaces))
 
+        if cbar_label is None:
+            cbar_label = {'mean': r'$C_f$ [-]', 'rms': r'$C_{f,rms}$ [-]',
+                          'raw_rms': r'$C_{f,raw\_rms}$ [-]'}[stat]
+
         fig, axes = plt.subplots(len(surfaces), 1, figsize=figsize, sharex=True, squeeze=False)
         axes = axes[:, 0]
 
         for ax, surf in zip(axes, surfaces):
 
             span, chord = self._span_chord(surf)
-            cf_mag = self.cf(surface=surf, frame=frame, component=None)
-            tau_chord = self.cf(surface=surf, frame=frame, component='chordwise')
-            tau_span = self.cf(surface=surf, frame=frame, component='spanwise')
+            cf_mag = self.cf(surface=surf, frame=frame, component=None, stat=stat)
+            # quiver direction always uses the MEAN flow, regardless of stat - see docstring
+            tau_chord = self.cf(surface=surf, frame=frame, component='chordwise', stat='mean')
+            tau_span = self.cf(surface=surf, frame=frame, component='spanwise', stat='mean')
 
             mask = np.ones(len(span), dtype=bool)
             if span_min is not None:

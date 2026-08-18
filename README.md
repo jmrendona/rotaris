@@ -443,77 +443,86 @@ noisy points, which reads as a dense cloud rather than a curve once
 plotted. The point of `n_chord_bins` is turning that cloud into the
 single readable curve per radius that `plot_cf_radii()` draws.
 
-**Two bugs found and fixed in `cf_at_radii()`/`plot_cf_radii()`** (this
-project's own `2f_SMF_forces_rotor.snc` case, a 2-bladed rotor with both
-blades lumped into a single `/Rotor::Default-Segment` face):
+If all the geometry is lumped into a single `/Rotor::Default-Segment` face,
+and therefore each blade contribution can not be separated, the option
+`span_min`/`span_max` needs to be activated so a radius band picks up
+only the desired blade. Otherwise, both blades surfels will be used at
+once generating a spurious extra peak at both x/c=0 and x/c=1 instead of 
+one, near the real leading edge (stacking the two blades results together).
+It is the same option as  `span_min`/`span_max` cropping `friction_lines()` 
+has implemented.
 
-1. **Two-blade chord mixing.** `cf_at_radii()` originally had no
-   `span_min`/`span_max` (unlike `friction_lines()`), so a radius band
-   picked up both blades' surfels at once (span runs symmetrically from
-   -0.125 to +0.125 m here, radius ~= `|span|`, so `r_target` matches
-   both `span=+r_target` and `span=-r_target`) - normalizing x/c against
-   their COMBINED chord range produced a spurious extra peak at both
-   x/c=0 AND x/c=1 instead of once, near the real leading edge (see
-   `friction_lines_test_cf_mag_avg.png`'s before/after - confirmed
-   against `images/cf/skin-friction_radii_plot.png`, a trusted reference
-   with a single clean peak). Fixed by adding the same `span_min`/
-   `span_max` cropping `friction_lines()` already had; this case needed
-   `span_min=0.02` to clear its hub-region point cluster (found via a
-   histogram of `_span_chord()`'s span - no reliable automatic value,
-   check per case).
-2. **Flipped LE/TE orientation.** Even after fixing (1), the peak showed
-   up at x/c=1 instead of x/c=0 - the same orientation ambiguity already
-   documented for Cp (`SurfaceVariable.at_radii()`'s `reverse_chord`):
-   x/c=0 is arbitrarily assigned to whichever raw chord extreme happens
-   to be the minimum value, with no inherent LE/TE meaning. Added the
-   same `reverse_chord` parameter here; this case needed
-   `reverse_chord=True` to match the trusted reference (Cf peaking
-   sharply near x/c=0, decaying toward x/c=1).
+Similarly, as the `span_min`/`span_max` divides the geometry, it can happen that
+the band crosses the blades TE before passing the LE, thus generating an
+inverse in the peak location. Therefore, the option `reverse_chord` parameter
+is added here. A similar ambiguity is also documented for Cp plots.
 
-`plot_cf_radii()` also now defaults to `cividis` (not `viridis`) and
-draws a grid, matching `SurfaceVariable`'s radius-colored plots.
-`friction_lines()`'s default colormap was switched to `cividis` too, for
-the same consistency.
+### Cf unsteadiness: `cf(stat=...)` / `cf_at_radii()`/`plot_cf_radii(stat=...)` / `friction_lines(stat=...)`
+
+`stat='rms'` (also `'raw_rms'`) on `cf()` - and forwarded from
+`cf_at_radii()`/`plot_cf_radii()`/`friction_lines()` - gives the actual
+"how unsteady is this" statistic: the RMS fluctuation of Cf about its
+mean, at every surfel. This flags things the MEAN Cf field alone can
+miss entirely - transition, an unsteady separation/reattachment line
+whose position wanders in time rather than sitting still, or a vortex
+core (see `critical_points()`'s `'focus'` points) that moves around.
+
+Computed on the SCALAR Cf itself (magnitude or a signed component),
+frame by frame, THEN reduced - not by reducing the wall-shear VECTOR
+first and taking its magnitude/component afterward. Those differ:
+extracting a magnitude/component is a nonlinear operation, so
+`RMS(|tau|) != |RMS(tau)|` in general - unlike the MEAN, which commutes
+with the linear `tau = F - (F.n)n` projection (that's why
+`wall_shear(frame=None)`'s existing mean behavior needed no change to
+support this).
+
+```python
+cf_rms = fl.cf(surface='Upper', frame=None, component=None, stat='rms')
+
+fl.plot_cf_radii([0.045, 0.072, 0.1], surface='Upper', stat='rms', span_min=0.02,
+                  reverse_chord=True, savepath='cf_rms_radii.png')
+
+# spatial map - the quiver direction always stays MEAN flow regardless of
+# stat (an "RMS direction" isn't a meaningful vector):
+fl.friction_lines(surface='Upper', stat='rms', span_min=0.02, savepath='cf_rms_map.png')
+```
+
+**Validated** against a synthetic case with a known analytic answer (a
+uniform oscillating chordwise force, `A + B*cos(2*pi*f*t)` with `A > B`
+so magnitude and the chordwise component are identical throughout, no
+sign flip): both `component=None` and `component='chordwise'` recovered
+`Cf_rms = (B/sqrt(2)) / q_ref(r)` to within floating-point precision
+(~1e-15 relative error) at every point; the mean matched `A / q_ref(r)`
+exactly too; the existing `frame=<int>` (instantaneous) path was
+unaffected (checked against its pre-change values) - the whole `stat`
+addition is a pure extension, not a behavior change to what already
+worked.
 
 ### Separation/reattachment line: `separation_line()` / `plot_separation_line()` / `save_separation_line()`
 
-Every span location where chordwise Cf (`tau[chord_axis] / q_ref`)
-crosses zero - the near-wall flow reversal signature the signed `cf()`
-component was already meant to reveal (see "Equations" above: magnitude
-can only dip toward zero, the signed component actually crosses it).
-Restricted to ONE blade section via `span_min`/`span_max`, same reason as
-`cf_at_radii()`/`friction_lines()` - a multi-blade file's span axis mixes
-chord ranges across blades otherwise, corrupting the x/c each crossing's
-chord position is measured against.
+It is based on every span location where chordwise Cf (`tau[chord_axis] / q_ref`)
+crosses zero. Restricted to ONE blade section via `span_min`/`span_max`, same reason as
+`cf_at_radii()`/`friction_lines()`.
 
-Method: partitions the (cropped) span range into `n_span_bins` bins
-(default 200 - dense, since this traces a continuous line, not a
-handful of spot-check stations like `cf_at_radii()`); within each,
-chordwise Cf is averaged into `n_chord_bins` x/c bins (default 200)
+**Method:** partitioning the (cropped) span range into `n_span_bins` bins
+(default 200). Within each, chordwise Cf is averaged into `n_chord_bins` x/c bins (default 200)
 using the SAME per-band, percentile-normalized x/c convention as
-`cf_at_radii()` (pass the same `reverse_chord` you use there/in
-`plot_cf_radii()`, or the two disagree on which end is the leading
-edge); adjacent bins with a sign change are linearly interpolated to
+`cf_at_radii()` (pass the same `reverse_chord` used in
+`plot_cf_radii()`, or it might disagree on which end is the leading
+edge). Adjacent bins with a sign change are linearly interpolated to
 localize each crossing. A span bin can produce zero, one, or several
-crossings (e.g. a bubble followed by another further aft); all are kept.
+crossings; all are kept.
 
-**Labeling is NOT based on the raw sign of Cf.** Which physical direction
-counts as "positive" chordwise Cf depends on how this mesh's
-`chord_axis` happens to be oriented in the `.snc` file - an arbitrary
-modeling choice, not a physical convention - so a fixed "+ to - means
-separation" rule is only right for one of the two possible axis
-orientations, and silently wrong (reattachment appearing to precede its
-own separation, which isn't physically possible) for the other. This is
-exactly what showed up in an earlier version of
-`friction_lines_test_separation_overlay.png`. Instead, crossings within
-each span bin are labeled purely by ORDER along x/c: the 1st, 3rd, 5th,
+**Labeling is NOT based on the raw sign of Cf.** Which physical position
+counts as separation and reattachment is defined by an ordering method. The crossings within
+each span bin are labeled purely by order along x/c: the 1st, 3rd, 5th,
 ... is `'separation'` (entering a reversed-flow region), the 2nd, 4th,
-6th, ... is `'reattachment'` (leaving it) - always alternating, always
+6th, ... is `'reattachment'` (leaving it) always alternating, always
 paired, regardless of which raw sign happens to mean "attached" on this
 mesh. Each matched pair shares a `pair_id` (a bin with an odd number of
 crossings leaves one unpaired, `pair_id=-1` - the region it opened
 extends past the resolved x/c range rather than closing within it, e.g.
-all the way to the trailing edge - a real open region, not a bug).
+all the way to the trailing edge).
 
 ```python
 points = fl.separation_line(surface='Upper', frame=None, span_min=0.02, reverse_chord=True)
@@ -532,50 +541,31 @@ fl.plot_separation_line(ax, points)
 `plot_separation_line()` draws large, black-edged, high-contrast markers
 (separation in red, reattachment in cyan), sized to stay visible against
 `friction_lines()`'s dense background scatter. `connect_pairs=True`
-optionally draws a line between each matched pair marking the reversed-
-flow region's chordwise extent at that span station - off by default,
+optionally draws a line between each matched pair marking the reversed
+flow region's chordwise extent at that span station. This option is off by default,
 since on a dense case the connecting lines packed side by side read as a
-solid black wall rather than individually legible segments (checked
-visually against this project's own case, `friction_lines_test_separation_overlay.png` -
-markers alone read cleanly, connected version didn't).
-
-**Validated** against this project's own case (`span_min=0.02,
-reverse_chord=True`, matching the values `plot_cf_radii()` needed - see
-above): 107 crossings found at the default (higher) resolution, all
-correctly alternating separation/reattachment by construction (order-
-based labeling can't produce a reattachment before its separation,
-unlike the earlier sign-based version) - clustered near the root
-(span~0.02-0.028, just past the hub cutoff) and the tip
-(span~0.108-0.123), almost none mid-span - consistent with
-`friction_lines_test_cf_chordwise_avg.png`, where chordwise Cf stays
-negative across nearly all of mid-span at every sampled radius and only
-gets close to zero near the edges; root/tip 3D effects (hub
-interference, tip vortex) producing more flow reversal than a cleaner
-mid-span region is also physically expected.
+solid black wall rather than individually legible segments.
 
 ### Spanwise migration-reversal line: `migration_line()` / `plot_migration_line()` / `save_migration_line()`
 
 Every location where SPANWISE Cf (`tau[span_axis] / q_ref`) crosses zero
-- where near-wall flow switches between migrating toward the tip
+showing where near-wall flow switches between migrating toward the tip
 ("outward", e.g. classic centrifugal pumping in a rotating boundary
-layer) and migrating toward the root ("inward"). This is a DIFFERENT
-physical phenomenon from separation/reattachment (that's the chordwise
-component reversing along the chord; this is the spanwise component
-reversing along the span), kept as its own method rather than a mode on
-`separation_line()`. Same per-span-band binning architecture and
-`span_min`/`span_max`/`reverse_chord` requirements as `separation_line()`.
+layer) and migrating toward the root ("inward"). This is a different
+physical phenomenon from separation/reattachment. Same per-span-band binning architecture and
+`span_min`/`span_max`/`reverse_chord` requirements as `separation_line()`. An independent method called `migration_line()` is implemented for this case.
 
 **Labeling is physically grounded, unlike `separation_line()`'s.**
 Chordwise Cf's sign has no fixed physical meaning (it depends on this
 mesh's arbitrary `chord_axis` orientation - see `reverse_chord` above),
 but spanwise Cf's sign can be: span is used as-is, the raw absolute
 Cartesian coordinate, and `span_min`/`span_max` already isolates one
-blade running from the hub outward - so on that selected half, increasing
+blade running from the hub outward. So on that selected half, increasing
 span consistently means "toward the tip". A crossing from positive to
 negative spanwise Cf is labeled `'inward'`; negative to positive is
-`'outward'` - unless this mesh's span_axis happens to point the opposite
+`'outward'` unless this mesh's span_axis happens to point the opposite
 way on whichever half was cropped, in which case `flip_direction=True`
-swaps the meaning (no way to detect this automatically - check per case).
+swaps the meaning.
 
 ```python
 points = fl.migration_line(surface='Upper', frame=None, span_min=0.02, reverse_chord=True)
@@ -585,67 +575,28 @@ fl.friction_lines(surface='Upper', frame=None, span_min=0.02, show_migration_lin
                    migration_line_kwargs={'reverse_chord': True}, savepath='friction_lines_mig.png')
 ```
 
-**A real debugging story worth recording** (found while validating this
-tool on this project's own case): a first, unfiltered version showed a
-dense band of rapidly-alternating `'outward'`/`'inward'` crossings
-running right along the leading edge - not a real migration boundary.
-Right at the LE, near-wall flow is nearly pure chordwise, so spanwise Cf
-sits close to zero AND swings hard over a very short x/c distance there,
-flipping sign from bin to bin for no meaningful reason. Two amplitude-
-based filter attempts to suppress this both backfired:
-1. Requiring both bracketing chord bins' `|Cf|` to exceed a fraction of
-   that SPAN BIN'S OWN curve max - a large unrelated LE excursion in one
-   bin inflated its own threshold enough to asymmetrically kill the
-   smaller-magnitude half of an otherwise genuine pair elsewhere in that
-   same bin, silently producing one-sided output (confirmed: 68
-   crossings, ALL `'inward'`, zero `'outward'`).
-2. Requiring it relative to ONE global scale (90th percentile of `|Cf|`
-   over the whole case) instead - the LE's own large gradient dominated
-   that global scale too, so the filter ended up keeping only the single
-   largest (LE-adjacent) crossing per bin and discarding the genuine
-   mid-chord/tip-region signal entirely (confirmed: every surviving
-   crossing sat at `xc < 0.007`).
-
-The fix that actually worked: `edge_crop` (same idea as
-`SurfaceVariable.at_radii()`'s parameter of the same name) excludes
-crossings by POSITION (within `edge_crop` of x/c=0 or x/c=1) rather than
-by amplitude - sidesteps both failure modes, since it no longer matters
-how large the LE's own Cf swing is. **Final validated result**
-(`edge_crop=0.05`, the default): 313 crossings, `{'outward': 187,
-'inward': 126}`, spanning `xc` 0.05-0.95 (no longer stuck at the LE) and
-span 0.079-0.125, 0 alternation violations (verified: within any span
-bin, consecutive crossings never repeat the same kind, as a continuous
-signal crossing zero repeatedly must). The rendered overlay
-(`friction_lines_test_migration_overlay.png`) shows a physically
-coherent picture: a mixed outward/inward cluster near the tip
-(span~0.105-0.125, overlapping where `separation_line()`/
-`critical_points()` also find structure) plus a smooth, single-kind
-(`'outward'`) line further inboard (span~0.08-0.105) - too consistent
-along span to be noise, likely a real recovery boundary.
-
 ### Vortex-footprint critical points: `critical_points()` / `plot_critical_points()` / `save_critical_points()`
 
-Locations where the ENTIRE wall-shear vector (chordwise Cf, spanwise Cf)
-vanishes simultaneously - not just one component's zero crossing.
+Locations where the complete wall-shear vector (chordwise Cf, spanwise Cf)
+vanishes simultaneously.
 Per Lighthill's theorem (see Tobak & Peake, 1982, "Topology of
 Three-Dimensional Separated Flows"), any point a real 3D flow's surface
-streamlines converge to, diverge from, or spiral around MUST be a point
-of zero skin friction - so genuine 3D structures, including vortex
+streamlines converge to, diverge from, or spiral around must be a point
+of zero skin friction, so genuine 3D structures, including vortex
 footprints specifically, can be located this way.
 
 Unlike `separation_line()`/`migration_line()` (which bin per span band
-using a LOCALLY renormalized x/c), this bins the raw surfel cloud onto a
-genuine 2D grid in ABSOLUTE physical `(span, chord)` coordinates [m] - a
+using a locally renormalized x/c), this bins the raw surfel cloud onto a
+genuine 2D grid in absolute physical `(span, chord)` coordinates [m]. A
 real 2D neighborhood search needs a consistent coordinate system across
-neighboring cells. No `reverse_chord` parameter as a result - raw
-physical chord already has a real, consistent geometric meaning on its
-own.
+neighboring cells. No `reverse_chord` parameter as a result. Raw
+physical chord already has a real, consistent geometric meaning on its own.
 
 Method: bins the cropped selection onto an `n_span_bins x n_chord_bins`
 grid (mean chordwise/spanwise Cf and Cf magnitude per cell, cells with
 fewer than `min_count` surfels treated as unreliable); candidates are
 cells whose Cf magnitude is both in the bottom `magnitude_percentile`%
-of the grid AND a local minimum among their (reliable) neighbors; each
+of the grid and a local minimum among their neighbors; each
 candidate is classified via the local Jacobian of `(chordwise Cf,
 spanwise Cf)` w.r.t. `(chord, span)` (central finite differences), using
 its eigenvalues:
@@ -667,8 +618,7 @@ fl.friction_lines(surface='Upper', frame=None, span_min=0.02, show_critical_poin
 
 #### Theory: why eigenvalues tell you node vs. saddle vs. focus
 
-A surface streamline (a "skin-friction line" - the pattern the
-`friction_lines()` quiver traces) is an integral curve of the wall-shear
+A surface streamline is an integral curve of the wall-shear
 vector field: parametrize the curve by an arclength-like variable `t`,
 and it satisfies
 
@@ -677,16 +627,15 @@ d(chord)/dt = u(chord, span)      where  u = Cf_chordwise
 d(span)/dt  = v(chord, span)      where  v = Cf_spanwise
 ```
 
-`t` here isn't physical time - it's just how far you've walked along the
+`t` here isn't physical time, it's just how far you've walked along the
 surface following the local wall-shear direction. A critical point
 `(chord_0, span_0)` is where `u = v = 0` simultaneously: the direction
-field is undefined there (every direction is "downhill" equally), which
-is exactly why real streamlines converge to it, diverge from it, or
+field is undefined there, which is exactly why real streamlines converge to it, diverge from it, or
 spiral around it, instead of just passing through like everywhere else.
 
 Near such a point, Taylor-expand `(u, v)` to first order (the
 higher-order terms vanish fastest as you approach the point, so the
-LINEAR part determines the local picture):
+linear part determines the local picture):
 
 ```
 [u]   [du/dchord  du/dspan] [chord - chord_0]
@@ -695,7 +644,7 @@ LINEAR part determines the local picture):
 
 `J` (the 2x2 Jacobian `critical_points()` estimates by central finite
 differences on the grid) turns the messy nonlinear flow near the point
-into a simple LINEAR system, `dx/dt = J x` (relative to `x_0`) - and the
+into a simple linear system, `dx/dt = J x` (relative to `x_0`) - and the
 solutions of a linear system like this are completely characterized by
 `J`'s eigenvalues `lambda_1, lambda_2` (roots of
 `lambda^2 - tr(J) lambda + det(J) = 0`, where `tr(J)` is the trace and
@@ -709,57 +658,57 @@ solutions of a linear system like this are completely characterized by
 
 Physically:
 - A **node** is where surface flow genuinely collects (a 3D
-  reattachment point flow spreads out FROM, or an attachment point it
-  converges TO) - no rotation, just pure convergence/divergence.
+  reattachment point flow spreads out from, or an attachment point it
+  converges to). No rotation, just pure convergence/divergence.
 - A **saddle** is the generic "flow gets redirected around an obstacle"
-  point - most reattachment LINES (as opposed to points) are built from
-  chains of these; only 2 special streamlines actually reach it.
-- A **focus** is the ONLY one of the three with genuine rotation baked
+  point. Most reattachment lines (as opposed to points) are built from
+  chains of these.
+- A **focus** is the only one of the three with genuine rotation baked
   into its linearization (`b != 0`, a nonzero imaginary part) - which is
   precisely the mathematical signature of a vortex: the near-wall flow
   doesn't just converge or get deflected, it winds around the point.
-  This is why `'focus'` - not `'node'` or `'saddle'` - is the marker
+  This is why `'focus'`, not `'node'` or `'saddle'`, is the marker
   that actually means "vortex footprint" (leading-edge vortex, corner/
   horseshoe vortex, ...) rather than an ordinary separation/reattachment
   feature.
 
 This eigenvalue classification is the standard tool for this kind of
-analysis - see Tobak & Peake (1982), "Topology of Three-Dimensional
-Separated Flows", already cited above, or Poincaré's original
+analysis. See Tobak & Peake (1982), "Topology of Three-Dimensional
+Separated Flows" already cited above, or Poincaré's original
 classification of singular points of planar vector fields, which this
 is a direct application of.
 
 #### Theory: the Poincaré-Hopf check - `poincare_index()`
 
 Each critical point carries an "index": +1 for a `'node'` or a `'focus'`
-(the vector field's direction winds around the point once, in the SAME
+(the vector field's direction winds around the point once, in the same
 sense you walk around it), -1 for a `'saddle'` (winds around once in the
-OPPOSITE sense). `poincare_index(points)` sums these:
+opposite sense). `poincare_index(points)` sums these:
 
 ```
 index = N + F - S
 ```
 
 (`N`, `F`, `S` = counts of node/focus/saddle points). The **Poincaré-Hopf
-theorem** says that for a vector field on a CLOSED surface (no boundary
+theorem** says that for a vector field on a closed surface (no boundary
 - e.g. a full blade's entire skin, both surfaces and the tip cap,
 stitched into one topological sphere), this sum must equal the surface's
-Euler characteristic `chi` - `2` for anything sphere-like (genus 0), the
+Euler characteristic `chi` - `2` for anything sphere-like, the
 same `2` in `V - E + F = 2` for a polyhedron. It's a real constraint: no
 matter how complicated the surface flow pattern looks, the critical
-points occurring on a closed surface can't be arranged arbitrarily -
+points occurring on a closed surface can't be arranged arbitrarily,
 their indices are forced to sum to `chi`.
 
-**This project's `critical_points()` runs on an OPEN patch** - one
+**This project's `critical_points()` runs on an open patch**, one
 surface (Upper or Lower), further cropped by `span_min`/`span_max`, not
-a closed surface - so there is no reason `N + F - S` should come out to
+a closed surface, so there is no reason `N + F - S` should come out to
 `2` here, and it usually won't (this project's own case: `N=10, F=14,
 S=10`, `index = 14`). `show_critical_points_index=True` on
 `friction_lines()` (or calling `poincare_index()` directly) reports the
 number as a text box on the figure regardless, annotated `"(closed-
-surface value)"` only in the special case it happens to equal 2 - it's a
+surface value)"` only in the special case it happens to equal 2. It's a
 genuine diagnostic (e.g. a useful self-consistency check across a
-resolution change - if the SAME underlying flow gives a wildly different
+resolution change. If the same underlying flow gives a wildly different
 index at a different `n_span_bins`/`n_chord_bins`, that's a sign the grid
 is under-resolving something, not that the flow changed), not a
 pass/fail test on this kind of open selection.
@@ -773,23 +722,8 @@ fl.friction_lines(surface='Upper', frame=None, span_min=0.02,
                    savepath='friction_lines_crit_index.png')
 ```
 
-This is a real but approximate, resolution- and noise-sensitive tool -
-treat results as candidates to inspect against `friction_lines()`'s own
+This is a real but approximate, resolution- and noise-sensitive tool. Treat results as candidates to inspect against `friction_lines()`'s own
 quiver pattern, not as ground truth by themselves.
-
-**Validated** against this project's own case: 34 critical points found
-(`{'node': 10, 'saddle': 10, 'focus': 14}`), all sitting in the same
-low-Cf (dark blue) region near the tip (span~0.06-0.125) where the
-quiver pattern visibly converges/diverges/spirals - the same region
-`separation_line()` and `migration_line()` independently flagged as
-structurally interesting, three different methods agreeing on where the
-3D activity is (`friction_lines_test_critical_points.png`).
-
-`friction_lines()` gained matching `show_migration_line`/
-`migration_line_kwargs` and `show_critical_points`/
-`critical_points_kwargs` toggles, same pattern as
-`show_separation_line`/`separation_line_kwargs` - any combination can be
-shown together (up to the user; more than one overlay at once gets busy).
 
 ## Any surface variable at radii: `bladeprocessor/SurfaceVariable`
 
@@ -806,8 +740,7 @@ frame axis, `Metadata/lrf_axis_origin,lrf_axis_direction`):
 **Not** for wall shear/Cf itself - that needs normals and the
 `tau = F - (F.n)n` derivation, still `FrictionLines`' job. Span/chord/
 radius conventions (raw Cartesian `span_axis`/`chord_axis`, rotation-
-axis-based radius) are identical to `FrictionLines` - same caveats apply
-(assumes little blade twist).
+axis-based radius) are identical to `FrictionLines`, it assumes a little blade twist.
 
 ```python
 from bladeprocessor.surface_variable import SurfaceVariable
@@ -838,66 +771,26 @@ q_ref = 0.5 * rho_ref * (omega * r)^2
 `pref` is only needed for `stat='mean'`/instantaneous - a constant offset
 doesn't change a fluctuation's `rms`/`raw_rms`, so those work without it.
 
-**Instantaneous vs. average vs. RMS** - every method takes the same
+**Instantaneous vs. average vs. RMS:** every method takes the same
 `frame`/`stat` pair `FrictionLines` uses: `frame=<int>` for one frame
-directly (`stat` ignored - a statistic across frames isn't meaningful for
+directly (`stat` ignored as a statistic across frames isn't meaningful for
 a single one), `frame=None` (default) reduces across every frame via
 `stat` (`'mean'`, `'rms'` = fluctuation std about the mean, or
-`'raw_rms'` = `sqrt(mean(x^2))`, includes any nonzero mean - see
-`variable()`'s docstring for when you'd want which). Validated: the
-`rms`/`raw_rms` reduction formulas match `np.std`/`sqrt(mean(x^2))`
-exactly (synthetic check); only one real frame was available locally to
-validate `stat='mean'`/instantaneous against real data, so `rms` itself
-hasn't been checked against a real multi-frame case yet.
+`'raw_rms'` = `sqrt(mean(x^2))`, includes any nonzero mean.
 
-**Real bugs found and fixed while validating this against real Cp data**
-(not data issues - all in the code):
-
-- **Two-blade mixing**: a radius band on a file covering a whole
-  multi-bladed rotor picks up every blade at that radius at once: `x/c`
-  then gets normalized against the combined chord range of all of them,
-  producing a garbled curve. Same issue `FrictionLines.friction_lines()`
-  already had `span_min`/`span_max` for - `at_radii()`/`plot_at_radii()`/
-  `plot_cp_radii()` now have the same parameters, with the same caveat:
-  no reliable automatic value, pass what's right for your case's mesh
-  (e.g. `span_min=0.03` for the case this was validated against).
-- **x/c orientation**: the raw chord axis has no inherent leading/
-  trailing-edge meaning - `x/c=0` was arbitrarily assigned to the minimum
-  chord value, which came out backwards for the validated case (Kutta-
-  condition-near-zero end at `x/c=0`, sharp LE stagnation+suction-peak
-  signature at `x/c=1`). `reverse_chord=True` flips it - check per case
-  (Cp should return to ~0 approaching the trailing edge and show the
-  sharp stagnation/suction-peak feature at the leading edge; if that's at
-  `x/c=1` instead, flip it).
-- **Sign**: `plot_cp_radii()` labeled its y-axis `$-C_p$` but was
-  plotting raw `+Cp`, unnegated - a real sign bug, not a display choice
-  (fixed: `stat='mean'`/instantaneous now correctly negates; `rms`/
-  `raw_rms` don't, since those are already non-negative and negating
-  them would be wrong). **`BladePostProcessor.plot_radii()` elsewhere in
-  this project has the identical bug** - labels `$-C_p$` but never
-  negates - confirmed by reading that method directly, not fixed there
-  (different class, out of scope here) - worth knowing if comparing
-  against or reusing that tool's past output/figures.
-
-**Plot style**: points (scatter), never a connected line, even when
-`n_chord_bins` bin-averages the data (already smooth) - a line whose end
-sits wherever a crop/percentile cut it off visually reads as "the curve
-is missing" past that point; discrete points don't imply continuation.
-Default colormap `cividis` (not `viridis`), one legend entry per radius
-covering both surfaces (same color, two branches - matches this
-project's established `-Cp`-radii plot style).
+As for `FrictionLines.friction_lines()`, this tool also allows for the definition of `span_min`/`span_max` to isolate the effect of a single blade. Similarly, the `reverse_chord=True` is also available for a meaningfull plot.
 
 ### Whole-blade surface plot: `plot_variable_surface()`
 
 Generalizes `FrictionLines.friction_lines()` beyond Cf to any scalar
-field (static pressure, Cp, `y+`, ...) - same style (dense scatter, not
-interpolated onto a grid - see that method's docstring for why), one row
+field (static pressure, Cp, `y+`, ...). It has the same style (dense scatter, not
+interpolated onto a grid), one row
 per surface, colors clipped to a percentile range (two-sided here, since
 a general field like Cp can be negative, unlike Cf magnitude):
 
 ```python
 sv.plot_variable_surface(
-    lambda s: -sv.cp(surface=s, stat='mean'),  # note the negation - see "Sign" above
+    lambda s: -sv.cp(surface=s, stat='mean'),  # note the negation, see "Sign" above
     cbar_label='-Cp', span_min=0.03,
     savepath='cp_surface.png',
 )
@@ -908,21 +801,14 @@ surface velocity field), same as `friction_lines()`'s wall-shear quiver.
 
 ### Cross-case comparison: `to_common_grid()` / `field()` / `SurfaceVariableField`
 
-Resamples any per-surfel field onto a shared `(r/R, x/c)` grid - same
-purpose, convention, and two-stage algorithm (per-radius-band onto x/c,
-then across bands onto r/R) as `SurfaceField.to_common_grid()`
-(`bladeprocessor/surface_field.py`), built directly from a raw surfel
+Resamples any per-surfel field onto a shared `(r/R, x/c)` grid. Built directly from a raw surfel
 cloud instead of a pre-resampled `(Radius, Chord)` file. Only meaningful
 for cases known to share the same geometry, or ones that are properly
-scalable in both span and chord (same caveat `SurfaceField` already
-carries).
+scalable in both span and chord.
 
-Rather than reimplement comparison/delta plotting, `SurfaceVariable.field()`
-wraps a `(SurfaceVariable, get_values)` pair as a `SurfaceVariableField` -
-an object that duck-types `SurfaceField`'s interface (`to_common_grid()`,
-`physical_aspect()`, `var_name`) closely enough to drop straight into the
-existing `SurfaceFieldComparator`, **unmodified** - works interchangeably
-against another `SurfaceVariableField` or an actual `SurfaceField`:
+The option of performing comparison/delta plotting is also available by using 
+`SurfaceFieldComparator` where the plots are made together with the delta using
+the first one used as a reference case.
 
 ```python
 from bladeprocessor.surface_field import SurfaceFieldComparator
@@ -937,34 +823,19 @@ comparator.plot_cases(cbar_label='Cp', savepath='cp_comparison.png')
 comparator.plot_delta('2025', '2026', cbar_label='Cp delta', savepath='cp_delta.png')
 ```
 
-`c_ref` (unlike `SurfaceField`, which can fall back to `max(chord)` from
-its own file) must be passed explicitly - raw surfel data has no native
+`c_ref`, reference chord, (unlike `SurfaceField`, which can fall back to `max(chord)` 
+from its own file) must be passed explicitly. Raw surfel data has no native
 chord axis to infer one from, and using the same physical `c_ref` across
 every case being compared is what keeps `x/c` meaning the same thing in
 each.
 
-**Validated**: resampling a real Cp field and comparing it against
-itself (same `SurfaceVariable`, same `get_values`) through the full
-`SurfaceFieldComparator` pipeline gives exactly `0.0` delta wherever both
-sides have data, and `plot_cases()` renders both (identical) panels
-correctly - confirms the duck-typed integration works end-to-end.
-`plot_delta()` itself hit a **pre-existing bug in `SurfaceFieldComparator`**
-(`surface_field.py`, not part of this class): when a delta is exactly
-zero everywhere (only possible in a degenerate self-comparison like this
-test), `symmetric=True`'s `vmax = max(abs(delta)) = 0` makes
-`contour_levels` a repeated `0`, and matplotlib rejects non-increasing
-contour levels. Not hit by any real two-different-cases comparison, and
-not fixed here (different class) - worth knowing if a genuinely-zero
-delta ever comes up for real.
-
 ### Pressure fluctuation: `pressure_fluctuation()` / `plot_pressure_fluctuation()`
 
 `p'(frame) = p(frame) - p_mean`, where `p_mean` is the mean over every
-frame in the file - the same mean `variable(stat='rms')` uses internally
+frame in the file. It is the same mean `variable(stat='rms')` uses internally
 for `Prms = sqrt(mean(p'^2))`, so this fluctuation is consistent with
-that statistic rather than some other baseline. Dimensional [Pa], not
-normalized by `q_ref` (unlike `cp()`) - the fluctuation's own sign/shape
-is the point here, not a cross-radius comparison.
+that statistic rather than some other baseline. The results are giving in
+dimensional units [Pa], not normalized by `q_ref` (unlike `cp()`).
 
 ```python
 # one frame's fluctuation as a blade contour:
@@ -975,28 +846,23 @@ for frame in range(sv.n_frames):
     sv.plot_pressure_fluctuation(frame, span_min=0.03, savepath=f'p_fluct_frame{frame:03d}.png')
 ```
 
-`Prms` itself needs no new code - it's already `variable('static_pressure', stat='rms')`
+`Prms` itself needs no new code as it's already settle inside
+`variable('static_pressure', stat='rms')`
 (or `cp(stat='rms')` for the normalized version), usable directly with
 `plot_variable_surface()`/`plot_at_radii()`.
-
-**Validated**: on a real (single-frame) file, `pressure_fluctuation(0)`
-returns exactly `0.0` everywhere, as expected (`p(frame) == p_mean` when
-there's only one frame) - real signal will show up once compared against
-a multi-frame case.
 
 ### Point time trace + Welch periodogram: `timetrace()` / `periodogram()`
 
 Wall pressure fluctuations at a single point over time, and their
-spectrum - `timetrace()` pulls `Data/<surface>/<name>` at ONE raw surfel
-across every frame in the file; `periodogram()` wraps
+spectrum. The `timetrace()` option pulls `Data/<surface>/<name>` at one raw surfel
+across every frame in the file. The `periodogram()` wraps
 `scipy.signal.welch` on top of that. Works for any variable stored in
 the file (pressure, `y+`, forces, ...), not just pressure.
 
 The point is given as `(span_pct, chord_pct)` percentages (0-100) of
-`r/R` and `x/c` - the SAME `x/c` convention as `at_radii()`/
-`to_common_grid()` (local, per-radius-band, percentile-normalized -
-see `chord_percentile`/`reverse_chord` there). The nearest available raw
-surfel is used (not an interpolated value) - `_nearest_point()` returns
+`r/R` and `x/c`. The same `x/c` convention as `at_radii()`/
+`to_common_grid()` (local, per-radius-band, percentile-normalized). 
+The nearest available raw surfel is used where - `_nearest_point()` returns
 the requested vs. actual `(r, x/c)`, and every method here reports the
 actual location in its `point_info`/plot title, since the nearest surfel
 generally won't sit exactly on the target:
@@ -1016,33 +882,240 @@ sv.plot_periodogram('static_pressure', span_pct=80, chord_pct=90, surface='Upper
 **Time axis / sampling rate**: needs a real physical timestep, which
 these files don't always have -
 `convert_snc_to_h5()` (`converters/ensight_to_h5.py`) writes
-`Metadata/mid_s` (real time in seconds) ONLY when an `nc_stats` file was
+`Metadata/mid_s` (real time in seconds) only when an `nc_stats` file was
 supplied at conversion time; `SNCReader.to_h5()` never writes any time
 info at all. `timetrace()` falls back, in order: explicit `dt` argument
 (assumes uniform spacing) -> `Metadata/mid_s` if present -> the raw
 integer frame index (fine for just looking at a trace's shape, not a
-real time axis). `periodogram()` is stricter - it needs `fs`, `dt`, or a
+real time axis). `periodogram()` is stricter as it needs `fs`, `dt`, or a
 usable `Metadata/mid_s`; without one of those it raises rather than
 silently plotting a meaningless frequency axis.
 
-`nperseg` (Welch segment length) defaults to `min(256, n_frames)`, not
-scipy's own bare 256 - with only a handful of frames (a likely case
-while more data is still being generated - this whole feature's
-motivating use case) scipy would silently clip 256 down to `n_frames`
-anyway; doing it explicitly here avoids that surprise.
+## Strip forces (Hanson's method input): `bladeprocessor/StripForces`
 
-**Validated** against a synthetic file built with the exact same schema
-(`Geometry/Upper,Lower` + `Data/Upper,Lower/<name>` with a frame axis +
-`Metadata/lrf_axis_origin,lrf_axis_direction,frame_index,mid_s`) as a
-real `to_h5()`/`convert_snc_to_h5()` output, since no real multi-frame
-file was available locally: a point's requested `(80%, 90%)` location
-resolved to the correct nearby raw surfel (`r/R=0.802`, `x/c=0.901`);
-`timetrace()` correctly picked up `Metadata/mid_s` for its time axis
-(`dt=0.001` s, matching the synthetic sampling rate) with no `dt`
-argument passed; a 50 Hz sine injected into the synthetic signal (plus
-noise) came back as a sharp, correctly-located peak at `50.8` Hz (off by
-one Welch frequency bin - as expected, not exact) in `periodogram()`'s
-output, with a flat noise floor everywhere else.
+Per-radial-strip, time-resolved axial/radial/tangential force. These data
+are the raw input Hanson's tonal noise method needs (harmonics of
+unsteady sectional loading), computed directly from a `SNCReader.to_h5()` 
+conversion.
+
+Per-surfel force = `Surface_X/Y/Z-Force` (Pa) x `Area` (m²), projected
+onto a physical basis computed at every surfel (not once for the whole
+strip, since the radial direction itself varies across a strip's own
+surfels): `axial` = the rotation axis direction (constant), `radial` =
+unit vector from the axis to the surfel (always points
+outward), `tangential` = `axial x radial`. `axial`'s own sign and
+`tangential`'s rotation sense both depend on which way this file's own
+`lrf_axis_direction` happens to point. An arbitrary modeling choice,
+same kind of ambiguity as `reverse_chord` elsewhere so check the sign
+against what you expect physically and use `flip_axial`/
+`flip_tangential` if it comes out backwards.
+
+`n_chord_bins` optionally subdivides each radial strip further, along
+the chord, for cases where a single strip's whole chord can no longer be
+treated as one compact acoustic source (a high blade-passing frequency,
+or a high enough harmonic in Hanson's method itself). Off by default and
+one strip per radial band is used.
+
+```python
+from bladeprocessor.strip_forces import StripForces
+
+sf = StripForces('forces_rotor.h5', r_tip=0.125)
+
+result = sf.compute(span_min=0.02, n_span_bins=20)  # span limits for one blade analysis
+sf.save(result, 'strip_forces.h5', dt=0.000056)      # independent file, reusable without this class again
+
+sf.plot_bar_forces(result, show_totals=True, savepath='strip_forces_bar.png')  # bar + cumulative, one blade only
+
+# chordwise-subdivided (non-compact chord case):
+result_2d = sf.compute(span_min=0.02, n_span_bins=20, n_chord_bins=5)
+```
+
+`plot_bar_forces()`'s x-axis is `r/R` by default (`normalize_radius=True`,
+needs `r_tip`). You can pass `normalize_radius=False` for physical 
+radius [m] instead.
+
+### Integrated totals: `total_loads()` / `compute()`'s `'totals'` key
+
+Net thrust, torque, and (for completeness) net radial and tangential
+force, summed directly over every selected surfel. It is independent of
+strip binning entirely, so it's the right quantity to cross-check
+against an independently known total (a `.csnc` file output of `exaritool forces.ri`), not a re-added sum of `compute()`'s strips (though
+they agree, since strip binning is an exact partition of the same
+surfels).
+
+- `'thrust'` = `Sum(F_axial)`.
+- `'torque'` = `Sum(F_tangential_i * radius_i)` - a moment, not the same
+  as `'tangential_force'`; needs each surfel's own radius as
+  a lever arm, not just the raw force.
+- `'radial_force'` = `Sum(F_radial)` - usually small; most of a real
+  blade's outward pull is centrifugal. If it's not small relative to
+  thrust, worth a second look (Hanson assumption).
+- `'tangential_force'` = `Sum(F_tangential)` - the net in-plane force,
+  related to (but distinct from) the classic rotorcraft in-plane
+  "H-force".
+
+`compute()` computes these from the same surfel selection used for
+its own strip breakdown and embeds them as `result['totals']`. It has a
+guaranteed consistentcy with whatever `span_min`/`span_max` that
+particular `compute()` call used. `total_loads()` is the same
+computation as a standalone call without the strip processing.
+
+```python
+result = sf.compute(span_min=0.02, n_span_bins=20)
+result['totals']['thrust']   # (n_frames,) - matches total_loads(span_min=0.02) exactly
+
+totals = sf.total_loads(span_min=0.02)  # standalone, same numbers, no strip binning needed
+
+sf.plot_bar_forces(result, show_totals=True, savepath='strip_forces_bar.png')  # annotates the figure
+```
+
+### Thrust/torque coefficients: `plot_bar_forces(rho=..., n_rot=..., diameter=...)`
+
+If `rho` [kg/m^3], `n_rot` [rev/s - not rad/s], and `diameter` [m] are
+all given, `plot_bar_forces()`'s y-axis (bars and the cumulative curve)
+becomes a standard propeller-convention force coefficient, the same
+equation applied to all three components:
+
+```
+C_T,axial      = thrust           / (rho * n_rot^2 * diameter^4)
+C_T,radial     = radial_force     / (rho * n_rot^2 * diameter^4)
+C_T,tangential = tangential_force / (rho * n_rot^2 * diameter^4)
+```
+
+This is deliberately not a separate "torque coefficient" for the
+tangential bar: what's plotted there is still a per-strip/cumulative
+force, and torque isn't a force (see `total_loads()`'s note on why
+torque needs a radius-weighted sum). The proper torque coefficient, 
+computed from `total_loads()`'s radius-weighted torque (not the 
+tangential bar), needs one extra factor of `diameter`:
+
+```
+C_Q = torque / (rho * n_rot^2 * diameter^5)
+```
+
+Both `C_T,*` and `C_Q` only ever appear in the `show_totals` box, never
+as their own bar/line.
+
+**`show_totals` becomes coefficients-only in this mode** when
+`rho`/`n_rot`/`diameter` are given, the box shows `C_T,axial`/
+`C_T,radial`/`C_T,tangential`/`C_Q` and nothing else; the dimensional
+N/N.m totals it would otherwise show are deliberately left out, for
+cases where the raw loads shouldn't be exposed but their non-dimensional
+form is fine to share.
+
+```python
+sf.plot_bar_forces(
+    result, show_totals=True,
+    rho=1.22523, n_rot=6000 / 60, diameter=0.25,  # n_rot in rev/s, not RPM
+    savepath='strip_forces_bar_coeffs.png',
+)
+```
+
+### Average vs. instantaneous cases
+
+`compute()`/`total_loads()`/`plot_bar_forces()` work on either an
+already time-averaged ("average", `n_frames=1`) or a transient
+("inst", `n_frames>1`) file. `frame=None` averages over whatever
+frames are present (a no-op on a 1-frame file), `frame=<int>` picks one.
+`plot_time_trace()`/`phase_lock()`/`harmonics()` below only make sense
+for an "inst" file (there's nothing to trace/fold/decompose in a single
+already-averaged frame). A clear error is raises if given a
+1-frame file rather than silently producing something meaningless.
+
+### Time trace: `plot_time_trace()`
+
+Raw per-strip force vs time, one line per strip. The time-domain view
+of `compute()`'s per-frame result.
+
+```python
+result = sf.compute(span_min=0.02, n_span_bins=20)  # needs an "inst" (multi-frame) file
+sf.plot_time_trace(result, dt=0.000056, component='axial', strips=[0, 4, 9, 14, 19],
+                    savepath='strip_time_trace.png')
+```
+
+`strips` (0-based indices into `result['radius']`) lets you pick a
+legible subset. A real case can have far more strips than fit on one
+legend.
+
+### Phase-locked (revolution-folded) forces: `phase_lock()` / `plot_vs_angle()`
+
+Bins every frame by its rotor azimuth angle (needs `rpm`, set in
+`__init__`) into `n_azimuth_bins` bins spanning one revolution, and
+averages every frame landing in each bin using as many revolutions
+as it spans. This is the standard "phase-locked averaging" that turns a
+noisy, multi-revolution time series into one clean once-per-rev curve.
+
+```python
+sf = StripForces('forces_rotor.h5', r_tip=0.125, rpm=6000)
+result = sf.compute(span_min=0.02, n_span_bins=20)
+
+phase_locked = sf.phase_lock(result, dt=0.000056, n_azimuth_bins=72)
+sf.plot_vs_angle(phase_locked, component='axial', strips=[0, 4, 9, 14, 19],
+                  savepath='strip_vs_angle.png')  # polar by default; polar=False for Cartesian
+```
+
+Needs roughly a full revolution of frames at minimum to have every
+azimuth bin populated; several revolutions is what makes the averaging
+part actually do anything (fewer just assigns each frame its own bin
+with nothing to fold together).
+
+Azimuth assumes constant rpm across the file (`azimuth = (t * rpm * 6) mod 360`.
+
+### Harmonics (Hanson's method's actual input): `harmonics()` / `plot_harmonics()`
+
+FFT of each strip's force time history, reported at harmonics of the
+rotor's own rotation frequency (1P, 2P, 3P, ...). They are `|F_n(r)|`,
+the loading-harmonic input Hanson's tonal noise method needs.
+
+```python
+h = sf.harmonics(result, dt=0.000056, component='axial', n_harmonics=17)
+sf.plot_harmonics(h, strips=[0, 4, 9, 14, 19], savepath='strip_harmonics.png')
+```
+
+Uses a plain FFT over the whole time series (not Welch's method like
+`SurfaceVariable.periodogram()`). The file should span close to an
+integer number of full revolutions.
+
+#### Phase: `harmonics(return_phase=True)` / `peak_azimuth()` / `reconstruct_from_harmonics()`
+
+Off by default (most exploratory work), `harmonics(..., return_phase=True)`
+also returns each harmonic's phase [rad], needed for two things:
+
+1. **Hanson's model itself:** a magnitude-only harmonic can't be summed
+   back into a physically meaningful signal, and the interference
+   between radial stations' contributions (which shapes the final
+   directivity) depends on their relative phase, not just magnitude.
+2. **Tying a harmonic back to a physical cause, independent of the noise
+   calculation:** `peak_azimuth()` converts phase into the azimuth
+   [deg] where each harmonic's own contribution peaks
+   (`-phase/n mod (360/n)`, since a harmonic `n` repeats `n` times per
+   revolution).
+
+`reconstruct_from_harmonics()` rebuilds an azimuth-domain curve from
+magnitude + phase (`sum_n magnitude_n * cos(n*phi - phase_n)`, DC
+excluded since `harmonics()` detrends it away) an overlay this against
+`phase_lock()`'s own empirical folded curve as a validation check: if a
+handful of harmonics already reconstructs the real curve closely, that
+confirms the FFT decomposition captured the dominant unsteady content
+(and tells you honestly how many harmonics actually matter for this
+case), rather than trusting magnitudes/phases blind.
+
+```python
+h = sf.harmonics(result, dt=0.000056, component='axial', n_harmonics=17, return_phase=True)
+sf.plot_harmonics(h, strips=[0, 4, 9], show_phase=True, savepath='strip_harmonics_phase.png')
+
+peak_deg = sf.peak_azimuth(h)  # (n_harmonics, n_span_bins)
+
+phase_locked = sf.phase_lock(result, dt=0.000056, n_azimuth_bins=72)
+az, recon = sf.reconstruct_from_harmonics(h, azimuth_deg=phase_locked['azimuth_deg'])
+# overlay recon[:, i] + result['axial'][:, i].mean() against phase_locked['axial'][:, i]
+```
+
+**Downstream output**: `save_harmonics(h, filepath)` writes `radius`,
+`chord` (if chord-subdivided), `harmonic`, `magnitude`, and `phase` (if
+present) to one self-contained `.h5` file giving the actual Hanson-model-ready
+artifact, usable without this class or the original `.snc`-derived file
+again.
 
 ## What's still open
 
@@ -1054,7 +1127,7 @@ output, with a flat noise floor everywhere else.
   remains unresolved and is not assumed to be case-independent - hence the
   hard requirement to use `pf2ens` for pressure rather than the raw file.
 - `FrictionLines`' span/chord axes are raw Cartesian columns
-  (`span_axis`/`chord_axis`), not derived from the rotor's rotation axis -
+  (`span_axis`/`chord_axis`), not derived from the rotor's rotation axis,
   a rotation-axis-based derivation was tried and abandoned (see the class
   docstring) because it assumes the chord line lies in the rotor disk
   plane, which breaks on any blade with real geometric pitch/twist. The
@@ -1064,11 +1137,10 @@ output, with a flat noise floor everywhere else.
   either - a proper fix (e.g. per-station PCA of the point cloud) is not
   implemented.
 - `SurfaceVariable`'s `reverse_chord` (which end of the raw chord axis is
-  the leading vs. trailing edge) has no automatic detection - it's
+  the leading vs. trailing edge) has no automatic detection, it's
   arbitrary per case, currently determined by eye (checking whether the
   Kutta-condition/near-zero-Cp end and the stagnation-point/suction-peak
   end land where expected) rather than computed from anything in the
   file. `SurfaceVariable.cp(stat='rms')` is implemented and its reduction
   formula is validated synthetically, but hasn't yet been checked against
-  a real multi-frame pressure file - only one real frame was available
-  locally when this was built.
+  a real multi-frame pressure file.

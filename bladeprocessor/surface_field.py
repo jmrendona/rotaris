@@ -10,7 +10,8 @@ plt.rcParams.update({
     "font.serif": ["Computer Modern"],
     "axes.labelsize": 18,
     "xtick.labelsize": 16,
-    "ytick.labelsize": 16
+    "ytick.labelsize": 16,
+    "legend.fontsize": 18
 })
 
 
