@@ -48,26 +48,48 @@ class _LargeRecordNetcdfFile(sio.netcdf_file):
     rounded up to the next multiple of 4).
 
     Fix, part 2 (NumPy's OWN, separate 32-bit ceiling): even with
-    `_recsize` correct, scipy still reads every record variable through
-    one NumPy STRUCTURED dtype (`dtypes = {'names': [...], 'formats':
-    [...]}`, one "field" per record variable, each field a fixed-shape
-    sub-array format string like '(500000, 3)>f4'). NumPy's structured-
-    dtype machinery computes each field's byte size as a C `int`
-    internally and raises `ValueError: invalid shape in fixed-type
-    tuple: dtype size in bytes must fit into a C int` once a single
-    field exceeds ~2^31 bytes (~2.1 GB) - confirmed on a real, single-
-    frame, 8 GB .snc file: `_recsize` itself came out correct (part 1
-    worked), but building the ONE-field structured dtype for
-    "measurements" still failed, because that one field's own data is
-    multiple GB. A plain (non-structured) ndarray has no such limit -
-    its shape is stored as 64-bit npy_intp values, not a C int - so when
-    there is exactly one record variable (this file's "measurements",
-    always true in practice for .snc files), skip the structured dtype
-    for it entirely and read it straight into a plain array instead.
-    Falls back to scipy's original structured-dtype approach when there
-    is more than one record variable, or when that one variable needs
-    the 'bch' padding scipy handles below (neither happens for the
-    float32/float64 "measurements" data this class exists for).
+    `_recsize` correct, scipy still reads every record variable (any
+    NetCDF-level array whose first axis is the file's unlimited/frame
+    dimension - "measurements" is one; this format apparently also has
+    at least one other, smaller one riding the same frame axis, e.g. a
+    per-frame timestamp/iteration value that isn't one of the physical
+    quantities packed inside "measurements") through one NumPy
+    STRUCTURED dtype: `dtypes = {'names': [...], 'formats': [...]}`, one
+    "field" per record variable, each field a fixed-shape sub-array
+    format string like '(500000, 3)>f4'. NumPy's structured-dtype
+    machinery computes each field's byte size as a C `int` internally
+    and raises `ValueError: invalid shape in fixed-type tuple: dtype
+    size in bytes must fit into a C int` once a single field exceeds
+    ~2^31 bytes (~2.1 GB) - confirmed on a real, single-frame, 8 GB .snc
+    file: `_recsize` itself came out correct (part 1 worked), but
+    building the structured dtype covering "measurements" (huge) plus
+    whatever the other record variable is (small) still failed, because
+    NumPy applies that ~2.1 GB ceiling per field, and one field
+    ("measurements") is multiple GB regardless of how many OTHER,
+    smaller fields sit alongside it.
+
+    A plain (non-structured) ndarray has no such limit - its shape is
+    stored as 64-bit npy_intp values, not a C int - so this override
+    never builds a structured dtype for record variables at all,
+    regardless of how many there are. Per the NetCDF classic-format
+    spec, a file's record variables are interleaved by record (for each
+    record r: each record variable's data, back-to-back, in declaration
+    order, each padded to a 4-byte boundary) - and each variable's own
+    `begin_` (its file offset, already correctly parsed - a genuine
+    64-bit value, since a file large enough to need this fix is
+    necessarily in the 64-bit-offset format variant) already tells us
+    exactly where that variable's record-0 data starts. So: read the
+    whole interleaved record block once as raw bytes, then hand each
+    record variable its own plain strided view into it (stride between
+    records = the corrected `self._recsize`; strides within one
+    record = an ordinary C-contiguous layout for that variable's own
+    shape). No NumPy dtype ever has to describe more than one variable's
+    data at once, so the per-field ceiling above can't apply, no matter
+    how many record variables the file has (an earlier version of this
+    fix only bypassed the structured dtype when there was exactly one
+    record variable - which turned out not to match this file's actual
+    layout, and hit the exact same ceiling through the path left over
+    for "more than one record variable").
 
     Everything else below is otherwise IDENTICAL to
     scipy.io._netcdf.netcdf_file._read_var_array - there is no smaller
@@ -88,11 +110,10 @@ class _LargeRecordNetcdfFile(sio.netcdf_file):
             raise ValueError("Unexpected header.")
 
         begin = 0
-        dtypes = {'names': [], 'formats': []}
         rec_vars = []
         rec_var_shapes = {}
         rec_var_dtypes = {}
-        rec_var_typecodes = {}
+        rec_var_begins = {}
         count = self._unpack_int()
 
         for i in range(count):
@@ -105,26 +126,21 @@ class _LargeRecordNetcdfFile(sio.netcdf_file):
                 rec_vars.append(name)
                 rec_var_shapes[name] = shape
                 rec_var_dtypes[name] = dtype_
-                rec_var_typecodes[name] = typecode
+                rec_var_begins[name] = begin_
 
                 # NOT `vsize` (the file's own, possibly-corrupted field -
                 # see class docstring) - recomputed independently from
-                # shape/dtype instead.
+                # shape/dtype instead. This formula already accounts for
+                # the same 4-byte-boundary padding scipy's original code
+                # only added explicitly for 'bch' typecodes (a no-op
+                # round-up for everything else, since those itemsizes
+                # are already multiples of 4).
                 true_vsize = reduce(mul, shape[1:], 1) * size
                 true_vsize = ((true_vsize + 3) // 4) * 4
                 self.__dict__['_recsize'] += true_vsize
 
                 if begin == 0:
                     begin = begin_
-                dtypes['names'].append(name)
-                dtypes['formats'].append(str(shape[1:]) + dtype_)
-
-                if typecode in 'bch':
-                    actual_size = reduce(mul, (1,) + shape[1:]) * size
-                    padding = -actual_size % 4
-                    if padding:
-                        dtypes['names'].append('_padding_%d' % i)
-                        dtypes['formats'].append('(%d,)>b' % padding)
 
                 data = None
             else:
@@ -145,44 +161,38 @@ class _LargeRecordNetcdfFile(sio.netcdf_file):
 
         if rec_vars:
 
-            single_var_ok_for_bypass = (
-                len(rec_vars) == 1 and rec_var_typecodes[rec_vars[0]] not in 'bch'
-                and not self.use_mmap
-            )
-
-            if single_var_ok_for_bypass:
-
-                name = rec_vars[0]
-                full_shape = (self._recs,) + rec_var_shapes[name][1:]
-
+            if self.use_mmap:
+                buffer = self._mm_buf
+                block_start = 0  # self._mm_buf already spans the whole file
+            else:
                 pos = self.fp.tell()
                 self.fp.seek(begin)
-                flat = _nc.frombuffer(
-                    self.fp.read(self._recs * self._recsize), dtype=rec_var_dtypes[name]
-                ).copy()
-                flat.shape = full_shape
+                buffer = self.fp.read(self._recs * self._recsize)
+                block_start = begin
                 self.fp.seek(pos)
 
-                self.variables[name].__dict__['data'] = flat
+            for name in rec_vars:
 
-            else:
+                shape = rec_var_shapes[name]
+                shape_tail = shape[1:]
+                item_dtype = np.dtype(rec_var_dtypes[name])
 
-                if len(rec_vars) == 1:
-                    dtypes['names'] = dtypes['names'][:1]
-                    dtypes['formats'] = dtypes['formats'][:1]
+                tail_strides = []
+                stride = item_dtype.itemsize
+                for dim in reversed(shape_tail):
+                    tail_strides.append(stride)
+                    stride *= dim
+                tail_strides.reverse()
 
-                if self.use_mmap:
-                    rec_array = self._mm_buf[begin:begin + self._recs * self._recsize].view(dtype=dtypes)
-                    rec_array.shape = (self._recs,)
-                else:
-                    pos = self.fp.tell()
-                    self.fp.seek(begin)
-                    rec_array = _nc.frombuffer(self.fp.read(self._recs * self._recsize), dtype=dtypes).copy()
-                    rec_array.shape = (self._recs,)
-                    self.fp.seek(pos)
+                full_shape = (self._recs,) + shape_tail
+                full_strides = (self._recsize,) + tuple(tail_strides)
+                offset = rec_var_begins[name] - block_start
 
-                for var in rec_vars:
-                    self.variables[var].__dict__['data'] = rec_array[var]
+                arr = np.ndarray(
+                    full_shape, dtype=item_dtype, buffer=buffer,
+                    offset=offset, strides=full_strides,
+                )
+                self.variables[name].__dict__['data'] = arr
 
 
 class SNCReader:

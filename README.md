@@ -147,28 +147,43 @@ regression.
 That fix alone surfaced a **second, separate** 32-bit ceiling on the
 actual 8 GB DNS case: `ValueError: invalid shape in fixed-type tuple:
 dtype size in bytes must fit into a C int`. Even with `_recsize`
-correct, scipy still reads every record variable through one NumPy
-*structured* dtype (one "field" per record variable, each field a
-fixed-shape sub-array format string). NumPy's structured-dtype
-machinery computes each field's byte size as a C `int` internally and
-refuses anything past ~2.1 GB *per field* - unrelated to the NetCDF
-`vsize` issue above, and not fixable by correcting `_recsize`, since the
-failure happens while NumPy is still building the dtype, before any
-data is read. A plain (non-structured) NumPy array has no such limit -
-its shape is 64-bit. Fix: when there's exactly one record variable
-(true for every `.snc` file - "measurements" is the only one),
-`_LargeRecordNetcdfFile` now skips the structured dtype for it entirely
-and reads it straight into a plain array instead.
+correct, scipy still reads every record variable (any NetCDF-level
+array whose first axis is the frame dimension - "measurements" is one;
+this format has at least one other, smaller one riding the same frame
+axis too, e.g. a per-frame timestamp) through one NumPy *structured*
+dtype (one "field" per record variable, each field a fixed-shape
+sub-array format string). NumPy's structured-dtype machinery computes
+each field's byte size as a C `int` internally and refuses anything
+past ~2.1 GB *per field* - unrelated to the NetCDF `vsize` issue above,
+and not fixable by correcting `_recsize`, since the failure happens
+while NumPy is still building the dtype, before any data is read.
+
+Fix: `_LargeRecordNetcdfFile` never builds a structured dtype for
+record variables at all, regardless of how many there are. NetCDF's
+classic format interleaves record variables by record (each variable's
+data, back-to-back, in declaration order, padded to a 4-byte boundary),
+and each variable's own file offset (`begin_`, already correctly parsed
+as a genuine 64-bit value) tells us exactly where its data starts - so
+the whole interleaved record block is read once as raw bytes, and each
+record variable gets its own plain (non-structured) strided view into
+it. A plain ndarray's shape/strides are 64-bit, with no such ceiling. An
+earlier version of this fix only bypassed the structured dtype when
+there was exactly one record variable, which doesn't match this file's
+actual layout (it has more than one) and hit the same ceiling through
+the leftover fallback path - this version has no such precondition.
 
 **Validated**: reproduced the exact NumPy error directly (constructing
 the same shape of structured dtype scipy would have built for the real
-8 GB file's "measurements" variable) and confirmed the described ~2.1 GB
-per-field ceiling. Also built a real single-record-variable NetCDF file
-and confirmed `_LargeRecordNetcdfFile` reads it through the new bypass
-path with results identical to plain scipy, byte-for-byte - no
-regression. Neither fix has been run end-to-end against the actual
-multi-GB `.snc` file yet (needs the HPC) - both are validated at the
-exact mechanism level.
+8 GB file's variables) and confirmed the described ~2.1 GB per-field
+ceiling. Built real multi-record-variable NetCDF files - one mirroring
+this file's actual layout (a large float record variable alongside a
+small one sharing the frame axis), and one exercising the byte-alignment
+padding case (an odd-sized int16 record variable interleaved with a
+float one) - and confirmed `_LargeRecordNetcdfFile` reads every variable
+back byte-for-byte identical to plain scipy in both cases, and still
+matches on the original single-record-variable file too - no
+regression. Not yet run end-to-end against the actual multi-GB `.snc`
+file (needs the HPC) - validated at the exact mechanism level.
 
 ## 3. Static Pressure → `pf2ens` (do not derive it from raw `.snc`)
 
