@@ -142,9 +142,33 @@ sentinel value - plain `scipy.io.netcdf_file` failed with the identical
 error message; `_LargeRecordNetcdfFile` recovered the correct record
 size and the exact original data. Also confirmed `_LargeRecordNetcdfFile`
 behaves identically to plain scipy on a normal (uncorrupted) file - no
-regression. Not yet confirmed against the actual multi-GB `.snc` file
-that triggered this (needs the HPC) - the fix is validated at the exact
-mechanism level, not yet end-to-end on the real DNS case.
+regression.
+
+That fix alone surfaced a **second, separate** 32-bit ceiling on the
+actual 8 GB DNS case: `ValueError: invalid shape in fixed-type tuple:
+dtype size in bytes must fit into a C int`. Even with `_recsize`
+correct, scipy still reads every record variable through one NumPy
+*structured* dtype (one "field" per record variable, each field a
+fixed-shape sub-array format string). NumPy's structured-dtype
+machinery computes each field's byte size as a C `int` internally and
+refuses anything past ~2.1 GB *per field* - unrelated to the NetCDF
+`vsize` issue above, and not fixable by correcting `_recsize`, since the
+failure happens while NumPy is still building the dtype, before any
+data is read. A plain (non-structured) NumPy array has no such limit -
+its shape is 64-bit. Fix: when there's exactly one record variable
+(true for every `.snc` file - "measurements" is the only one),
+`_LargeRecordNetcdfFile` now skips the structured dtype for it entirely
+and reads it straight into a plain array instead.
+
+**Validated**: reproduced the exact NumPy error directly (constructing
+the same shape of structured dtype scipy would have built for the real
+8 GB file's "measurements" variable) and confirmed the described ~2.1 GB
+per-field ceiling. Also built a real single-record-variable NetCDF file
+and confirmed `_LargeRecordNetcdfFile` reads it through the new bypass
+path with results identical to plain scipy, byte-for-byte - no
+regression. Neither fix has been run end-to-end against the actual
+multi-GB `.snc` file yet (needs the HPC) - both are validated at the
+exact mechanism level.
 
 ## 3. Static Pressure → `pf2ens` (do not derive it from raw `.snc`)
 
