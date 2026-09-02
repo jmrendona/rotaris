@@ -111,6 +111,41 @@ reader = SNCReader("forces_rotor.snc")
 reader.to_h5("forces_rotor.h5")
 ```
 
+### Very large (DNS-resolution) meshes: a 32-bit format limit, fixed
+
+`SNCReader` opens the file via `_LargeRecordNetcdfFile` (a small
+`scipy.io.netcdf_file` subclass in the same module), not `scipy.io.netcdf_file`
+directly. Plain scipy fails with `ValueError: read length must be
+non-negative or -1` once the "measurements" record variable's true
+per-record byte size (surfel count x recorded variables x item size -
+NOT overall file size, which is dominated by the separately-read, unaffected
+fixed-size geometry arrays) crosses what the classic NetCDF format's
+32-bit `vsize` header field can hold. Confirmed on a real case: an 8 GB
+`.snc` file hit this, a 5.4 GB file from the same project did not - it's
+specifically the measurements block's own size, not the file total.
+
+scipy's own source documents the failure mode without handling it: a
+writer facing an unrepresentable `vsize` is supposed to store the escape
+sentinel `2^32-1` instead, which scipy's *signed* 32-bit parse turns into
+`-1`, corrupting the internal record-size accounting (the same
+signed/unsigned mismatch already misreads any legitimate size between
+~2.1-4.3 GB as negative too, even without hitting the "official" escape
+case). The fix: never trust the file's own `vsize` for this - recompute
+it independently from the variable's own shape/dtype (unaffected by the
+32-bit field), exactly like scipy's own comment describes but never
+implements. See `_LargeRecordNetcdfFile`'s docstring for the full
+mechanism.
+
+**Validated**: reproduced the exact reported error by surgically
+corrupting a real (small) NetCDF file's `vsize` field to the documented
+sentinel value - plain `scipy.io.netcdf_file` failed with the identical
+error message; `_LargeRecordNetcdfFile` recovered the correct record
+size and the exact original data. Also confirmed `_LargeRecordNetcdfFile`
+behaves identically to plain scipy on a normal (uncorrupted) file - no
+regression. Not yet confirmed against the actual multi-GB `.snc` file
+that triggered this (needs the HPC) - the fix is validated at the exact
+mechanism level, not yet end-to-end on the real DNS case.
+
 ## 3. Static Pressure → `pf2ens` (do not derive it from raw `.snc`)
 
 PowerFLOW translates static pressure between lattice and real units through

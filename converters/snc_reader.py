@@ -1,7 +1,136 @@
 import warnings
+from functools import reduce
+from operator import mul
 import h5py
 import numpy as np
 import scipy.io as sio
+import scipy.io._netcdf as _nc
+
+
+class _LargeRecordNetcdfFile(sio.netcdf_file):
+
+    '''
+    scipy.io.netcdf_file, patched for a record variable (one with a
+    frame/record axis - this file's "measurements") whose TRUE per-record
+    byte size exceeds what the classic NetCDF format's 32-bit `vsize`
+    header field can hold - exactly what happens for a fine enough DNS
+    mesh's Surface_*/Skin_Friction data (confirmed: a real case with an
+    8 GB .snc file hit this, while a 5.4 GB one from the same project did
+    not - it's the "measurements" record block's OWN byte size that
+    matters, not overall file size, which is dominated by the separately-
+    read, unaffected fixed-size geometry arrays).
+
+    scipy's own source (scipy.io._netcdf.netcdf_file._read_var_array,
+    verified directly against the installed scipy 1.10.1) documents the
+    failure mode in a comment without actually handling it:
+
+        "The 32-bit vsize field is not large enough to contain the size
+        of variables that require more than 2^32 - 4 bytes, so 2^32 - 1
+        is used in the vsize field for such variables."
+
+    `vsize` is parsed with `_unpack_int`, a SIGNED 32-bit read
+    (`frombuffer(..., '>i')`) - so that escape sentinel (0xFFFFFFFF) comes
+    back as Python int -1, and scipy adds it straight into
+    `self._recsize` (`self.__dict__['_recsize'] += vsize`) with no special
+    -casing, corrupting it. The same signed/unsigned mismatch already
+    misreads any LEGITIMATE (non-sentinel) vsize between 2^31 and
+    2^32-2 bytes (~2.1-4.3 GB) as negative too, even without hitting the
+    "officially" documented escape case. Either way, `self._recs *
+    self._recsize` ends up negative, and `self.fp.read(negative_number)`
+    raises `ValueError: read length must be non-negative or -1` - the
+    exact error this fixes.
+
+    Fix: never trust the file's own `vsize` field when accumulating
+    `self._recsize` - recompute the true value ourselves from the
+    variable's own (correctly parsed, NOT subject to this 32-bit limit)
+    shape/dtype instead, using the exact formula scipy's own comment
+    documents (product of the non-record dimensions x itemsize, rounded
+    up to the next multiple of 4). Everything else below is otherwise
+    IDENTICAL to scipy.io._netcdf.netcdf_file._read_var_array - there is
+    no smaller public hook to override, the fix has to happen inside
+    this exact loop, so this necessarily duplicates scipy's private
+    method rather than patching one line of it. Tied to scipy's private
+    API by nature - if a scipy upgrade changes this method's internals,
+    this override needs revisiting (it will fail loudly with an
+    AttributeError pointing at whatever's missing, not silently misread
+    data, since it calls straight through to the same private helpers
+    scipy's own unmodified method does).
+    '''
+
+    def _read_var_array(self):
+
+        header = self.fp.read(4)
+        if header not in (_nc.ZERO, _nc.NC_VARIABLE):
+            raise ValueError("Unexpected header.")
+
+        begin = 0
+        dtypes = {'names': [], 'formats': []}
+        rec_vars = []
+        count = self._unpack_int()
+
+        for i in range(count):
+
+            (name, dimensions, shape, attributes,
+             typecode, size, dtype_, begin_, vsize) = self._read_var()
+
+            if shape and shape[0] is None:  # record variable
+
+                rec_vars.append(name)
+
+                # NOT `vsize` (the file's own, possibly-corrupted field -
+                # see class docstring) - recomputed independently from
+                # shape/dtype instead.
+                true_vsize = reduce(mul, shape[1:], 1) * size
+                true_vsize = ((true_vsize + 3) // 4) * 4
+                self.__dict__['_recsize'] += true_vsize
+
+                if begin == 0:
+                    begin = begin_
+                dtypes['names'].append(name)
+                dtypes['formats'].append(str(shape[1:]) + dtype_)
+
+                if typecode in 'bch':
+                    actual_size = reduce(mul, (1,) + shape[1:]) * size
+                    padding = -actual_size % 4
+                    if padding:
+                        dtypes['names'].append('_padding_%d' % i)
+                        dtypes['formats'].append('(%d,)>b' % padding)
+
+                data = None
+            else:
+                a_size = reduce(mul, shape, 1) * size
+                if self.use_mmap:
+                    data = self._mm_buf[begin_:begin_ + a_size].view(dtype=dtype_)
+                    data.shape = shape
+                else:
+                    pos = self.fp.tell()
+                    self.fp.seek(begin_)
+                    data = _nc.frombuffer(self.fp.read(a_size), dtype=dtype_).copy()
+                    data.shape = shape
+                    self.fp.seek(pos)
+
+            self.variables[name] = _nc.netcdf_variable(
+                data, typecode, size, shape, dimensions, attributes,
+                maskandscale=self.maskandscale)
+
+        if rec_vars:
+
+            if len(rec_vars) == 1:
+                dtypes['names'] = dtypes['names'][:1]
+                dtypes['formats'] = dtypes['formats'][:1]
+
+            if self.use_mmap:
+                rec_array = self._mm_buf[begin:begin + self._recs * self._recsize].view(dtype=dtypes)
+                rec_array.shape = (self._recs,)
+            else:
+                pos = self.fp.tell()
+                self.fp.seek(begin)
+                rec_array = _nc.frombuffer(self.fp.read(self._recs * self._recsize), dtype=dtypes).copy()
+                rec_array.shape = (self._recs,)
+                self.fp.seek(pos)
+
+            for var in rec_vars:
+                self.variables[var].__dict__['data'] = rec_array[var]
 
 
 class SNCReader:
@@ -37,7 +166,12 @@ class SNCReader:
     def __init__(self, filename: str):
 
         self.filename = filename
-        self._f = sio.netcdf_file(filename, mmap=False)
+        # _LargeRecordNetcdfFile, not sio.netcdf_file directly - see its
+        # own docstring: plain scipy corrupts the "measurements" record
+        # size on a fine-enough DNS mesh (confirmed on a real 8 GB .snc
+        # file), which this subclass fixes. Behaves identically to
+        # sio.netcdf_file otherwise.
+        self._f = _LargeRecordNetcdfFile(filename, mmap=False)
         self._decode_metadata()
 
     @staticmethod
