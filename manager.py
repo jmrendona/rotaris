@@ -68,7 +68,12 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #
 # Input: a SNCReader.to_h5(..., surface_split=True) file - the forces
 # branch, NEVER the pf2ens/pressure one (see README.md, "Splitting into
-# upper/lower surface"). rho_ref/rpm set the LOCAL Cf normalization
+# upper/lower surface"). Built from EVERY raw frame, NEVER from a
+# PowerFLOW-pre-averaged .snc (e.g. an "Avg"/"SMF"-style file) - confirmed
+# to produce non-physical Cf on a real case, see README.md's "Input:
+# every raw frame, never a PowerFLOW-pre-averaged .snc". Let
+# FrictionLines do the time-averaging itself (frame=None below).
+# rho_ref/rpm set the LOCAL Cf normalization
 # (q_ref = 0.5*rho_ref*(omega*r)^2, matching BladePostProcessor.compute_cf()
 # above - see README.md's "Equations" section for the full derivation).
 

@@ -466,6 +466,35 @@ not implemented.
 recomputed normals aren't trustworthy for this, see "Splitting into
 upper/lower surface"). Every quantity below is per-surfel unless noted.
 
+### Input: every raw frame, never a PowerFLOW-pre-averaged `.snc`
+
+**Feed `SNCReader`/`FrictionLines` the original, multi-frame `.snc` file
+(every instantaneous frame), and let `FrictionLines` do the time-
+averaging itself (`frame=None` on `wall_shear()`/`cf()`/etc.) -
+never a `.snc` that PowerFLOW has already time-averaged for you** (e.g.
+an "Avg"/"SMF"-style file such as `Avg_SMF_fwh_rotor.snc`). Confirmed on
+a real case: running `cf_at_radii()`/`plot_cf_radii()` against a
+PowerFLOW-pre-averaged file produced non-physical `Cf` vs. `x/c` curves,
+while the same case's individually-extracted frames, averaged by
+`FrictionLines` itself, did not.
+
+Why this isn't just a style preference: `wall_shear()`'s projection
+`tau = F - (F . n) n` is linear in `F` for a *fixed* `n`, so averaging
+the raw force vector first and projecting once is only guaranteed to
+equal projecting every frame and averaging the results afterward if
+every frame that went into the average shares the exact same normal
+`n` (true for `FrictionLines`' own per-frame averaging, since it always
+reuses this file's one stored geometry/normal for every frame - the raw
+`.snc` carries no separate geometry per frame in the first place, see
+`to_h5()`'s docstring). PowerFLOW's own averaging tool is a black box
+here - there's no guarantee it preserves that same exact-normal
+condition (or handles a vector/tensor-valued field's projection at all,
+as opposed to naively averaging its raw X/Y/Z components component-wise)
+- and the observed non-physical result on a real case is consistent with
+that condition being violated. Extracting every frame costs more disk/
+conversion time than using PowerFLOW's own pre-averaged file, but it's
+the only path validated to give correct `Cf`/friction-line results.
+
 **Wall shear vector** (`wall_shear()`) - the surface force with its
 normal (pressure) component removed, leaving only the tangential
 (friction) part:
