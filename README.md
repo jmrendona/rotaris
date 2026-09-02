@@ -253,14 +253,26 @@ pip install pyvista
 doesn't exist yet, rather than trying to build it inside the batch job.
 After that, `run_conversion.sh` just reuses the venv.
 
-**Where things live**: `run_conversion.sh` locates `convert.py` via its own
-path, not your current directory, letting the `rotaris/` folder sit
-anywhere, e.g. `$HOME`, and you can `sbatch ~/rotaris/run_conversion.sh ...`
-from wherever you want the job's data/logs to land (typically `$SCRATCH` or
-your `/project` allocation). No need to `cd` into the code folder first.
-SLURM's `--output`/`--error` logs land in whatever directory you ran
-`sbatch` from, and `<snc_path>`/`<output>` are resolved relative to that
-same directory.
+**Where things live**: `run_conversion.sh` locates `convert.py` via
+`ROTARIS_DIR` (default `$HOME/rotaris`), NOT via its own script path -
+`sbatch` copies the submitted script to a per-job spool directory on the
+compute node (`/var/spool/slurm/slurmd/job<ID>/`) and runs that copy, so
+`${BASH_SOURCE[0]}`'s directory would resolve to the spool path, not
+wherever `rotaris/` actually lives (confirmed: this is exactly what
+produced `python: can't open file '/var/spool/.../convert.py'` before
+this was fixed). If `rotaris/` isn't at `$HOME/rotaris`, override it:
+`ROTARIS_DIR=/path/to/rotaris sbatch run_conversion.sh ...`.
+
+You can `sbatch ~/rotaris/run_conversion.sh ...` from wherever you want
+the job's data/logs to land (typically `$SCRATCH` or your `/project`
+allocation) - no need to `cd` into the code folder first. SLURM's
+`--output`/`--error` logs land in whatever directory you ran `sbatch`
+from, and `<snc_path>`/`<output>` are resolved relative to that same
+directory - **`cd` into that target directory before running `sbatch`**
+if it's somewhere writable from compute nodes (e.g. `$SCRATCH`); some
+clusters (e.g. Trillium) make `$HOME` read-only from compute nodes, so
+submitting from `$HOME` with the default relative `--output`/`--error`
+fails with a read-only-filesystem error.
 
 `--time`/`--mem`/`--cpus-per-task` at the top of `run_conversion.sh` are
 placeholder that need to be adjusted before running depending on the case.

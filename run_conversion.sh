@@ -119,7 +119,21 @@ fi
 
 # =-=-=-=-=-=-=-=-=-=-=-=-=-
 # RUN
+#
+# NOT ${BASH_SOURCE[0]}'s directory: `sbatch` COPIES this script to a
+# per-job spool directory on the compute node
+# (/var/spool/slurm/slurmd/job<ID>/) and runs THAT copy - so
+# ${BASH_SOURCE[0]} resolves to the spool path, not wherever this script
+# actually lives, and `convert.py` isn't there (only this one file got
+# copied). ROTARIS_DIR is a fixed, known install location instead - same
+# pattern as VENV_DIR above. Override it if rotaris isn't at $HOME/rotaris:
+#   ROTARIS_DIR=/path/to/rotaris sbatch run_conversion.sh ...
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROTARIS_DIR="${ROTARIS_DIR:-$HOME/rotaris}"
 
-python "$SCRIPT_DIR/convert.py" "$@"
+if [ ! -f "$ROTARIS_DIR/convert.py" ]; then
+    echo "No convert.py found at $ROTARIS_DIR - set ROTARIS_DIR to wherever rotaris actually lives." >&2
+    exit 1
+fi
+
+python "$ROTARIS_DIR/convert.py" "$@"
