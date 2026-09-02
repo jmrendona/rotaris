@@ -110,11 +110,29 @@ class EnsightFrame:
 
     def mesh(self):
 
-        '''Load (and cache) the EnSight Gold mesh via pyvista.'''
+        '''
+        Load (and cache) the EnSight Gold mesh via pyvista.
+
+        pv.get_reader() mis-resolves a .case file whose internal geometry
+        line is an absolute path (as pf2ens writes, given an absolute -b
+        basename) against the reader's own base directory, doubling the
+        path and failing to open it - chdir into the case file's own
+        directory and pass a bare filename to sidestep this (same fix as
+        FNCVolumeFrame.mesh() in fnc_plane.py - confirmed on the HPC:
+        IndexError: index (0) out of range for this dataset, from an
+        empty multiblock after the doubled path failed to open).
+        '''
 
         if self._mesh is None:
-            reader = pv.get_reader(self.case_path)
-            multiblock = reader.read()
+            case_dir = os.path.dirname(self.case_path) or '.'
+            case_name = os.path.basename(self.case_path)
+            cwd = os.getcwd()
+            os.chdir(case_dir)
+            try:
+                reader = pv.get_reader(case_name)
+                multiblock = reader.read()
+            finally:
+                os.chdir(cwd)
             self._mesh = multiblock[0]
 
         return self._mesh
@@ -455,17 +473,35 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
         axis_origin=axis_origin, axis_direction=axis_direction,
     )
 
+    # Absolute, resolved BEFORE the loop below starts running pf2ens with
+    # cwd=work_dir - snc_path may have been given relative to the caller's
+    # own working directory, which is no longer where the subprocess runs.
+    snc_path_abs = os.path.abspath(snc_path)
+
     try:
         for frame in range(first_frame, last_frame + 1):
 
-            basename = os.path.join(work_dir, f'frame_{frame}')
+            # RELATIVE basename, run with cwd=work_dir - NOT
+            # os.path.join(work_dir, ...) (an absolute path). pf2ens
+            # writes whatever basename it's given straight into the
+            # .case file as the geometry/variable filenames; if that's
+            # already absolute, VTK's EnSight reader (which expects a
+            # .case file's referenced filenames to be relative to the
+            # .case file's own directory) blindly joins its own
+            # directory onto them ANYWAY, producing a doubled path like
+            # "/tmp/xxx//tmp/xxx/frame_1.geo.ens" - confirmed exactly
+            # this failure mode on the HPC (IndexError: index (0) out of
+            # range for this dataset, from an empty multiblock after
+            # that doubled path failed to open) - not a bad frame index,
+            # every frame hit it the same way.
+            basename = f'frame_{frame}'
 
             subprocess.run(
-                ['pf2ens', '-f', str(frame), '-b', basename, snc_path],
-                check=True,
+                ['pf2ens', '-f', str(frame), '-b', basename, snc_path_abs],
+                check=True, cwd=work_dir,
             )
 
-            ensight_frame = EnsightFrame(basename + '.case')
+            ensight_frame = EnsightFrame(os.path.join(work_dir, basename + '.case'))
             writer.add_frame(
                 ensight_frame,
                 frame_index=frame,
