@@ -8,23 +8,157 @@ instead of starting cold. `README.md` is the canonical reference for
 way they are*, what's been validated against real vs. synthetic data,
 and what's still open.
 
-## OPEN INVESTIGATION — confirmed root cause, fix needs to happen on the local machine
+## OPEN INVESTIGATION — root cause confirmed, fix IMPLEMENTED and partially verified, decisive sweep test still needs the HPC
 
 **Status**: the ORIGINAL investigation (Cf magnitude apparently growing
 25x with frame index) is RESOLVED - see "RESOLVED: Cf-magnitude-growth
-investigation" below. Investigating it surfaced a SEPARATE, more serious,
-CONFIRMED bug (not yet fixed): `Surface_X/Y/Z-Force` is written to every
-converted `.h5` in the GLOBAL (lab, non-rotating) reference frame, while
-`Geometry/{Upper,Lower}` (positions, normals - and therefore the
-`chord_axis`/`span_axis`/`radial`/`tangential` directions everything
-downstream defines from them) is in the LOCAL (LRF, blade-co-rotating)
-frame. Nothing currently rotates the force vector into the LRF before
-splitting it into chordwise/spanwise (`FrictionLines`) or
-radial/tangential (`StripForces`) components. **This needs an actual fix
-- do that first, on the local machine, before trusting any chordwise/
-spanwise/radial/tangential-component result (torque, harmonics,
-phase-lock, separation/migration lines, critical points) from ANY
-`.snc` conversion, old or new.**
+investigation" below. Investigating it surfaced a SEPARATE, more serious
+bug: `Surface_X/Y/Z-Force` was written to every converted `.h5` in the
+GLOBAL (lab, non-rotating) reference frame, while `Geometry/{Upper,Lower}`
+(positions, normals - and therefore the `chord_axis`/`span_axis`/
+`radial`/`tangential` directions everything downstream defines from them)
+is in the LOCAL (LRF, blade-co-rotating) frame. **This has now been
+fixed** in `converters/snc_reader.py` (this session, on the local
+machine) - see "The fix, as implemented" below - but the fix's SIGN is
+only confirmed by algebra + a small-gap thrust-preservation check so
+far, not yet by the decisive real-data sweep test HANDOFF's evidence was
+originally built from. **Do not trust any chordwise/spanwise/radial/
+tangential-component result (torque, harmonics, phase-lock, separation/
+migration lines, critical points) until "Next step" below has actually
+been run.**
+
+### The fix, as implemented
+
+`converters/snc_reader.py`:
+- `SNCReader._decode_metadata()` now also decodes `start_time`,
+  `end_time`, `lrf_has_constant_angular_vel`, `lrf_initial_angular_rotation`
+  (previously unread) - defensively: `None` if this file doesn't have
+  them (older/different format), rather than a hard `KeyError` on open.
+- `SNCReader._rotation_angle(frame, frame_meta=None)` - the per-frame
+  rotation angle [rad]. Prefers `frame_meta[frame]['lrf_position_rad']`
+  (PowerFLOW's own authoritative value, from `exaritool nc-stats.ri
+  <snc> -detail` via the new module-level `parse_nc_stats()` - MOVED
+  here from `converters/ensight_to_h5.py`, which now imports it from
+  here instead, to avoid a circular import) when given; otherwise falls
+  back to the self-derived formula (`lrf_initial_angular_rotation +
+  lrf_constant_angular_vel_mag * (start_time[frame] - start_time[0])`),
+  validated to reproduce the exact `-2.001 deg` frame-to-frame angle
+  HANDOFF's evidence #3 already measured, off the real
+  `2f_SMF_forces_rotor.snc` (confirmed again, independently, this
+  session - see "Locally verified" below). Raises clearly (doesn't
+  silently guess) if `LatticeTime`'s scale isn't exactly 1.0, or if
+  `lrf_has_constant_angular_vel` is false.
+- `SNCReader._rotate_about_axis(vectors, axis, angle)` - Rodrigues'
+  rotation formula, staticmethod.
+- `SNCReader._write_surfel_group()` now rotates the
+  `Surface X/Y/Z-Force` TRIPLE (gathered together, not per-component)
+  about `lrf_axis_direction` by `-angle(frame)` before scaling/writing -
+  see "Sign" below for why `-angle(frame)`, not `+angle(frame)`. Raises
+  (refuses to write) if force data is present but no rotation-angle
+  source is available at all, rather than silently reproducing the bug.
+  `Skin Friction`/`Static Pressure` are untouched (confirmed scalars in
+  this format via `diagnose_snc.py` - no frame ambiguity).
+- `SNCReader.to_h5(..., nc_stats_path=None)` - new optional parameter,
+  same convention as `convert_snc_to_h5()`'s parameter of the same name.
+  If given, real per-frame `mid_s`/`lrf_position_rad` get written to
+  `Metadata` (same schema as `EnsightSeriesWriter`, so
+  `SurfaceVariable.timetrace()`/`periodogram()`'s existing
+  `Metadata/mid_s` lookup picks up a real sampling rate here too). If
+  NOT given, this file's own raw `start_time`/`end_time` are written
+  instead, under `Metadata/start_time_lattice`/`end_time_lattice` -
+  deliberately NOT called `mid_s`, since there's no validated conversion
+  from these raw values to physical seconds (don't guess one - same
+  "don't invent an unvalidated conversion" policy as Static Pressure's
+  own lattice-units caveat elsewhere in this file).
+
+### Sign (re-derived independently this session, matches HANDOFF's original evidence)
+
+The fix rotates by `-angle(frame)`. Re-deriving this algebraically from
+evidence #2+#3 already in this file (not just trusting the "TBD" note):
+evidence #3 gives `angle(frame) ~ -2.001 deg` per frame (a NEGATIVE
+per-frame value, straight from the file's own `lrf_constant_angular_vel_mag`
+sign). Evidence #2's empirical correction that WORKED (collapsed the
+sweep from ~317-330 deg to ~90-110 deg) needed the wall-shear angle's
+slope to change from ~-1.8/-1.9 deg/frame to the reported +0.67/+0.27
+deg/frame residual - only possible if the correction ADDED back
+~+2.0 deg/frame, i.e. `corrected_angle = raw_angle - angle(frame)`
+(subtracting a NEGATIVE quantity). Rotating a 2D vector's components by
+`phi` shifts its polar angle by `+phi`; to shift the OBSERVED polar
+angle by `-angle(frame)`, the rotation applied to the vector itself must
+be `phi = -angle(frame)` - exactly what's implemented. This is
+self-consistent, not just asserted, but is NOT a substitute for actually
+re-running the sweep test below.
+
+### Locally verified this session (2-frame `2f_SMF_forces_rotor.snc`, no HPC needed)
+
+- Confirmed the exact raw metadata values directly (not assumed from
+  HANDOFF): `start_time=[1964490, 1965582]`, `lrf_constant_angular_vel_mag
+  =-3.19835169e-05` rad/lattice-time-unit, `lrf_has_constant_angular_vel=1`,
+  `lrf_initial_angular_rotation=0.0`, `LatticeTime` scale exactly `1.0`.
+  `_rotation_angle(1)` evaluates to exactly `-2.001112 deg` - matches
+  HANDOFF's evidence #3 to the same precision it was originally reported.
+- Rodrigues rotation confirmed to preserve the AXIAL component and total
+  magnitude of the raw force field exactly (frame 1: axial component
+  2377.380648 before vs. 2377.380591 after - floating-point-level
+  agreement; magnitude similarly preserved) - the mathematically required
+  behavior for a rotation about that same axis, confirmed on real data,
+  not just the rotation formula in isolation.
+- Replicated `StripForces.total_loads()`'s exact formula in-memory
+  (`face_mask('/Rotor::Default-Segment')` + `span_min=0.02`, ~10M
+  surfels) directly against `SNCReader`, comparing BEFORE (buggy) vs.
+  AFTER (fixed) force data: frame 0 identical (angle=0 there by
+  construction - it's the reference frame), frame 1 thrust UNCHANGED to
+  6 decimals (1.321462 N both ways - consistent with the previously-
+  documented ~1.319 N and with axial invariance under this rotation),
+  torque shifts a SMALL, physically-expected amount for this tiny ~2 deg
+  gap (0.021870 -> 0.022138 N.m) - not the dramatic frame-40-vs-85-style
+  effect, which is expected, since this file's own two frames are too
+  close together to show it (the same reason this bug was invisible on
+  this file in the first place - see "Why this was missed until now"
+  below). **Could not** write a full converted `.h5` for this file
+  locally to test through the actual `StripForces` class end-to-end -
+  the local disk has only ~5 GB free and this case has ~26.7M surfels;
+  the in-memory replication above is mathematically identical to what
+  `to_h5()` now does, just without the disk write.
+
+### IMPORTANT constraint discovered this session: the decisive sweep test needs the HPC, and the original source file for it is gone
+
+HANDOFF's evidence #1/#2 (the sweep collapsing from ~317-330 deg to
+~90-110 deg) was measured against `forces_out.h5` (829 frames, ~4.6
+revolutions) - the only real file with enough angular spread to actually
+show this bug. That file's ORIGINAL raw `.snc` **no longer exists** on
+HPC scratch (deleted to save space - see "File/data conventions" below),
+so the now-fixed `SNCReader.to_h5()` can't simply be re-run on it to
+produce a corrected version directly - there's no `.snc` left to convert.
+
+**Next step, not yet run**: `verify_rotation_fix.py` (repo root, written
+this session) - applies the IDENTICAL rotation math directly to
+`forces_out.h5`'s ALREADY-STORED (buggy) `Surface_X/Y/Z-Force` arrays as
+a post-hoc correction (not a re-conversion), and re-runs HANDOFF's exact
+net-in-plane-angle-sweep test before/after. Run on the HPC as:
+
+```bash
+python verify_rotation_fix.py /scratch/jmrendon/Rotor-alone/6e-5_6000rpm/forces_out.h5 \
+    --span-min 0.02 --omega-deg-per-frame -2.0
+```
+
+(pass `--nc-stats /path/to/nc_stats.txt` instead of
+`--omega-deg-per-frame` if an `exaritool nc-stats.ri` dump for this case
+is available or can be regenerated - see the script's own docstring for
+why that's preferable when possible, and what assumption
+`--omega-deg-per-frame` makes instead). Expect the AFTER-correction
+sweep span to collapse to roughly HANDOFF's already-measured ~90-110 deg
+residual; if it instead balloons (toward the ~650-680 deg HANDOFF noted
+the WRONG sign produces), flip the sign in
+`SNCReader._write_surfel_group()` (currently `-angle(frame)`) and
+`verify_rotation_fix.py`'s own correction step to match, then re-run.
+
+Once this confirms (or corrects) the sign: re-run the SAME idea for
+`StripForces`'s radial/tangential (not yet directly tested, see "What's
+corrupted vs. safe" below), then move on to re-validating
+`separation_line()`/`migration_line()`/`critical_points()` and
+`StripForces`'s full time-domain suite - all still flagged UNRELIABLE
+until this happens (see those sections below).
 
 ### Why this was missed until now
 

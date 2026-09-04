@@ -1,6 +1,5 @@
 import argparse
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -9,7 +8,7 @@ import h5py
 import pyvista as pv
 from scipy.spatial import cKDTree
 
-from converters.snc_reader import SNCReader
+from converters.snc_reader import SNCReader, parse_nc_stats
 
 
 def raw_positions_to_ensight_frame(positions: np.ndarray) -> np.ndarray:
@@ -39,56 +38,6 @@ def raw_positions_to_ensight_frame(positions: np.ndarray) -> np.ndarray:
 
     bbox_center = (positions.min(axis=0) + positions.max(axis=0)) / 2
     return positions - bbox_center
-
-
-def parse_nc_stats(path: str):
-
-    '''
-    Parse the "Frame Start(ts) Mid(ts) End(ts) Mid(s) LRF_position(rad)"
-    table out of the text output of:
-
-    exaritool nc-stats.ri <file>.snc -detail > nc_stats.txt
-
-    Parameters
-    ----------
-    path : str
-        Path to the saved nc-stats.ri output.
-
-    Returns
-    -------
-    dict[int, dict]
-        Keyed by frame index, each value has keys:
-        start_ts, mid_ts, end_ts, mid_s, lrf_position_rad.
-    '''
-
-    with open(path) as f:
-        lines = f.readlines()
-
-    header_idx = None
-    for i, line in enumerate(lines):
-        if line.strip().startswith('Frame') and 'LRF_position' in line:
-            header_idx = i
-            break
-
-    if header_idx is None:
-        raise ValueError(f"Could not find a 'Frame ... LRF_position(rad)' table in {path}")
-
-    frames = {}
-    for line in lines[header_idx + 1:]:
-        parts = line.split()
-        if len(parts) < 6 or not re.match(r'^-?\d+$', parts[0]):
-            break
-
-        frame, start_ts, mid_ts, end_ts, mid_s, lrf_pos = parts[:6]
-        frames[int(frame)] = {
-            'start_ts': int(start_ts),
-            'mid_ts': float(mid_ts),
-            'end_ts': int(end_ts),
-            'mid_s': float(mid_s),
-            'lrf_position_rad': float(lrf_pos),
-        }
-
-    return frames
 
 
 class EnsightFrame:

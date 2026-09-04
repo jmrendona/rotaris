@@ -1,3 +1,4 @@
+import re
 import warnings
 from functools import reduce
 from operator import mul
@@ -5,6 +6,63 @@ import h5py
 import numpy as np
 import scipy.io as sio
 import scipy.io._netcdf as _nc
+
+
+def parse_nc_stats(path: str):
+
+    '''
+    Parse the "Frame Start(ts) Mid(ts) End(ts) Mid(s) LRF_position(rad)"
+    table out of the text output of:
+
+    exaritool nc-stats.ri <file>.snc -detail > nc_stats.txt
+
+    Lives here (not converters/ensight_to_h5.py, which also uses it for
+    the pressure/pf2ens branch) since SNCReader.to_h5() needs it too, for
+    an authoritative, PowerFLOW-computed alternative to _rotation_angle()'s
+    self-derived formula - `ensight_to_h5.py` already imports SNCReader
+    from this module, so defining it there instead would create a
+    circular import.
+
+    Parameters
+    ----------
+    path : str
+        Path to the saved nc-stats.ri output.
+
+    Returns
+    -------
+    dict[int, dict]
+        Keyed by frame index, each value has keys:
+        start_ts, mid_ts, end_ts, mid_s, lrf_position_rad.
+    '''
+
+    with open(path) as f:
+        lines = f.readlines()
+
+    header_idx = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith('Frame') and 'LRF_position' in line:
+            header_idx = i
+            break
+
+    if header_idx is None:
+        raise ValueError(f"Could not find a 'Frame ... LRF_position(rad)' table in {path}")
+
+    frames = {}
+    for line in lines[header_idx + 1:]:
+        parts = line.split()
+        if len(parts) < 6 or not re.match(r'^-?\d+$', parts[0]):
+            break
+
+        frame, start_ts, mid_ts, end_ts, mid_s, lrf_pos = parts[:6]
+        frames[int(frame)] = {
+            'start_ts': int(start_ts),
+            'mid_ts': float(mid_ts),
+            'end_ts': int(end_ts),
+            'mid_s': float(mid_s),
+            'lrf_position_rad': float(lrf_pos),
+        }
+
+    return frames
 
 
 class _LargeRecordNetcdfFile(sio.netcdf_file):
@@ -223,6 +281,26 @@ class SNCReader:
     use pf2ens for physical-unit pressure instead, and treat
     Data/Static_Pressure in the output HDF5 as still being in raw lattice
     units.
+
+    NOTE on reference frames (bug found and fixed - see HANDOFF.md's
+    "OPEN INVESTIGATION" for the full evidence/derivation): `Geometry/*`
+    (positions, normals) is written once, frame-independent, and is
+    expressed in the LRF (the rotor's own co-rotating frame - the mesh
+    doesn't move in this frame, only the flow does). `Surface X/Y/Z-Force`
+    as PowerFLOW stores it, however, is in the GLOBAL (lab, non-rotating)
+    frame - confirmed empirically (a net in-plane wall-shear angle swept
+    a full 360 deg once per revolution across a real 829-frame case,
+    collapsing to a small residual once de-rotated by the file's own
+    recorded angular rate) and independently corroborated from the file's
+    own `start_time`/`lrf_constant_angular_vel_mag`/
+    `lrf_initial_angular_rotation` metadata (an exact match, to three
+    decimal degrees, against the empirically measured rate). to_h5()
+    rotates `Surface X/Y/Z-Force` into the LRF (see `_rotation_angle()`)
+    before writing, so every downstream consumer (FrictionLines,
+    StripForces) sees vectors in the same frame as the geometry they're
+    dotted against - no change needed on their end. `Skin Friction` and
+    `Static Pressure` are stored as scalars in this format (confirmed via
+    diagnose_snc.py), so they carry no frame ambiguity and are untouched.
     '''
 
     def __init__(self, filename: str):
@@ -271,6 +349,19 @@ class SNCReader:
         self.lrf_axis_direction = np.array(f.variables['lrf_axis_direction'][:][0])
         self.lrf_angular_vel_lattice = float(f.variables['lrf_constant_angular_vel_mag'][:][0])
 
+        # Needed to rotate Surface X/Y/Z-Force out of the global frame it's
+        # stored in and into the LRF that Geometry/* (and therefore every
+        # chordwise/spanwise/radial/tangential direction downstream) is
+        # actually expressed in - see the class docstring's "NOTE on
+        # reference frames" and HANDOFF.md's OPEN INVESTIGATION for the
+        # full evidence/derivation. start_time/end_time are real per-frame
+        # timestamps (lattice time units) - one entry per frame, same
+        # indexing as `measurements`'s frame axis.
+        self.lrf_has_constant_angular_vel = bool(f.variables['lrf_has_constant_angular_vel'][:][0])
+        self.lrf_initial_angular_rotation = float(f.variables['lrf_initial_angular_rotation'][:][0])
+        self.start_time = np.array(f.variables['start_time'][:], dtype=np.float64)
+        self.end_time = np.array(f.variables['end_time'][:], dtype=np.float64)
+
         lx_names = self._decode_packed(f.variables['lx_names'])
         lx_scales = f.variables['lx_scales'][:]
         lx_offsets = f.variables['lx_offsets'][:]
@@ -278,6 +369,76 @@ class SNCReader:
         self.lattice_offsets = dict(zip(lx_names, lx_offsets))
 
         self.n_frames = f.variables['measurements'].shape[0]
+
+    def _rotation_angle(self, frame: int, frame_meta: dict = None) -> float:
+
+        '''
+        Angle [rad] the LRF has rotated, at `frame`, relative to the
+        fixed global frame `Surface X/Y/Z-Force` is stored in - see the
+        class docstring's "NOTE on reference frames" and HANDOFF.md's
+        OPEN INVESTIGATION for the full evidence/derivation.
+
+        Two sources, in order of preference:
+
+        1. `frame_meta['lrf_position_rad']`, if given - PowerFLOW's OWN
+           authoritative angular position for this frame, from
+           `exaritool nc-stats.ri <file>.snc -detail` (see
+           parse_nc_stats()). Preferred when available: no sign/unit
+           derivation needed, it's already the exact quantity this
+           method exists to compute, straight from the tool that
+           presumably computes it the same way internally.
+        2. Otherwise, self-derived from this file's own recorded angular
+           rate and per-frame timestamps (validated against an
+           independent, empirically-measured drift rate - agreement to 3
+           decimal degrees, HANDOFF.md's OPEN INVESTIGATION evidence #3):
+
+               angle(frame) = lrf_initial_angular_rotation
+                            + lrf_constant_angular_vel_mag * (start_time[frame] - start_time[0])
+
+           `lrf_constant_angular_vel_mag` is already in radians per
+           lattice time unit, and `start_time` in lattice time units, so
+           this is directly in radians PROVIDED `LatticeTime`'s own scale
+           factor is 1.0 (true for every case checked so far) - checked
+           explicitly below rather than assumed, since this hasn't been
+           validated for any case where it isn't.
+        '''
+
+        if frame_meta is not None and frame in frame_meta:
+            return frame_meta[frame]['lrf_position_rad']
+
+        if not self.lrf_has_constant_angular_vel:
+            raise NotImplementedError(
+                "lrf_has_constant_angular_vel is False for this file - the constant-rate "
+                "rotation-angle formula above doesn't apply, and this case needs different "
+                "handling (not yet implemented - see HANDOFF.md's OPEN INVESTIGATION)."
+            )
+
+        lattice_time_scale = self.lattice_scales.get('LatticeTime', 1.0)
+        if not np.isclose(lattice_time_scale, 1.0):
+            raise NotImplementedError(
+                f"LatticeTime scale is {lattice_time_scale}, not 1.0 - the rotation-angle "
+                "formula was only validated assuming this is exactly 1.0. Confirm the right "
+                "conversion (multiply start_time by this scale?) before trusting the "
+                "Surface_X/Y/Z-Force frame correction on this file."
+            )
+
+        return (self.lrf_initial_angular_rotation
+                + self.lrf_angular_vel_lattice * (self.start_time[frame] - self.start_time[0]))
+
+    @staticmethod
+    def _rotate_about_axis(vectors: np.ndarray, axis: np.ndarray, angle: float) -> np.ndarray:
+
+        '''
+        Rotate an (n, 3) array of vectors about a unit `axis` by `angle`
+        [rad] (right-hand rule) - Rodrigues' rotation formula.
+        '''
+
+        axis = axis / np.linalg.norm(axis)
+        cos_a, sin_a = np.cos(angle), np.sin(angle)
+        cross = np.cross(axis, vectors)
+        dot = vectors @ axis
+
+        return vectors * cos_a + cross * sin_a + axis[None, :] * dot[:, None] * (1 - cos_a)
 
     def face_mask(self, name: str) -> np.ndarray:
 
@@ -388,9 +549,11 @@ class SNCReader:
         idx = self.variable_index[name]
         return self._f.variables['measurements'][frame, idx, :]
 
+    _FORCE_VARIABLE_NAMES = ['Surface X-Force', 'Surface Y-Force', 'Surface Z-Force']
+
     def _write_surfel_group(self, h5f, geo_path: str, data_path: str, mask: np.ndarray,
                              coords: np.ndarray, normals: np.ndarray, areas: np.ndarray,
-                             force_scale: float):
+                             force_scale: float, frame_meta: dict = None):
 
         '''
         Write one surfel selection's geometry (once, frame-independent -
@@ -399,6 +562,25 @@ class SNCReader:
         (n_frames, n_points) dataset) under the given Geometry/Data group
         paths. Shared by to_h5() for both the unsplit and
         upper/lower-split cases.
+
+        Surface X/Y/Z-Force is handled specially: rotated about
+        lrf_axis_direction, per-frame, from the global frame it's stored
+        in into the LRF that Geometry/* is in - see the class docstring's
+        "NOTE on reference frames" and _rotation_angle(). Everything else
+        (Skin Friction, Static Pressure) is a scalar in this format, so
+        it's written as-is, same as before.
+
+        frame_meta : dict[int, dict], optional
+            parse_nc_stats()'s return value (keyed by ABSOLUTE frame
+            number, as used by exaritool - see _rotation_angle()), if
+            available - passed straight through to _rotation_angle() per
+            frame. Assumes this file's own row 0 corresponds to
+            frame_meta's frame number 0; if this .snc is a partial dump
+            starting at some other absolute frame, frame_meta's keys
+            won't line up and every frame silently falls back to
+            _rotation_angle()'s self-derived formula instead (still
+            correct, just not cross-checked against PowerFLOW's own
+            value) - not a crash, but worth being aware of.
         '''
 
         geo = h5f.create_group(geo_path)
@@ -412,7 +594,45 @@ class SNCReader:
 
         data = h5f.create_group(data_path)
 
+        has_force = all(name in self.variable_index for name in self._FORCE_VARIABLE_NAMES)
+
+        if has_force:
+
+            if self.start_time is None and not frame_meta:
+                raise ValueError(
+                    f"'{self.filename}' has Surface X/Y/Z-Force but no start_time/"
+                    "lrf_initial_angular_rotation/etc. metadata and no nc_stats_path was "
+                    "given, so there's no way to compute the frame rotation these need "
+                    "(see the class docstring's 'NOTE on reference frames') - refusing to "
+                    "write potentially-wrong (still-global-frame) force data rather than "
+                    "silently reproducing the bug this fixes."
+                )
+
+            axis_direction = self.lrf_axis_direction / np.linalg.norm(self.lrf_axis_direction)
+
+            force_frames = []
+            for frame in range(self.n_frames):
+                raw = np.stack(
+                    [self.variable(name, frame=frame)[mask] for name in self._FORCE_VARIABLE_NAMES],
+                    axis=-1,
+                )  # (n_selected, 3) - still global frame, raw lattice units
+                angle = self._rotation_angle(frame, frame_meta=frame_meta)
+                force_frames.append(self._rotate_about_axis(raw, axis_direction, -angle))
+
+            force_all = np.stack(force_frames, axis=0) * force_scale  # (n_frames, n_selected, 3)
+
+            for i, name in enumerate(self._FORCE_VARIABLE_NAMES):
+                key = name.replace(' ', '_')
+                dset = data.create_dataset(key, data=force_all[..., i])
+                dset.attrs['lattice_unit_class'] = self.variable_lattice_units.get(name, '')
+                dset.attrs['physical_units'] = True
+                dset.attrs['rotated_to_lrf'] = True
+
         for name in self.variable_names:
+
+            if has_force and name in self._FORCE_VARIABLE_NAMES:
+                continue
+
             key = name.replace(' ', '_')
             unit_class = self.variable_lattice_units.get(name, '')
             is_physical = unit_class == 'LatticeForcePerArea'
@@ -436,7 +656,8 @@ class SNCReader:
             dset.attrs['lattice_unit_class'] = unit_class
             dset.attrs['physical_units'] = is_physical
 
-    def to_h5(self, output_path: str, face_name: str = None, surface_split: bool = False):
+    def to_h5(self, output_path: str, face_name: str = None, surface_split: bool = False,
+              nc_stats_path: str = None):
 
         '''
         Write coordinates (centroids), normals, areas, all variables (for
@@ -453,7 +674,10 @@ class SNCReader:
         Each Data/<variable> dataset has shape (n_frames, n_points) -
         geometry (positions/normals/areas) is written once, since the
         raw .snc file carries no frame axis for it, only for
-        measurements.
+        measurements. Surface X/Y/Z-Force is additionally rotated,
+        per-frame, from the global frame it's stored in into the LRF -
+        see the class docstring's "NOTE on reference frames" and
+        _rotation_angle().
 
         Parameters
         ----------
@@ -467,6 +691,23 @@ class SNCReader:
             Geometry/Upper, Geometry/Lower, Data/Upper, Data/Lower
             groups, instead of a single Geometry/Data pair. Off by
             default, by default False.
+        nc_stats_path : str, optional
+            Path to saved `exaritool nc-stats.ri <snc_path> -detail`
+            output (see parse_nc_stats()) - same convention as
+            converters.ensight_to_h5.convert_snc_to_h5()'s parameter of
+            the same name. If given, its `lrf_position_rad` is used
+            PREFERENTIALLY over _rotation_angle()'s self-derived formula
+            (PowerFLOW's own authoritative angle - see _rotation_angle()),
+            and its real per-frame `mid_s`/`start_ts`/`end_ts` are written
+            into Metadata alongside `lrf_position_rad`, matching
+            EnsightSeriesWriter's schema for the pressure branch - so
+            SurfaceVariable.timetrace()/periodogram() (which already look
+            for Metadata/mid_s) get a real sampling rate here too. If
+            omitted, rotation falls back to the self-derived formula, and
+            Metadata gets this file's own raw `start_time`/`end_time`
+            instead (lattice time units, NOT seconds - no validated
+            conversion to physical time exists without nc_stats_path;
+            written for reference only, not as a `mid_s`-equivalent).
         '''
 
         length_scale = self.lattice_scales['LatticeLength']
@@ -476,6 +717,8 @@ class SNCReader:
 
         base_mask = self.face_mask(face_name) if face_name is not None else np.ones(len(areas), dtype=bool)
 
+        frame_meta = parse_nc_stats(nc_stats_path) if nc_stats_path else None
+
         with h5py.File(output_path, 'w') as h5f:
 
             meta = h5f.create_group('Metadata')
@@ -483,6 +726,29 @@ class SNCReader:
             meta.create_dataset('lrf_axis_direction', data=self.lrf_axis_direction)
             meta.create_dataset('frame_index', data=np.arange(self.n_frames))
             meta.attrs['lrf_angular_vel_lattice'] = self.lrf_angular_vel_lattice
+
+            if frame_meta:
+                # Real, PowerFLOW-computed per-frame timing/angle - same
+                # schema as converters.ensight_to_h5.EnsightSeriesWriter,
+                # so SurfaceVariable's existing Metadata/mid_s lookup
+                # (timetrace()/periodogram()) works here too. NaN for any
+                # frame missing from frame_meta (see _write_surfel_group()'s
+                # docstring on frame-index alignment).
+                mid_s = np.array([frame_meta.get(i, {}).get('mid_s', np.nan) for i in range(self.n_frames)])
+                lrf_position_rad = np.array(
+                    [frame_meta.get(i, {}).get('lrf_position_rad', np.nan) for i in range(self.n_frames)]
+                )
+                meta.create_dataset('mid_s', data=mid_s)
+                meta.create_dataset('lrf_position_rad', data=lrf_position_rad)
+            elif self.start_time is not None:
+                # No nc_stats_path - this file's own raw timestamps, for
+                # reference only. NOT seconds (no validated conversion -
+                # see class docstring) - deliberately NOT called mid_s,
+                # unlike the branch above, so nothing downstream mistakes
+                # this for a real sampling rate.
+                meta.create_dataset('start_time_lattice', data=self.start_time)
+                meta.create_dataset('end_time_lattice', data=self.end_time)
+
             for k, v in self.lattice_scales.items():
                 meta.attrs[f'scale_{k}'] = v
             for k, v in self.lattice_offsets.items():
@@ -499,7 +765,8 @@ class SNCReader:
             for label, mask in groups.items():
                 geo_path = f'Geometry/{label}' if label else 'Geometry'
                 data_path = f'Data/{label}' if label else 'Data'
-                self._write_surfel_group(h5f, geo_path, data_path, mask, coords, normals, areas, force_scale)
+                self._write_surfel_group(h5f, geo_path, data_path, mask, coords, normals, areas,
+                                          force_scale, frame_meta=frame_meta)
 
     def close(self):
         self._f.close()
