@@ -8,93 +8,176 @@ instead of starting cold. `README.md` is the canonical reference for
 way they are*, what's been validated against real vs. synthetic data,
 and what's still open.
 
-## OPEN INVESTIGATION — read this first, work is moving to the HPC mid-debug
+## OPEN INVESTIGATION — confirmed root cause, fix needs to happen on the local machine
 
-**Symptom**: on a real, transient (~400-frame), already-past-transient
-(user confirmed thrust converged by ~5 revolutions) `.snc` case
-(`6e-5-6000rpm`), `FrictionLines.plot_cf_radii()`'s Cf magnitude grows
-smoothly and monotonically with frame index, then saturates: peak Cf
-~0.044 at frame 0, ~0.23 at frame 10, ~0.83 at frame 40, ~1.1 at frame
-80 (images in `.../images/cf_test/cf_radii_frame{0,10,40,80}.png`, and
-the two originally-reported `cf_radii_avg.png` vs `cf_radii_frame0.png`
-that kicked this off, another ~13x gap in the same direction). The
-radial trend also inverts between early and late/averaged frames (which
-radius has the biggest LE peak flips). Separately: averaging the raw
-forces over frames [0,1] vs [50,51] gives nearly IDENTICAL thrust
-(1.319 N vs 1.313 N) but torque that changes a lot and flips sign
-(+0.0219 N·m vs -0.0114 N·m).
+**Status**: the ORIGINAL investigation (Cf magnitude apparently growing
+25x with frame index) is RESOLVED - see "RESOLVED: Cf-magnitude-growth
+investigation" below. Investigating it surfaced a SEPARATE, more serious,
+CONFIRMED bug (not yet fixed): `Surface_X/Y/Z-Force` is written to every
+converted `.h5` in the GLOBAL (lab, non-rotating) reference frame, while
+`Geometry/{Upper,Lower}` (positions, normals - and therefore the
+`chord_axis`/`span_axis`/`radial`/`tangential` directions everything
+downstream defines from them) is in the LOCAL (LRF, blade-co-rotating)
+frame. Nothing currently rotates the force vector into the LRF before
+splitting it into chordwise/spanwise (`FrictionLines`) or
+radial/tangential (`StripForces`) components. **This needs an actual fix
+- do that first, on the local machine, before trusting any chordwise/
+spanwise/radial/tangential-component result (torque, harmonics,
+phase-lock, separation/migration lines, critical points) from ANY
+`.snc` conversion, old or new.**
 
-**Why thrust-stable-but-Cf/torque-not-stable is NOT inherently
-contradictory** (resolved, not open): `tau = F - (F.n)n` mathematically
-removes the ENTIRE pressure contribution to `F` (pressure acts purely
-along the local normal `n` by definition, so it contributes exactly
-zero to `tau`) - only the viscous/shear part of `F` survives into Cf.
-Thrust is essentially the rotation-axis component of `F`, dominated by
-the (fast-converging) pressure part. Torque includes both a pressure
-part AND a viscous/profile-drag part, so it's the natural first place a
-still-transient viscous field would show up even while thrust looks
-converged. This is real physics, not a bug - but it only explains why
-thrust and Cf/torque CAN move independently, it does NOT by itself prove
-the observed Cf growth is real physics rather than a reader bug. Both
-explanations below are still live.
+### Why this was missed until now
 
-**Two live hypotheses, not yet distinguished**:
+Confirmed directly from the `.h5` schema: `Geometry/*` datasets have NO
+frame axis at all (shape `(n_points,)`, IDENTICAL across every frame -
+this is `SNCReader.to_h5()`'s own documented behavior, "the raw .snc file
+carries no frame axis for it, only for measurements"), while `Data/*`
+(`Surface_X/Y/Z-Force`, `Skin_Friction`, `Static_Pressure`) has shape
+`(n_frames, n_points)`. All of `FrictionLines`'s and `StripForces`'s
+prior "validated on real data" claims elsewhere in this file were done
+either on the frame-averaged mean, or on the only real multi-frame file
+available at the time (2 frames, ~2 degrees apart - see below, that
+tiny gap turns out to be exactly why). A rotation-frame mismatch this
+small over 2 degrees is invisible; it only becomes obvious once you
+compare frames spread across a real fraction of a revolution - which
+this session finally had, in `forces_out.h5`
+(`/scratch/jmrendon/Rotor-alone/6e-5_6000rpm/forces_out.h5`, 829 frames,
+~4.6 revolutions, already converted, no raw `.snc` needed for any of the
+checks below).
 
-1. **Real, still-unconverged near-wall/viscous statistics.** Skin
-   friction (SGS-turbulence-driven) is well known to converge much more
-   slowly than integrated pressure loads in scale-resolving CFD - the
-   user's "5 revolutions, transient removed" check very likely confirmed
-   THRUST had converged, not necessarily this finer near-wall quantity.
-   The observed shape (smooth, monotonic, SATURATING - only 1.32x growth
-   from frame 40→80 despite doubling the frame count - and each
-   individual frame's spatial Cf-vs-x/c shape is smooth/physically
-   sane, an LE peak decaying to the TE, not scrambled noise) is
-   consistent with this: a byte-misalignment/stride bug would be
-   expected to scramble the SPATIAL structure within a frame (reinterpret
-   floats essentially at random), not preserve a clean airfoil-shaped
-   curve while just scaling its amplitude up smoothly.
-2. **A real bug in `_LargeRecordNetcdfFile`** (see next section) on
-   THIS file's specific layout. Motivating concern: this reader was
-   rewritten from scratch this session and is used UNCONDITIONALLY for
-   every `.snc` file now (no size-based branch), but was only validated
-   against hand-built SYNTHETIC files (single record var; two record
-   vars, one big one small; a byte-padding case) - never against this
-   actual file. If this file's real record-variable layout has some
-   property none of those synthetic tests happened to cover, a
-   systematic (not random) stride/offset error could plausibly still
-   preserve smooth-looking per-frame data while being wrong in a way
-   that correlates with frame index.
+### Evidence (all against `forces_out.h5`, `span_min=0.02`, one blade
+half, `rho_ref=1.22523`, `rpm=6000`, `span_axis=0`, `chord_axis=2`)
 
-**Decisive test, not yet run**: `diagnose_snc.py` (repo root - written
-this session, needs to travel to the HPC with everything else). Reads
-the raw `.snc` directly via `SNCReader` (our patched reader) AND, if
-this file is small enough for it to work at all, via plain unmodified
-`scipy.io.netcdf_file` side by side, for a handful of frames
-(0/1/10/40/80/150). Run as:
+1. **Net in-plane wall-shear angle sweeps with frame index.** Summing
+   `tau[chord_axis]` and `tau[span_axis]` (`tau = F - (F.n)n`) over every
+   selected surfel per frame, then taking `atan2(span_sum, chord_sum)`,
+   traces out a SMOOTH, nearly-monotonic sweep across one whole
+   revolution (frames 0→176, step 4): Upper goes 168.7°→-148.8° (span
+   317.5°, average rate -1.80°/frame); Lower goes 173.9°→-155.9° (span
+   329.8°, average rate -1.87°/frame). A vector that's genuinely steady
+   (or only mildly modulated) in the blade's own frame should NOT sweep
+   360° once per revolution if it's actually being expressed in that
+   frame - it should if it's still in the global frame instead.
+2. **De-rotating by the known mechanical rate collapses the sweep.**
+   Subtracting `+2.0°/frame` from the unwrapped angle (undoing the
+   apparent `-2°/frame` drift) drops the sweep span from 317.5°→109.3°
+   (Upper) and 329.8°→89.8° (Lower), with residual slope falling from
+   ~-1.8/-1.9°/frame to +0.67/+0.27°/frame. Subtracting the WRONG sign
+   (-2.0°/frame) makes it worse instead (span balloons to ~670-680°) -
+   this sign-sensitivity rules out coincidence.
+3. **The `.snc` file itself independently confirms the exact rate.**
+   `SNCReader` already reads (but never uses) `lrf_axis_origin`,
+   `lrf_axis_direction`, and `lrf_constant_angular_vel_mag`
+   (`self.lrf_angular_vel_lattice`) - the file's OWN recorded LRF
+   angular velocity. The raw NetCDF ALSO carries (currently NOT read by
+   `SNCReader` at all): `start_time`/`end_time` (real per-frame
+   timestamps, shape `(nsets,)` = `(n_frames,)` - `SNCReader.to_h5()`
+   currently throws these away and writes a fake `Metadata/frame_index =
+   np.arange(n_frames)` instead), plus `lrf_has_constant_angular_vel`,
+   `lrf_initial_angular_rotation`, `lrf_initial_n_revolutions`. Reading
+   these directly off a real file (`f50_SMF_forces_rotor.snc`, a small
+   2-frame raw dump for this same case) and computing
+   `lrf_constant_angular_vel_mag * (start_time[1] - start_time[0])`
+   (no extra unit conversion needed - `LatticeTime` scale is exactly
+   `1.0` for this case) gives **exactly -2.001 degrees** for that file's
+   single frame-to-frame gap - matching the independently-measured
+   empirical drift (~-1.8 to -2.4°/frame, from a completely different
+   file/method) almost exactly. `lrf_has_constant_angular_vel=1` (true)
+   and `lrf_initial_angular_rotation=0.0` for this case.
+4. **Corroborating (secondary) signal**: a chordwise/spanwise
+   cross-correlation check at two frame pairs 90° apart, both away from
+   the low-Cf trough (frame 40 vs 85, and the identical relative pair 4
+   revolutions later, 760 vs 805) shows a real cross-component signature
+   (e.g. Upper: `corr(chordwise40,chordwise85)=0.982`,
+   `corr(spanwise40,chordwise85)=0.847`) that reproduces almost exactly
+   4 revolutions apart - consistent with a rotation-angle-tied effect,
+   though on its own this was ambiguous (an earlier attempt at 1-vs-45
+   was confounded by frame 1 sitting near the Cf trough, i.e. near-zero
+   signal - don't reuse that specific pair).
 
-```bash
-python diagnose_snc.py /path/to/6e-5-6000rpm/case.snc
+### The exact fix formula (derived, not yet implemented)
+
 ```
+angle(frame) = lrf_initial_angular_rotation
+             + lrf_constant_angular_vel_mag * (start_time[frame] - start_time[0])
+```
+(radians; `LatticeTime` scale was exactly `1.0` for this case, so no
+further unit conversion was needed here - CONFIRM this holds in general
+before hardcoding it, rather than assuming). Rotate `Surface_X/Y/Z-Force`
+about `lrf_axis_direction` by `-angle(frame)` (sign TBD by direct
+empirical check against the measured drift direction above) before any
+chordwise/spanwise/radial/tangential decomposition. `Skin_Friction` and
+`Static_Pressure` are SCALARS (confirmed via `diagnose_snc.py`'s section
+2/3 output - no vector/frame ambiguity for those), so this only concerns
+`Surface_X/Y/Z-Force`.
 
-- If plain scipy can open the file (likely - this case predates the
-  8 GB DNS case that originally motivated `_LargeRecordNetcdfFile`, so
-  it may not even need the fix) AND its numbers match `SNCReader`'s
-  frame-by-frame: our reader is exonerated, this is hypothesis 1 (real
-  convergence question) - stop suspecting the code, go look at the
-  solver's own convergence history for near-wall quantities specifically.
-- If they DON'T match: hypothesis 2 is confirmed - fix
-  `_LargeRecordNetcdfFile`, most likely the assumption (in its
-  docstring) that the first-declared record variable in the header also
-  has the smallest on-disk offset (a NetCDF-classic-format invariant
-  that should hold, but hasn't been independently confirmed for
-  whatever wrote THIS file), or something about the per-variable stride
-  math that this file's specific record-variable layout exercises
-  differently from the three synthetic cases already tested.
-- Also worth doing regardless of outcome: if an OLDER, pre-this-session
-  conversion of this exact case (or a similar one) still exists from
-  before `_LargeRecordNetcdfFile` existed, compare its Cf plots against
-  the new ones for the same frames - a clean before/after regression
-  check that doesn't require any new HPC runs.
+**Recommended fix location**: centrally, inside `SNCReader.to_h5()` /
+`_write_surfel_group()` (`converters/snc_reader.py`) - decode
+`start_time`, `lrf_initial_angular_rotation`, `lrf_has_constant_angular_vel`
+in `_decode_metadata()`, rotate `Surface_X/Y/Z-Force` into the LRF there
+before writing, and write the REAL per-frame time (not
+`np.arange(n_frames)`) into `Metadata` too - so every downstream
+consumer (`FrictionLines`, `StripForces`) gets already-correct data with
+no changes needed on their end, and gets real timing for free (useful
+independently for `StripForces`'s harmonics/FFT, which currently has to
+assume uniform frame spacing). Confirm `lrf_has_constant_angular_vel` is
+true before applying this formula as-is - if any case has it false, the
+rotation isn't a simple constant rate and needs different handling.
+
+### What's corrupted vs. safe
+
+- **Corrupted**: `FrictionLines.cf(component='chordwise'/'spanwise')`,
+  `separation_line()`, `migration_line()`, `critical_points()` (needs the
+  full in-plane vector field). Their "validated on the real converted
+  rotor case... found REAL, physically coherent structure" claim
+  elsewhere in this file should be treated as UNRELIABLE until re-run
+  after the fix.
+- **Likely safe**: Cf MAGNITUDE (`component=None`, what
+  `plot_cf_radii()` uses - the file that started this whole
+  investigation). This blade is nearly flat, so its normal is dominated
+  by the axis-aligned (frame-invariant) thickness direction, making
+  `F.n` and hence `|tau|` only weakly sensitive to this rotation
+  mismatch - consistent with the clean, tight magnitude periodicity
+  already confirmed (frame 720 ≈ frame 0, frame 800 ≈ frame 80, see
+  below).
+- **Not yet directly tested, but almost certainly ALSO corrupted by the
+  identical mechanism**: `StripForces`'s `radial`/`tangential`
+  decomposition (built the same way - a basis vector from static LRF
+  geometry, dotted against the same global-frame `Force`) - and
+  therefore torque, `harmonics()`, `phase_lock()`, `plot_time_trace()`,
+  everything time-resolved. `axial` (thrust) should be safe, since the
+  rotation axis itself is frame-invariant under its own rotation -
+  consistent with HANDOFF's existing thrust validation looking correct
+  while torque was flagged as suspicious from the start. **Run the same
+  angle-tracking test (net radial+tangential vector angle vs. frame)
+  against `StripForces` before trusting any of its time-domain output.**
+
+### RESOLVED: Cf-magnitude-growth investigation
+
+Original symptom: `plot_cf_radii()`'s Cf magnitude appeared to grow
+smoothly/monotonically with frame index then saturate (peak Cf ~0.044 at
+frame 0, ~0.23 at frame 10, ~0.83 at frame 40, ~1.1 at frame 80).
+`diagnose_snc.py` (repo root) confirmed `_LargeRecordNetcdfFile` reads
+match plain `scipy.io.netcdf_file` bit-for-bit, frame-by-frame, on two
+real files (a 121-frame/186 GB file for a different case, and this
+case's own small raw dump) - the reader itself is exonerated, this was
+never a `_LargeRecordNetcdfFile` bug.
+
+Extending the check across all 829 frames of `forces_out.h5` (not just
+0/10/40/80) showed the "growth" is actually PERIODIC, not monotonic:
+frame 720 (=frame 0 + exactly 4 revolutions at ~2°/frame) reproduces
+frame 0's Cf stats almost exactly (mean 0.0086 vs 0.0082 Upper, 0.0070
+vs 0.0068 Lower), and frame 800 reproduces frame 80 just as tightly
+(0.1222 vs 0.1221 Upper). The original 0/10/40/80 sample just happened
+to land on the rising limb of one cycle, starting right near a periodic
+trough - not unbounded growth. Real, periodic, once-per-revolution
+near-wall shear variation (plausible for a hovering rotor encountering
+its own wake/tip vortex each revolution) - not a bug, not a slow
+"still-converging" transient.
+
+`diagnose_snc.py` usage, if needed again: `python diagnose_snc.py
+/path/to/case.snc` - opens via plain scipy AND `SNCReader` side by side,
+prints per-frame magnitude for both.
 
 ## `SNCReader` / `_LargeRecordNetcdfFile` (`converters/snc_reader.py`) — two 32-bit ceilings, fixed this session, UNVALIDATED against most real files
 
@@ -145,13 +228,17 @@ mirroring this file's apparent layout; a byte-alignment padding case
 with an odd-sized int16 record var) - `_LargeRecordNetcdfFile` matched
 plain scipy byte-for-byte in every case, no regression.
 
-**NOT yet validated end-to-end against any real multi-GB `.snc` file**
-(the DNS case that motivated this needs the HPC to even test) - and,
-per the OPEN INVESTIGATION above, its correctness against THIS project's
-own everyday-sized `6e-5-6000rpm` case is now an active, unresolved
-question, not a settled assumption. Treat any Cf/friction-line result
-from a freshly-(re)converted `.snc` file as suspect until
-`diagnose_snc.py` clears this reader on that file.
+**Now also validated against two real files this session** (see OPEN
+INVESTIGATION above, "RESOLVED: Cf-magnitude-growth investigation"):
+bit-for-bit identical to plain scipy, frame-by-frame, on a 186 GB/
+121-frame file (different case) AND this project's own
+`6e-5-6000rpm` raw dump. The reader itself is exonerated - still
+untested on the original multi-GB DNS case that motivated it (needs the
+HPC), but no longer an open question for this project's own files.
+**IMPORTANT - separate, still-open issue**: `SNCReader.to_h5()` writes
+`Surface_X/Y/Z-Force` in the wrong reference frame (global instead of
+LRF) - a real, CONFIRMED bug, but a physics/frame bug, not a byte-reading
+bug like the two above. See OPEN INVESTIGATION for the fix.
 
 ## `SurfaceVariable.stagnation_line()` — leading-edge stagnation point tracking (new this session)
 
@@ -309,6 +396,13 @@ All three validated on the real converted rotor case (`span_min=0.02`,
 clustered in the same tip region (span ~0.095-0.125 m) - three
 independent methods agreeing is the main confidence-builder here.
 
+**CAVEAT (added this session, see OPEN INVESTIGATION)**: this validation
+predates the discovery that `Surface_X/Y/Z-Force` is in the wrong
+reference frame, and all three of these tools consume the
+chordwise/spanwise-split wall-shear VECTOR (not just its magnitude) -
+exactly what that bug corrupts. Treat this validation as UNRELIABLE and
+re-run it after the frame fix lands, before trusting it again.
+
 ## `StripForces` (`bladeprocessor/strip_forces.py`) — the big new piece
 
 Built this session to replace a manual, per-frame PowerVIZ "Force
@@ -335,7 +429,17 @@ rotation axis geometry instead - no guessing.
   radial_force, tangential_force. **Validated against the user's own
   independently known total** (2.6 N thrust, full 2-bladed rotor):
   computed 1.319 N for one blade - matches half almost exactly. Torque
-  similarly confirmed ~half the user's known total.
+  similarly confirmed ~half the user's known total. **CAVEAT (this
+  session, see OPEN INVESTIGATION)**: this validation was done on the
+  only real file available at the time (2 frames, ~2 degrees apart) -
+  too small a gap to reveal the confirmed `Surface_X/Y/Z-Force`
+  global-vs-LRF frame bug. `axial` (thrust) is derived from the rotation
+  axis itself, which is frame-invariant, so it's likely still fine
+  (consistent with it validating cleanly) - but `radial`/`tangential`
+  (and therefore torque) use the exact same mechanism as
+  `FrictionLines`'s corrupted chordwise/spanwise split (a basis vector
+  from static LRF geometry, dotted against the still-global `Force`) and
+  are almost certainly ALSO wrong. Re-validate after the frame fix.
 - `plot_bar_forces()` - bar + cumulative curve, styled to match the
   user's own PowerVIZ reference (`images/forces/bar_forces/Force-Graph-1-bar_forces.png`).
   `normalize_radius` (default True, r/R) optional. `show_totals=True`
@@ -392,7 +496,13 @@ rotation axis geometry instead - no guessing.
     ~0° for the pure-cosine terms as expected. **NOT yet validated
     against real transient data** - no real multi-frame `.snc`
     conversion has been available locally this whole session (the only
-    real converted file has just 2 frames). This is the single most
+    real converted file has just 2 frames). **Also now blocked on the
+    OPEN INVESTIGATION's frame-of-reference fix** - `radial`/
+    `tangential` (hence torque, and every harmonic/phase-lock/time-trace
+    output below, all radial/tangential-based) are almost certainly
+    corrupted by the same global-vs-LRF `Surface_X/Y/Z-Force` bug until
+    that's fixed - don't spend real validation effort here until then,
+    it would need redoing anyway. This is the single most
     important thing to actually run once real HPC data is accessible.
 
 ## `Cf` unsteadiness (`FrictionLines.cf(stat=...)`)
@@ -450,17 +560,21 @@ not yet empirically checked):
 
 ## Pending / next steps (in likely priority order)
 
-1. **Convert a real multi-frame (transient) `.snc` file** on the HPC -
-   this unblocks real-data validation for: `StripForces`'s whole
-   time-domain/phase-lock/harmonics suite, `Cf` RMS/unsteadiness. This is
-   the biggest real gap right now - everything time-domain has only been
-   validated against synthetic data with known answers, which proves the
-   MATH is right but not that it looks/behaves sensibly on this actual
-   rotor.
-2. Get a real file from the colleague's swept-blade case, check the
+1. **Fix the `Surface_X/Y/Z-Force` global-vs-LRF reference frame bug** -
+   see OPEN INVESTIGATION at the top. This blocks trusting
+   `separation_line()`/`migration_line()`/`critical_points()`, and
+   almost certainly `StripForces`'s torque/radial/tangential/harmonics/
+   phase-lock/time-trace, entirely. Highest priority - everything else
+   in this list either depends on it or is lower-impact.
+2. After the fix: re-validate `separation_line()`/`migration_line()`/
+   `critical_points()` and `StripForces`'s full time-domain suite
+   against real data (`forces_out.h5`, 829 frames, already converted -
+   see File/data conventions below) - both were flagged this session as
+   needing re-validation, not just re-running once.
+3. Get a real file from the colleague's swept-blade case, check the
    sweep risk empirically (see above) before trusting any
    `cf_at_radii()`-family result on it.
-3. Possible future methods discussed but NOT built (only if the user
+4. Possible future methods discussed but NOT built (only if the user
    wants them): proper streamline integration (`matplotlib.streamplot`)
    for the skin-friction topology instead of inferring it from the
    quiver; cross-validating `separation_line()` against
@@ -480,15 +594,29 @@ not yet empirically checked):
   static/mean-case tools.
   **Note**: this file predates the `NX`→`Normal_X` rename and will need
   reconverting before `FrictionLines` can read it again.
-- **Now also**: a real, ~400-frame transient case, `6e-5-6000rpm` (an
-  isolated rotor in hover), converted via the same `forces` pipeline -
-  this is the file at the center of the OPEN INVESTIGATION at the top of
-  this document. Images referenced there live under
+- **Now also**: a real, 829-frame (~4.6 revolution) transient case,
+  `6e-5-6000rpm` (an isolated rotor in hover) -
+  `/scratch/jmrendon/Rotor-alone/6e-5_6000rpm/forces_out.h5` on the HPC,
+  already converted, this is the file the whole OPEN INVESTIGATION above
+  (both the resolved Cf-periodicity question and the still-open
+  reference-frame bug) was diagnosed against. **The raw `.snc` source
+  this was converted from no longer exists** (deleted from scratch to
+  save space) - not needed for the frame-bug fix itself (the already-
+  converted `.h5` has everything required), but if it's ever needed
+  again it only exists on the user's other computer (~3+ hour transfer).
+  A small (2-frame) raw `.snc` for this same case DOES still exist on
+  the HPC scratch (`f50_SMF_forces_rotor.snc`, despite the misleading
+  "f50" name - it only has 2 frames) - this is what was used to pull the
+  exact `start_time`/`lrf_initial_angular_rotation`/etc. metadata for
+  the fix formula above; useful as a quick real-data reference without
+  needing the full 829-frame conversion. Images referenced earlier in
+  this document for the original Cf-growth symptom live under
   `/Users/jmrendona/OneDrive - USherbrooke/PhD/rotor-alone/6e-5-6000rpm/images/`
   (note: different OneDrive root path, WITH spaces around the dash,
   than this repo's own `OneDrive-USherbrooke` working directory - both
   exist on this machine, don't confuse them).
 - `r_tip=0.125` m, `rho_ref=1.22523` kg/m³, `rpm=6000` for this case
-  (both the 2-frame and the 400-frame one - same underlying rotor).
+  (the 2-frame, 829-frame, and any other conversion of it - same
+  underlying rotor).
 - `span_min=0.02` isolates one blade half; `reverse_chord=True` needed
   to match the trusted `Cf`/`Cp` LE-at-x/c=0 convention.
