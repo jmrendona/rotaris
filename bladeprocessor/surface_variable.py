@@ -589,6 +589,264 @@ class SurfaceVariable:
                                            marker_size=marker_size, cmap=cmap, figsize=figsize,
                                            savepath=savepath, dpi=dpi)
 
+    def stagnation_line(self, frame: int = None, stat: str = 'mean',
+                         pressure_variable: str = 'Static_Pressure',
+                         span_min: float = None, span_max: float = None,
+                         n_span_bins: int = 200, chord_percentile: float = 0.1,
+                         reverse_chord: bool = False, search_xc_max: float = 0.2):
+
+        '''
+        Leading-edge stagnation point location, swept across span - the
+        local Cp MAXIMUM near the geometric leading edge (Cp approaches
+        the theoretical stagnation value there, see plot_cp_radii()'s
+        docstring) at every span station, tracking WHICH surface it
+        currently sits on and how far along it (in x/c) it has moved.
+        Motivated by downstream-obstruction (strut/stator) potential-flow
+        interaction: a local change in effective angle of attack shifts
+        the stagnation point toward one side, and the size/frequency of
+        that shift is a direct fingerprint of the interaction's strength
+        - this is the quantity that lets you actually see it, span
+        station by span station (and, across several `frame` calls,
+        instant by instant).
+
+        Unlike FrictionLines.separation_line()/migration_line(), which
+        each search ONE surface already split by its own wall-normal
+        sign (see SNCReader.surface_split()), this combines BOTH
+        surfaces' surfels in every span bin before searching - the
+        physical question here is precisely which side the stagnation
+        point has moved onto, not a quantity already confined to one of
+        them. The existing normal-based Upper/Lower split itself is
+        untouched; this only reuses both halves together downstream of
+        it.
+
+        How it works: the (cropped) span range is partitioned into
+        n_span_bins equal-width bins, same architecture as
+        separation_line(). Within each bin, EACH surface's own Cp vs.
+        local x/c is built the same percentile-normalized way as
+        at_radii()/cf_at_radii() (chord_percentile, reverse_chord - pass
+        the same reverse_chord you use elsewhere for this case),
+        restricted to x/c <= search_xc_max (near the geometric leading
+        edge, x/c=0 - see search_xc_max below). The surface whose
+        restricted window contains the higher Cp peak is reported as the
+        stagnation side for that bin; a span bin where neither surface
+        has enough points in that window is skipped.
+
+        Parameters
+        ----------
+        frame : int or None
+            A specific frame for an instantaneous stagnation location, or
+            None (default) for the `stat`-reduced case - see cp().
+            Comparing this across several individual frames (rather than
+            'mean') is the "does it move frame to frame" question this
+            was motivated by.
+        stat : 'mean', 'rms', or 'raw_rms'
+            Only used when frame is None - see cp(). 'mean' is the
+            physically meaningful choice for locating an actual
+            stagnation point ('rms' has no stagnation-point
+            interpretation of its own - it measures HOW MUCH Cp
+            fluctuates at a location, not where a pressure maximum sits -
+            exposed here mainly for completeness/debugging, not because
+            averaged unsteadiness has a stagnation point to find).
+        search_xc_max : float
+            Only x/c <= this value (on either surface) is searched for
+            the peak - keeps this a genuine leading-edge stagnation point
+            search, not a global max that could land on some unrelated
+            pressure feature elsewhere on the blade under separated-flow
+            conditions. Widen if a real case's stagnation point moves
+            further than the default (0.2) - check the returned 'xc'
+            values aren't pinned at this limit, which would mean they're
+            being clipped rather than genuinely located.
+
+        Returns
+        -------
+        list[dict]
+            One entry per span bin with enough data on at least one
+            surface, sorted by span: 'span' [m], 'chord' [m] (both raw
+            Cartesian, centered - see _span_chord(), directly usable as
+            (x, y) on plot_variable_surface()'s axes), 'r' [m] (all three
+            from the winning surface's own point), 'surface' ('Upper' or
+            'Lower' - whichever side the stagnation point is on; NOT a
+            physical pressure/suction label - check which is which for
+            this case, e.g. via plot_variable_surface()), 'xc' (that
+            surface's own local x/c position of the peak, 0 = right at
+            the geometric leading edge), 'signed_xc' (+xc if 'Lower', -xc
+            if 'Upper' - a single scalar combining side + distance,
+            directly plottable as one continuous line vs. span/r the way
+            migration_line()'s crossing already is - see
+            plot_stagnation_line()), 'cp' (the peak Cp value itself).
+        '''
+
+        if self.rho_ref is None or self.rpm is None:
+            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cp.")
+
+        per_surface = {}
+        for surf in ('Upper', 'Lower'):
+
+            span, chord = self._span_chord(surf)
+            r = self._radius(surf)
+            cp_vals = self.cp(surface=surf, frame=frame, stat=stat, pressure_variable=pressure_variable)
+
+            mask = np.ones(len(span), dtype=bool)
+            if span_min is not None:
+                mask &= span >= span_min
+            if span_max is not None:
+                mask &= span <= span_max
+
+            per_surface[surf] = (span[mask], chord[mask], r[mask], cp_vals[mask])
+
+        all_span = np.concatenate([per_surface[s][0] for s in ('Upper', 'Lower')])
+        if len(all_span) < 10:
+            raise ValueError(
+                f"Only {len(all_span)} points (both surfaces combined) after span_min/span_max "
+                "cropping - check span_min/span_max."
+            )
+
+        span_edges = np.linspace(all_span.min(), all_span.max(), n_span_bins + 1)
+
+        points = []
+
+        for i in range(n_span_bins):
+
+            lo, hi = span_edges[i], span_edges[i + 1]
+            candidates = []
+
+            for surf in ('Upper', 'Lower'):
+
+                span_s, chord_s, r_s, cp_s = per_surface[surf]
+                in_bin = (span_s >= lo) & (span_s < hi if i < n_span_bins - 1 else span_s <= hi)
+                if in_bin.sum() < 10:
+                    continue
+
+                c = chord_s[in_bin]
+                cp_bin = cp_s[in_bin]
+                r_bin = r_s[in_bin]
+                span_bin = span_s[in_bin]
+
+                c_min, c_max = np.percentile(c, [chord_percentile, 100 - chord_percentile])
+                if c_max == c_min:
+                    continue
+                valid = (c >= c_min) & (c <= c_max)
+                if valid.sum() < 10:
+                    continue
+
+                c_v = c[valid]
+                cp_v = cp_bin[valid]
+                r_v = r_bin[valid]
+                span_v = span_bin[valid]
+
+                xc_v = (c_v - c_min) / (c_max - c_min)
+                if reverse_chord:
+                    xc_v = 1 - xc_v
+
+                near_le = xc_v <= search_xc_max
+                if not np.any(near_le):
+                    continue
+
+                idx_local = np.argmax(cp_v[near_le])
+                idx = np.flatnonzero(near_le)[idx_local]
+
+                candidates.append({
+                    'surface': surf, 'xc': float(xc_v[idx]), 'cp': float(cp_v[idx]),
+                    'span': float(span_v[idx]), 'chord': float(c_v[idx]), 'r': float(r_v[idx]),
+                })
+
+            if not candidates:
+                continue
+
+            best = max(candidates, key=lambda c: c['cp'])
+            sign = 1.0 if best['surface'] == 'Lower' else -1.0
+            points.append({
+                'span': best['span'], 'chord': best['chord'], 'r': best['r'],
+                'surface': best['surface'], 'xc': best['xc'],
+                'signed_xc': sign * best['xc'], 'cp': best['cp'],
+            })
+
+        return sorted(points, key=lambda p: p['span'])
+
+    def plot_stagnation_line(self, points_by_label: dict, ax=None, x_axis: str = 'r',
+                              colors: dict = None, marker_size: float = 20,
+                              savepath: str = None, dpi: int = 150):
+
+        '''
+        Plot stagnation_line()'s signed_xc vs span or radius, one line
+        per label - e.g. {'mean': sv.stagnation_line(stat='mean'),
+        'frame 0': sv.stagnation_line(frame=0), 'frame 50':
+        sv.stagnation_line(frame=50)} to compare a handful of instants
+        against the mean - the "does it move frame to frame" question
+        directly. A single-item dict works fine too, for just the mean
+        case.
+
+        signed_xc = 0 sits right at the geometric leading edge; positive
+        = on the 'Lower' surface, negative = on 'Upper' (see
+        stagnation_line()'s Returns - not necessarily pressure/suction
+        side, check which is which for this case).
+
+        Parameters
+        ----------
+        points_by_label : dict[str, list[dict]]
+            label -> stagnation_line()'s return value.
+        x_axis : 'r' or 'span'
+            Horizontal axis - physical radius [m] (default) or raw
+            centered span [m] (see _span_chord()).
+        colors : dict[str, str], optional
+            label -> matplotlib color. Defaults to a cividis-sampled
+            color per label if not given.
+
+        Returns
+        -------
+        (fig, ax)
+        '''
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 5))
+        else:
+            fig = ax.figure
+
+        labels = list(points_by_label.keys())
+        if colors is None:
+            cmap_colors = plt.cm.get_cmap('cividis')(np.linspace(0, 1, max(len(labels), 1)))
+            colors = dict(zip(labels, cmap_colors))
+
+        for label in labels:
+
+            pts = points_by_label[label]
+            if not pts:
+                continue
+
+            x = np.array([p[x_axis] for p in pts])
+            y = np.array([p['signed_xc'] for p in pts])
+            order = np.argsort(x)
+            ax.plot(x[order], y[order], marker='o', markersize=np.sqrt(marker_size), linewidth=1.2,
+                    color=colors[label], label=label)
+
+        ax.axhline(0, color='k', linewidth=0.8, linestyle='--', alpha=0.6)
+        ax.set_xlabel('$r$ [m]' if x_axis == 'r' else 'span [m]')
+        ax.set_ylabel(r'signed $x/c$ (+Lower / -Upper) [-]')
+        ax.grid(True)
+        ax.legend()
+        fig.tight_layout()
+
+        if savepath:
+            fig.savefig(savepath, dpi=dpi)
+
+        return fig, ax
+
+    def save_stagnation_line(self, points, filepath: str):
+
+        '''
+        Write stagnation_line()'s output to a plain-text file, one row
+        per span bin: span, chord, r (all physical, meters), surface,
+        xc, signed_xc, cp - tab-separated with a header line. Same
+        convention as FrictionLines.save_separation_line()/
+        save_migration_line().
+        '''
+
+        with open(filepath, 'w') as f:
+            f.write('span_m\tchord_m\tr_m\tsurface\txc\tsigned_xc\tcp\n')
+            for p in points:
+                f.write(f"{p['span']:.6f}\t{p['chord']:.6f}\t{p['r']:.6f}\t{p['surface']}\t"
+                        f"{p['xc']:.4f}\t{p['signed_xc']:.4f}\t{p['cp']:.4f}\n")
+
     def _nearest_point(self, span_pct: float, chord_pct: float, surface: str = 'Upper',
                         tol: float = 0.0015, chord_percentile: float = 0.1, reverse_chord: bool = False,
                         span_min: float = None, span_max: float = None):
@@ -882,6 +1140,8 @@ class SurfaceVariable:
                                get_vector=None, span_min: float = None, span_max: float = None,
                                value_clip_percentile: float = 99, n_arrows: int = 2000,
                                marker_size: float = 1, cmap: str = 'cividis', figsize: tuple = None,
+                               show_stagnation_line: bool = False, stagnation_kwargs: dict = None,
+                               stagnation_color: str = 'red', stagnation_marker_size: float = 40,
                                savepath: str = None, dpi: int = 150):
 
         '''
@@ -929,6 +1189,27 @@ class SurfaceVariable:
             (only used if get_vector is given).
         marker_size : float
             Scatter marker size (matplotlib's `s`, points^2).
+        show_stagnation_line : bool
+            Overlay stagnation_line()'s per-span-bin leading-edge
+            stagnation point (see that method) on whichever subplot
+            ('Upper' or 'Lower') each bin's point actually landed on -
+            requires BOTH surfaces to be plotted (surface=('Upper',
+            'Lower'), the default): the whole point is seeing it jump
+            between subplots as it migrates sides, which a single-surface
+            call has already thrown away the other side's data for.
+            Uses this call's own span_min/span_max automatically; every
+            other stagnation_line() parameter (frame, stat,
+            pressure_variable, n_span_bins, chord_percentile,
+            reverse_chord, search_xc_max) can be overridden via
+            stagnation_kwargs. The existing normal-based Upper/Lower
+            split (surface_split(), baked into Geometry/Upper,Lower at
+            conversion time) is completely unaffected by this - it's
+            only reused here, not changed.
+        stagnation_kwargs : dict, optional
+            Extra keyword arguments forwarded to stagnation_line() (e.g.
+            {'frame': 12} for one instant instead of the mean).
+        stagnation_color, stagnation_marker_size : str, float
+            Marker style for the stagnation point overlay.
 
         Returns
         -------
@@ -939,6 +1220,13 @@ class SurfaceVariable:
 
         surfaces = (surface,) if isinstance(surface, str) else tuple(surface)
         rng = np.random.default_rng(0)
+
+        if show_stagnation_line and set(surfaces) != {'Upper', 'Lower'}:
+            raise ValueError(
+                "show_stagnation_line requires BOTH surfaces (surface=('Upper', 'Lower'), the "
+                "default) - it reports which side the stagnation point is on, which needs to "
+                "see both; a single-surface call has already discarded the other side's data."
+            )
 
         if figsize is None:
             figsize = (14, 4.5 * len(surfaces))
@@ -977,6 +1265,25 @@ class SurfaceVariable:
 
             ax.set_ylabel('chord [m]')
             ax.set_aspect('equal')
+
+        if show_stagnation_line:
+
+            stag_points = self.stagnation_line(span_min=span_min, span_max=span_max,
+                                                **(stagnation_kwargs or {}))
+
+            ax_by_surface = dict(zip(surfaces, axes))
+            labeled = {s: False for s in surfaces}
+
+            for p in stag_points:
+                ax = ax_by_surface[p['surface']]
+                ax.scatter([p['span']], [p['chord']], s=stagnation_marker_size,
+                           color=stagnation_color, edgecolors='k', linewidths=0.6, zorder=6,
+                           label='stagnation point' if not labeled[p['surface']] else None)
+                labeled[p['surface']] = True
+
+            for ax, surf in zip(axes, surfaces):
+                if labeled[surf]:
+                    ax.legend()
 
         axes[-1].set_xlabel('span [m]')
         fig.tight_layout()

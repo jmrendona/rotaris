@@ -8,6 +8,181 @@ instead of starting cold. `README.md` is the canonical reference for
 way they are*, what's been validated against real vs. synthetic data,
 and what's still open.
 
+## OPEN INVESTIGATION — read this first, work is moving to the HPC mid-debug
+
+**Symptom**: on a real, transient (~400-frame), already-past-transient
+(user confirmed thrust converged by ~5 revolutions) `.snc` case
+(`6e-5-6000rpm`), `FrictionLines.plot_cf_radii()`'s Cf magnitude grows
+smoothly and monotonically with frame index, then saturates: peak Cf
+~0.044 at frame 0, ~0.23 at frame 10, ~0.83 at frame 40, ~1.1 at frame
+80 (images in `.../images/cf_test/cf_radii_frame{0,10,40,80}.png`, and
+the two originally-reported `cf_radii_avg.png` vs `cf_radii_frame0.png`
+that kicked this off, another ~13x gap in the same direction). The
+radial trend also inverts between early and late/averaged frames (which
+radius has the biggest LE peak flips). Separately: averaging the raw
+forces over frames [0,1] vs [50,51] gives nearly IDENTICAL thrust
+(1.319 N vs 1.313 N) but torque that changes a lot and flips sign
+(+0.0219 N·m vs -0.0114 N·m).
+
+**Why thrust-stable-but-Cf/torque-not-stable is NOT inherently
+contradictory** (resolved, not open): `tau = F - (F.n)n` mathematically
+removes the ENTIRE pressure contribution to `F` (pressure acts purely
+along the local normal `n` by definition, so it contributes exactly
+zero to `tau`) - only the viscous/shear part of `F` survives into Cf.
+Thrust is essentially the rotation-axis component of `F`, dominated by
+the (fast-converging) pressure part. Torque includes both a pressure
+part AND a viscous/profile-drag part, so it's the natural first place a
+still-transient viscous field would show up even while thrust looks
+converged. This is real physics, not a bug - but it only explains why
+thrust and Cf/torque CAN move independently, it does NOT by itself prove
+the observed Cf growth is real physics rather than a reader bug. Both
+explanations below are still live.
+
+**Two live hypotheses, not yet distinguished**:
+
+1. **Real, still-unconverged near-wall/viscous statistics.** Skin
+   friction (SGS-turbulence-driven) is well known to converge much more
+   slowly than integrated pressure loads in scale-resolving CFD - the
+   user's "5 revolutions, transient removed" check very likely confirmed
+   THRUST had converged, not necessarily this finer near-wall quantity.
+   The observed shape (smooth, monotonic, SATURATING - only 1.32x growth
+   from frame 40→80 despite doubling the frame count - and each
+   individual frame's spatial Cf-vs-x/c shape is smooth/physically
+   sane, an LE peak decaying to the TE, not scrambled noise) is
+   consistent with this: a byte-misalignment/stride bug would be
+   expected to scramble the SPATIAL structure within a frame (reinterpret
+   floats essentially at random), not preserve a clean airfoil-shaped
+   curve while just scaling its amplitude up smoothly.
+2. **A real bug in `_LargeRecordNetcdfFile`** (see next section) on
+   THIS file's specific layout. Motivating concern: this reader was
+   rewritten from scratch this session and is used UNCONDITIONALLY for
+   every `.snc` file now (no size-based branch), but was only validated
+   against hand-built SYNTHETIC files (single record var; two record
+   vars, one big one small; a byte-padding case) - never against this
+   actual file. If this file's real record-variable layout has some
+   property none of those synthetic tests happened to cover, a
+   systematic (not random) stride/offset error could plausibly still
+   preserve smooth-looking per-frame data while being wrong in a way
+   that correlates with frame index.
+
+**Decisive test, not yet run**: `diagnose_snc.py` (repo root - written
+this session, needs to travel to the HPC with everything else). Reads
+the raw `.snc` directly via `SNCReader` (our patched reader) AND, if
+this file is small enough for it to work at all, via plain unmodified
+`scipy.io.netcdf_file` side by side, for a handful of frames
+(0/1/10/40/80/150). Run as:
+
+```bash
+python diagnose_snc.py /path/to/6e-5-6000rpm/case.snc
+```
+
+- If plain scipy can open the file (likely - this case predates the
+  8 GB DNS case that originally motivated `_LargeRecordNetcdfFile`, so
+  it may not even need the fix) AND its numbers match `SNCReader`'s
+  frame-by-frame: our reader is exonerated, this is hypothesis 1 (real
+  convergence question) - stop suspecting the code, go look at the
+  solver's own convergence history for near-wall quantities specifically.
+- If they DON'T match: hypothesis 2 is confirmed - fix
+  `_LargeRecordNetcdfFile`, most likely the assumption (in its
+  docstring) that the first-declared record variable in the header also
+  has the smallest on-disk offset (a NetCDF-classic-format invariant
+  that should hold, but hasn't been independently confirmed for
+  whatever wrote THIS file), or something about the per-variable stride
+  math that this file's specific record-variable layout exercises
+  differently from the three synthetic cases already tested.
+- Also worth doing regardless of outcome: if an OLDER, pre-this-session
+  conversion of this exact case (or a similar one) still exists from
+  before `_LargeRecordNetcdfFile` existed, compare its Cf plots against
+  the new ones for the same frames - a clean before/after regression
+  check that doesn't require any new HPC runs.
+
+## `SNCReader` / `_LargeRecordNetcdfFile` (`converters/snc_reader.py`) — two 32-bit ceilings, fixed this session, UNVALIDATED against most real files
+
+Built to fix `ValueError: read length must be non-negative or -1` on an
+8 GB, fine-DNS-mesh, single-frame `.snc` file that plain
+`scipy.io.netcdf_file` couldn't open. Two SEPARATE bugs, both in scipy
+itself, both fixed by a custom `_LargeRecordNetcdfFile(sio.netcdf_file)`
+subclass that overrides only `_read_var_array()`:
+
+1. **NetCDF's own 32-bit `vsize` header field** overflows/gets
+   corrupted (scipy's SIGNED 32-bit parse misreads the format's own
+   documented `2^32-1` escape sentinel as `-1`) once a record variable's
+   true per-record byte size crosses ~2.1-4.3 GB. Fixed by recomputing
+   the true per-record size independently from each variable's own
+   (unaffected) shape/dtype instead of trusting the file's stored
+   `vsize`.
+2. **A SEPARATE NumPy ceiling**, surfaced only after fixing #1: scipy
+   reads every record variable through ONE NumPy STRUCTURED dtype (one
+   "field" per record variable), and NumPy's structured-dtype machinery
+   caps a single field's byte size at a C `int` (~2.1 GB) - hit on the
+   same 8 GB file even after #1 was fixed, because "measurements" is a
+   multi-GB single field regardless. Fixed by never building a
+   structured dtype for record variables at all: read the whole
+   interleaved record block once as raw bytes, then hand each record
+   variable its OWN plain strided view into it (using that variable's
+   own file offset - `begin_`, already correctly parsed - as the anchor,
+   and the corrected per-record size from #1 as the between-records
+   stride). An EARLIER, narrower version of this fix only handled the
+   case of exactly one record variable, which turned out not to match
+   this file's real layout (it has more than one - "measurements" plus
+   at least one smaller one riding the same frame axis, e.g. a
+   timestamp) and hit the exact same ceiling through the leftover
+   fallback path - the current version has no such precondition.
+
+`SNCReader.__init__` uses `_LargeRecordNetcdfFile` UNCONDITIONALLY, for
+every file regardless of size - there is no runtime check/branch between
+"the two readers"; it's a strict replacement, validated to behave
+identically to plain scipy on ordinary files (see below), so there's no
+downside to always using it.
+
+**Validated**: both fixes reproduced against the EXACT reported error
+messages (constructing the same shape of structured dtype scipy would
+have built; surgically corrupting a real small NetCDF file's `vsize`
+field to the documented sentinel value). Correctness validated with
+THREE hand-built synthetic multi-record-variable files (a single record
+var; two record vars of very different size sharing the frame axis,
+mirroring this file's apparent layout; a byte-alignment padding case
+with an odd-sized int16 record var) - `_LargeRecordNetcdfFile` matched
+plain scipy byte-for-byte in every case, no regression.
+
+**NOT yet validated end-to-end against any real multi-GB `.snc` file**
+(the DNS case that motivated this needs the HPC to even test) - and,
+per the OPEN INVESTIGATION above, its correctness against THIS project's
+own everyday-sized `6e-5-6000rpm` case is now an active, unresolved
+question, not a settled assumption. Treat any Cf/friction-line result
+from a freshly-(re)converted `.snc` file as suspect until
+`diagnose_snc.py` clears this reader on that file.
+
+## `SurfaceVariable.stagnation_line()` — leading-edge stagnation point tracking (new this session)
+
+Motivated by potential-flow interaction with a downstream obstruction
+(strut/stator vane): a local AoA change shifts the stagnation point off
+the geometric LE, toward whichever surface sees the higher effective
+incidence. `stagnation_line()` sweeps span in bins (same architecture as
+`FrictionLines.separation_line()`/`migration_line()`), and in each bin
+searches the local Cp MAXIMUM near `x/c=0` across BOTH surfaces combined
+(unlike separation/migration lines, which each search one surface
+already split by wall-normal sign - the whole point here is seeing
+WHICH side it lands on). Returns a signed `x/c` (`+` on Lower, `-` on
+Upper) per span bin - one continuous scalar, directly plottable via the
+new `plot_stagnation_line()` (label→points dict, e.g. comparing several
+individual frames against the mean - the "does it move frame to frame"
+question). `plot_variable_surface(show_stagnation_line=True)` overlays
+it directly on the blade-contour subplots instead, jumping between the
+Upper/Lower panels as it migrates sides - only valid with both surfaces
+plotted (raises clearly otherwise). `save_stagnation_line()` matches the
+existing `save_separation_line()`/`save_migration_line()` text-export
+convention.
+
+**Validated** against a synthetic case with an engineered Cp peak at
+known (surface, x/c) locations at several span stations (including one
+placing the true peak exactly on the geometric LE) - recovered the
+correct surface and x/c to four decimal places at every station.
+`plot_variable_surface(show_stagnation_line=True)` and the single-surface
+guard both confirmed to run without error. **Not yet run against a real
+downstream-obstruction case** (needs one where this interaction is
+actually present - none available yet).
+
 ## Who's who / working style
 
 - User is a PhD student running PowerFLOW rotor simulations, building
@@ -298,13 +473,22 @@ not yet empirically checked):
 
 ## File/data conventions specific to this project's own validation case
 
-- Real converted force file used for validation this session:
-  `forces_rotor.h5`, built from `2f_SMF_forces_rotor.snc` via
-  `SNCReader.to_h5(face_name='/Rotor::Default-Segment', surface_split=True)`.
+- Real converted force file used for most of this session's earlier
+  validation: `forces_rotor.h5`, built from `2f_SMF_forces_rotor.snc`
+  via `SNCReader.to_h5(face_name='/Rotor::Default-Segment', surface_split=True)`.
   Only 2 frames - NOT a real transient case, just enough to sanity-check
   static/mean-case tools.
   **Note**: this file predates the `NX`→`Normal_X` rename and will need
   reconverting before `FrictionLines` can read it again.
-- `r_tip=0.125` m, `rho_ref=1.22523` kg/m³, `rpm=6000` for this case.
+- **Now also**: a real, ~400-frame transient case, `6e-5-6000rpm` (an
+  isolated rotor in hover), converted via the same `forces` pipeline -
+  this is the file at the center of the OPEN INVESTIGATION at the top of
+  this document. Images referenced there live under
+  `/Users/jmrendona/OneDrive - USherbrooke/PhD/rotor-alone/6e-5-6000rpm/images/`
+  (note: different OneDrive root path, WITH spaces around the dash,
+  than this repo's own `OneDrive-USherbrooke` working directory - both
+  exist on this machine, don't confuse them).
+- `r_tip=0.125` m, `rho_ref=1.22523` kg/m³, `rpm=6000` for this case
+  (both the 2-frame and the 400-frame one - same underlying rotor).
 - `span_min=0.02` isolates one blade half; `reverse_chord=True` needed
   to match the trusted `Cf`/`Cp` LE-at-x/c=0 convention.

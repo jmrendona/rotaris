@@ -914,6 +914,78 @@ sv.plot_variable_surface(
 An optional `get_vector` callable overlays a direction quiver (e.g. for a
 surface velocity field), same as `friction_lines()`'s wall-shear quiver.
 
+### Leading-edge stagnation point: `stagnation_line()` / `plot_stagnation_line()` / `show_stagnation_line`
+
+Motivated by potential-flow interaction with a downstream obstruction
+(a strut/stator vane): a local change in effective angle of attack
+shifts the stagnation point off the geometric leading edge, toward
+whichever surface now sees the higher effective incidence. Tracking
+that shift - which side it's on, and how far along it (in `x/c`) - is a
+direct, physically interpretable fingerprint of the interaction, span
+station by span station, and (by comparing several individual `frame`
+values) instant by instant.
+
+The stagnation point is defined as the local Cp **maximum** near `x/c=0`
+(Cp approaches its theoretical stagnation value there - see
+`plot_cp_radii()`'s docstring on the LE signature). Unlike
+`FrictionLines.separation_line()`/`migration_line()`, which each search
+ONE surface already split by its own wall-normal sign, this combines
+BOTH surfaces' surfels in every span bin before searching - the whole
+point is seeing which side it lands on, not a quantity already confined
+to one of them. The existing normal-based Upper/Lower split itself
+(`SNCReader.surface_split()`) is untouched; this only reuses both halves
+together, downstream of it, purely for this one search.
+
+```python
+points = sv.stagnation_line(stat='mean', span_min=0.03)
+# [{'span':..., 'chord':..., 'r':..., 'surface': 'Upper'|'Lower',
+#   'xc':..., 'signed_xc':..., 'cp':...}, ...] sorted by span - 'signed_xc'
+# is +xc on 'Lower', -xc on 'Upper' (0 = right at the geometric LE), a
+# single scalar combining side + distance for a one-line plot:
+
+sv.plot_stagnation_line(
+    {'mean': sv.stagnation_line(stat='mean', span_min=0.03),
+     'frame 0': sv.stagnation_line(frame=0, span_min=0.03)},
+    savepath='stagnation_vs_span.png',
+)  # one line per label vs r (or span) - the "does it move frame to frame" question directly
+
+sv.save_stagnation_line(points, 'stagnation_mean.txt')
+```
+
+Or, to see it directly on the blade contour (jumping between the Upper
+and Lower subplots as it migrates sides), pass `show_stagnation_line=True`
+to `plot_variable_surface()` instead - **only valid with both surfaces
+plotted** (`surface=('Upper', 'Lower')`, the default), since the whole
+point is seeing which subplot it lands on:
+
+```python
+sv.plot_variable_surface(
+    lambda s: -sv.cp(surface=s, stat='mean'),
+    cbar_label='-Cp', span_min=0.03,
+    show_stagnation_line=True,
+    savepath='cp_surface_with_stagnation.png',
+)
+```
+
+`search_xc_max` (default 0.2, forwarded via `stagnation_kwargs` on
+`plot_variable_surface()`, or passed directly to `stagnation_line()`)
+restricts the search to `x/c <= search_xc_max` on either surface - keeps
+this a genuine LE stagnation search rather than a global Cp max that
+could land on an unrelated feature under separated-flow conditions;
+widen it if a real case's returned `xc` values come back pinned at the
+default, which means they're being clipped rather than genuinely
+located.
+
+**Validated** against a synthetic case with a known, engineered Cp peak
+at a chosen (surface, x/c) location at each of several span stations
+(including one case placing the true peak on 'Lower' right at the exact
+geometric leading edge, x/c=0) - `stagnation_line()` recovered the
+correct surface and x/c (to four decimal places) at every station, and
+`plot_variable_surface(show_stagnation_line=True)` places the marker on
+the matching subplot without error. Not yet run against a real
+downstream-obstruction case (needs one where this interaction is
+actually present).
+
 ### Cross-case comparison: `to_common_grid()` / `field()` / `SurfaceVariableField`
 
 Resamples any per-surfel field onto a shared `(r/R, x/c)` grid. Built directly from a raw surfel
