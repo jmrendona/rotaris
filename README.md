@@ -111,6 +111,42 @@ reader = SNCReader("forces_rotor.snc")
 reader.to_h5("forces_rotor.h5")
 ```
 
+### Reference frame: `Surface X/Y/Z-Force` is rotated into the LRF automatically
+
+PowerFLOW stores `Surface X/Y/Z-Force` in the GLOBAL (lab, non-rotating)
+frame, while `Geometry/*` (positions/normals, and therefore every
+chordwise/spanwise/radial/tangential direction downstream tools define
+from them) is in the LRF (the rotor's own co-rotating frame). `to_h5()`
+rotates the force vector into the LRF before writing, so
+`FrictionLines`/`StripForces` see everything in a consistent frame - no
+change needed on your end, this happens automatically whenever
+`Surface X/Y/Z-Force` is present.
+
+Two optional `to_h5()` parameters control *how* the rotation angle is
+determined:
+
+- `nc_stats_path` - path to a saved `exaritool nc-stats.ri <snc_path>
+  -detail` dump (same convention as `convert_snc_to_h5()`'s parameter of
+  the same name, used for the pressure branch). **Preferred when
+  available** - PowerFLOW's own authoritative angle, computed from the
+  full simulation history, matched to this file's frames by absolute
+  timestamp (not by row index, so it's safe even if this `.snc` is a
+  partial, mid-simulation dump). Its real per-frame timing also gets
+  written to `Metadata/mid_s`, so `SurfaceVariable.periodogram()` gets a
+  real sampling rate for free.
+- If omitted, the rotation angle is self-derived from the file's own
+  `start_time`/`lrf_constant_angular_vel_mag`/`lrf_initial_angular_rotation`
+  metadata instead - validated against real data, including across two
+  files starting at different absolute points in the same simulation
+  (see `HANDOFF.md`'s OPEN INVESTIGATION for the full evidence).
+
+`blade_lrf_offset_deg` (default `0.0`) adds an extra CONSTANT angle on
+top of whichever of the above computed the per-frame rotation - for a
+fixed mounting/modeling misalignment between the LRF's own
+zero-orientation and the blade's actual geometry, which neither source
+above can derive on its own (a setup detail). Only set this if
+independently confirmed for a given case.
+
 ### Very large (DNS-resolution) meshes: a 32-bit format limit, fixed
 
 `SNCReader` opens the file via `_LargeRecordNetcdfFile` (a small

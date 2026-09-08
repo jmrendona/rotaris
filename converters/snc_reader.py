@@ -370,7 +370,7 @@ class SNCReader:
 
         self.n_frames = f.variables['measurements'].shape[0]
 
-    def _rotation_angle(self, frame: int, frame_meta: dict = None) -> float:
+    def _rotation_angle(self, frame: int, frame_meta_entry: dict = None) -> float:
 
         '''
         Angle [rad] the LRF has rotated, at `frame`, relative to the
@@ -380,20 +380,42 @@ class SNCReader:
 
         Two sources, in order of preference:
 
-        1. `frame_meta['lrf_position_rad']`, if given - PowerFLOW's OWN
-           authoritative angular position for this frame, from
-           `exaritool nc-stats.ri <file>.snc -detail` (see
-           parse_nc_stats()). Preferred when available: no sign/unit
-           derivation needed, it's already the exact quantity this
-           method exists to compute, straight from the tool that
-           presumably computes it the same way internally.
+        1. `frame_meta_entry['lrf_position_rad']`, if given - ONE
+           parse_nc_stats() entry, already resolved to correspond to
+           THIS `frame` by matching absolute `start_time` (see
+           `_aligned_frame_meta()` - NOT a raw frame-number-keyed lookup;
+           see that method for why a naive row-index match is unsafe).
+           PowerFLOW's OWN authoritative angular position for this frame,
+           from `exaritool nc-stats.ri <file>.snc -detail`. PREFERRED,
+           not just as a convenience: this is computed by PowerFLOW
+           itself from the full simulation history, so it isn't
+           vulnerable to the ambiguity #2 below has - see that path's
+           own note.
         2. Otherwise, self-derived from this file's own recorded angular
-           rate and per-frame timestamps (validated against an
-           independent, empirically-measured drift rate - agreement to 3
-           decimal degrees, HANDOFF.md's OPEN INVESTIGATION evidence #3):
+           rate and per-frame ABSOLUTE timestamps:
 
                angle(frame) = lrf_initial_angular_rotation
-                            + lrf_constant_angular_vel_mag * (start_time[frame] - start_time[0])
+                            + lrf_constant_angular_vel_mag * start_time[frame]
+
+           `start_time` is an ABSOLUTE simulation timestep counter, NOT
+           reset to 0 for a partial/mid-simulation dump - confirmed by
+           comparing two real files of this project's own case
+           (`2f_SMF_forces_rotor.snc`, `start_time[0]=1964490`, vs.
+           `f50_SMF_forces_rotor.snc`, `start_time[0]=2019090` - a
+           genuinely different, non-zero starting point) which report
+           IDENTICAL `lrf_initial_angular_rotation` (0.0) and
+           `lrf_constant_angular_vel_mag` despite starting at very
+           different absolute times - only possible if
+           `lrf_initial_angular_rotation` is a fixed, simulation-wide
+           constant (the angle at absolute `start_time=0`), not
+           something tied to whichever frame happens to be "frame 0" of
+           a given file. An EARLIER version of this formula subtracted
+           `start_time[0]`, silently treating THIS FILE'S OWN first
+           frame as the zero-angle reference - correct only for a dump
+           that happens to start at absolute `start_time=0`, and wrong
+           by a constant (but non-obvious - it wouldn't show up in a
+           within-file frame-to-frame sweep test, only across files) offset
+           otherwise. Caught before it caused a real error, not after.
 
            `lrf_constant_angular_vel_mag` is already in radians per
            lattice time unit, and `start_time` in lattice time units, so
@@ -401,10 +423,16 @@ class SNCReader:
            factor is 1.0 (true for every case checked so far) - checked
            explicitly below rather than assumed, since this hasn't been
            validated for any case where it isn't.
+
+        Neither source can know about a possible CONSTANT misalignment
+        between the LRF's own nominal zero-orientation and the blade's
+        actual geometric orientation (a modeling/setup detail, not
+        something derivable from rotation rate or timestamps at all) -
+        see `to_h5()`'s `blade_lrf_offset_deg` parameter for that.
         '''
 
-        if frame_meta is not None and frame in frame_meta:
-            return frame_meta[frame]['lrf_position_rad']
+        if frame_meta_entry is not None:
+            return frame_meta_entry['lrf_position_rad']
 
         if not self.lrf_has_constant_angular_vel:
             raise NotImplementedError(
@@ -422,8 +450,7 @@ class SNCReader:
                 "Surface_X/Y/Z-Force frame correction on this file."
             )
 
-        return (self.lrf_initial_angular_rotation
-                + self.lrf_angular_vel_lattice * (self.start_time[frame] - self.start_time[0]))
+        return self.lrf_initial_angular_rotation + self.lrf_angular_vel_lattice * self.start_time[frame]
 
     @staticmethod
     def _rotate_about_axis(vectors: np.ndarray, axis: np.ndarray, angle: float) -> np.ndarray:
@@ -439,6 +466,47 @@ class SNCReader:
         dot = vectors @ axis
 
         return vectors * cos_a + cross * sin_a + axis[None, :] * dot[:, None] * (1 - cos_a)
+
+    def _aligned_frame_meta(self, frame_meta: dict) -> list:
+
+        '''
+        Re-key parse_nc_stats()'s frame_meta (indexed by ABSOLUTE frame
+        number, per exaritool's own numbering) against THIS file's own
+        rows, by matching each row's own `start_time` value to
+        frame_meta entries' `start_ts` - NOT by assuming this file's row
+        0 corresponds to frame_meta's frame number 0. That assumption is
+        only safe for a file that happens to start at absolute frame/
+        timestep zero - confirmed unsafe in general on this project's own
+        `f50_SMF_forces_rotor.snc` (starts at `start_time[0]=2019090`, a
+        genuinely different absolute point than `2f_SMF_forces_rotor.snc`'s
+        `1964490` - see `_rotation_angle()`'s docstring for the full
+        story). Matching by the actual timestamp value instead sidesteps
+        needing to know or assume anything about which absolute frame a
+        given file starts at.
+
+        Falls back to a row-index match (with a warning) only if this
+        file has no `start_time` of its own to match against - rare, and
+        the best that can be done without it.
+
+        Returns
+        -------
+        list, length n_frames
+            frame_meta's entry for each row (by matching start_ts), or
+            None where no exact match was found - _rotation_angle() then
+            falls back to its own self-derived formula for that row.
+        '''
+
+        if self.start_time is None:
+            warnings.warn(
+                "This file has no start_time metadata, so nc_stats_path's per-frame table "
+                "can't be matched by absolute timestamp - falling back to assuming this "
+                "file's row order matches frame_meta's frame-number order directly (only "
+                "correct if this file starts at frame_meta's frame 0)."
+            )
+            return [frame_meta.get(row) for row in range(self.n_frames)]
+
+        by_start_ts = {entry['start_ts']: entry for entry in frame_meta.values()}
+        return [by_start_ts.get(int(self.start_time[row])) for row in range(self.n_frames)]
 
     def face_mask(self, name: str) -> np.ndarray:
 
@@ -553,7 +621,8 @@ class SNCReader:
 
     def _write_surfel_group(self, h5f, geo_path: str, data_path: str, mask: np.ndarray,
                              coords: np.ndarray, normals: np.ndarray, areas: np.ndarray,
-                             force_scale: float, frame_meta: dict = None):
+                             force_scale: float, aligned_frame_meta: list = None,
+                             blade_offset_rad: float = 0.0):
 
         '''
         Write one surfel selection's geometry (once, frame-independent -
@@ -570,17 +639,16 @@ class SNCReader:
         (Skin Friction, Static Pressure) is a scalar in this format, so
         it's written as-is, same as before.
 
-        frame_meta : dict[int, dict], optional
-            parse_nc_stats()'s return value (keyed by ABSOLUTE frame
-            number, as used by exaritool - see _rotation_angle()), if
-            available - passed straight through to _rotation_angle() per
-            frame. Assumes this file's own row 0 corresponds to
-            frame_meta's frame number 0; if this .snc is a partial dump
-            starting at some other absolute frame, frame_meta's keys
-            won't line up and every frame silently falls back to
-            _rotation_angle()'s self-derived formula instead (still
-            correct, just not cross-checked against PowerFLOW's own
-            value) - not a crash, but worth being aware of.
+        aligned_frame_meta : list, optional
+            _aligned_frame_meta()'s output (already re-keyed to this
+            file's own rows - NOT the raw parse_nc_stats() dict), if
+            available - aligned_frame_meta[frame] is passed straight
+            through to _rotation_angle() per frame.
+        blade_offset_rad : float
+            Extra CONSTANT rotation [rad] added to every frame's angle
+            before rotating - see to_h5()'s blade_lrf_offset_deg for what
+            this corrects (a fixed LRF-vs-blade misalignment neither
+            rotation-angle source can know about on its own).
         '''
 
         geo = h5f.create_group(geo_path)
@@ -598,7 +666,7 @@ class SNCReader:
 
         if has_force:
 
-            if self.start_time is None and not frame_meta:
+            if self.start_time is None and not aligned_frame_meta:
                 raise ValueError(
                     f"'{self.filename}' has Surface X/Y/Z-Force but no start_time/"
                     "lrf_initial_angular_rotation/etc. metadata and no nc_stats_path was "
@@ -616,7 +684,8 @@ class SNCReader:
                     [self.variable(name, frame=frame)[mask] for name in self._FORCE_VARIABLE_NAMES],
                     axis=-1,
                 )  # (n_selected, 3) - still global frame, raw lattice units
-                angle = self._rotation_angle(frame, frame_meta=frame_meta)
+                entry = aligned_frame_meta[frame] if aligned_frame_meta is not None else None
+                angle = self._rotation_angle(frame, frame_meta_entry=entry) + blade_offset_rad
                 force_frames.append(self._rotate_about_axis(raw, axis_direction, -angle))
 
             force_all = np.stack(force_frames, axis=0) * force_scale  # (n_frames, n_selected, 3)
@@ -657,7 +726,7 @@ class SNCReader:
             dset.attrs['physical_units'] = is_physical
 
     def to_h5(self, output_path: str, face_name: str = None, surface_split: bool = False,
-              nc_stats_path: str = None):
+              nc_stats_path: str = None, blade_lrf_offset_deg: float = 0.0):
 
         '''
         Write coordinates (centroids), normals, areas, all variables (for
@@ -696,18 +765,37 @@ class SNCReader:
             output (see parse_nc_stats()) - same convention as
             converters.ensight_to_h5.convert_snc_to_h5()'s parameter of
             the same name. If given, its `lrf_position_rad` is used
-            PREFERENTIALLY over _rotation_angle()'s self-derived formula
-            (PowerFLOW's own authoritative angle - see _rotation_angle()),
-            and its real per-frame `mid_s`/`start_ts`/`end_ts` are written
-            into Metadata alongside `lrf_position_rad`, matching
-            EnsightSeriesWriter's schema for the pressure branch - so
-            SurfaceVariable.timetrace()/periodogram() (which already look
-            for Metadata/mid_s) get a real sampling rate here too. If
-            omitted, rotation falls back to the self-derived formula, and
-            Metadata gets this file's own raw `start_time`/`end_time`
-            instead (lattice time units, NOT seconds - no validated
-            conversion to physical time exists without nc_stats_path;
-            written for reference only, not as a `mid_s`-equivalent).
+            PREFERENTIALLY over _rotation_angle()'s self-derived formula -
+            not just as a convenience, this is PowerFLOW's own
+            authoritative angle, computed from the full simulation
+            history, so use it whenever it's available. Matched to this
+            file's own frames by absolute `start_time`, not by row index
+            (see `_aligned_frame_meta()` - a raw .snc that's a partial,
+            mid-simulation dump won't have its row 0 line up with
+            frame_meta's frame 0 in general). Its real per-frame
+            `mid_s`/`lrf_position_rad` are also written into Metadata,
+            matching `EnsightSeriesWriter`'s schema for the pressure
+            branch - so `SurfaceVariable.timetrace()`/`periodogram()`
+            (which already look for `Metadata/mid_s`) get a real sampling
+            rate here too. If omitted, rotation falls back to the
+            self-derived formula, and Metadata gets this file's own raw
+            `start_time`/`end_time` instead (lattice time units, NOT
+            seconds - no validated conversion to physical time exists
+            without `nc_stats_path`; written for reference only, not as a
+            `mid_s`-equivalent).
+        blade_lrf_offset_deg : float
+            Extra CONSTANT angle [deg] added to every frame's rotation,
+            on top of whichever source above computed it. Neither source
+            can know about a fixed mounting/modeling misalignment between
+            the LRF's own nominal zero-orientation and the blade's actual
+            geometric orientation (e.g. if the blade was modeled with a
+            built-in pitch/lead-lag offset relative to the LRF's own
+            reference line) - that's a setup detail, not something
+            derivable from rotation rate or timestamps at all. 0 by
+            default (no offset assumed); set it only if you've
+            independently determined this case has one - e.g. by
+            comparing a known physical feature's expected vs. observed
+            azimuthal position after conversion.
         '''
 
         length_scale = self.lattice_scales['LatticeLength']
@@ -718,6 +806,8 @@ class SNCReader:
         base_mask = self.face_mask(face_name) if face_name is not None else np.ones(len(areas), dtype=bool)
 
         frame_meta = parse_nc_stats(nc_stats_path) if nc_stats_path else None
+        aligned_frame_meta = self._aligned_frame_meta(frame_meta) if frame_meta else None
+        blade_offset_rad = np.radians(blade_lrf_offset_deg)
 
         with h5py.File(output_path, 'w') as h5f:
 
@@ -726,17 +816,18 @@ class SNCReader:
             meta.create_dataset('lrf_axis_direction', data=self.lrf_axis_direction)
             meta.create_dataset('frame_index', data=np.arange(self.n_frames))
             meta.attrs['lrf_angular_vel_lattice'] = self.lrf_angular_vel_lattice
+            meta.attrs['blade_lrf_offset_deg'] = blade_lrf_offset_deg
 
-            if frame_meta:
+            if aligned_frame_meta is not None:
                 # Real, PowerFLOW-computed per-frame timing/angle - same
                 # schema as converters.ensight_to_h5.EnsightSeriesWriter,
                 # so SurfaceVariable's existing Metadata/mid_s lookup
                 # (timetrace()/periodogram()) works here too. NaN for any
-                # frame missing from frame_meta (see _write_surfel_group()'s
-                # docstring on frame-index alignment).
-                mid_s = np.array([frame_meta.get(i, {}).get('mid_s', np.nan) for i in range(self.n_frames)])
+                # row _aligned_frame_meta() couldn't match (see that
+                # method's docstring).
+                mid_s = np.array([(e or {}).get('mid_s', np.nan) for e in aligned_frame_meta])
                 lrf_position_rad = np.array(
-                    [frame_meta.get(i, {}).get('lrf_position_rad', np.nan) for i in range(self.n_frames)]
+                    [(e or {}).get('lrf_position_rad', np.nan) for e in aligned_frame_meta]
                 )
                 meta.create_dataset('mid_s', data=mid_s)
                 meta.create_dataset('lrf_position_rad', data=lrf_position_rad)
@@ -766,7 +857,8 @@ class SNCReader:
                 geo_path = f'Geometry/{label}' if label else 'Geometry'
                 data_path = f'Data/{label}' if label else 'Data'
                 self._write_surfel_group(h5f, geo_path, data_path, mask, coords, normals, areas,
-                                          force_scale, frame_meta=frame_meta)
+                                          force_scale, aligned_frame_meta=aligned_frame_meta,
+                                          blade_offset_rad=blade_offset_rad)
 
     def close(self):
         self._f.close()

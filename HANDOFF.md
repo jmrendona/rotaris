@@ -34,20 +34,32 @@ been run.**
   `end_time`, `lrf_has_constant_angular_vel`, `lrf_initial_angular_rotation`
   (previously unread) - defensively: `None` if this file doesn't have
   them (older/different format), rather than a hard `KeyError` on open.
-- `SNCReader._rotation_angle(frame, frame_meta=None)` - the per-frame
-  rotation angle [rad]. Prefers `frame_meta[frame]['lrf_position_rad']`
-  (PowerFLOW's own authoritative value, from `exaritool nc-stats.ri
-  <snc> -detail` via the new module-level `parse_nc_stats()` - MOVED
-  here from `converters/ensight_to_h5.py`, which now imports it from
-  here instead, to avoid a circular import) when given; otherwise falls
-  back to the self-derived formula (`lrf_initial_angular_rotation +
-  lrf_constant_angular_vel_mag * (start_time[frame] - start_time[0])`),
-  validated to reproduce the exact `-2.001 deg` frame-to-frame angle
-  HANDOFF's evidence #3 already measured, off the real
-  `2f_SMF_forces_rotor.snc` (confirmed again, independently, this
-  session - see "Locally verified" below). Raises clearly (doesn't
+- `SNCReader._rotation_angle(frame, frame_meta_entry=None)` - the
+  per-frame rotation angle [rad]. Prefers
+  `frame_meta_entry['lrf_position_rad']` (PowerFLOW's own authoritative
+  value, from `exaritool nc-stats.ri <snc> -detail` via the new
+  module-level `parse_nc_stats()` - MOVED here from
+  `converters/ensight_to_h5.py`, which now imports it from here instead,
+  to avoid a circular import) when given; otherwise falls back to the
+  self-derived formula: `lrf_initial_angular_rotation +
+  lrf_constant_angular_vel_mag * start_time[frame]` - see "CORRECTION"
+  below, this is NOT what was first implemented. Raises clearly (doesn't
   silently guess) if `LatticeTime`'s scale isn't exactly 1.0, or if
   `lrf_has_constant_angular_vel` is false.
+- `SNCReader._aligned_frame_meta(frame_meta)` - re-keys
+  `parse_nc_stats()`'s output (indexed by ABSOLUTE frame number) against
+  THIS file's own rows by matching absolute `start_time` values, NOT by
+  assuming row 0 = frame_meta's frame 0 - see "CORRECTION" below, the
+  identical issue affects nc_stats_path alignment too, not just the
+  self-derived formula.
+- `SNCReader.to_h5(..., blade_lrf_offset_deg=0.0)` - new parameter, an
+  extra CONSTANT angle added on top of whichever rotation source above
+  computed, for a fixed LRF-vs-blade mounting misalignment that neither
+  source could ever derive from rotation rate/timestamps alone (a
+  modeling/setup detail). 0 by default; only set it if independently
+  confirmed for a given case (e.g. a known physical feature's azimuth
+  coming out offset by a constant amount after conversion, consistently
+  across every frame).
 - `SNCReader._rotate_about_axis(vectors, axis, angle)` - Rodrigues'
   rotation formula, staticmethod.
 - `SNCReader._write_surfel_group()` now rotates the
@@ -121,41 +133,72 @@ re-running the sweep test below.
   the in-memory replication above is mathematically identical to what
   `to_h5()` now does, just without the disk write.
 
-### IMPORTANT constraint discovered this session: the decisive sweep test needs the HPC, and the original source file for it is gone
+### CORRECTION (later, same investigation): the self-derived formula assumed every file starts at absolute time zero - it doesn't
+
+Caught by the user asking, before trusting any of this: "what if the file I give you starts at some offset relative to the original location - would the fix know that?" It would NOT have, with the first version of the formula.
+
+The bug: `angle(frame) = lrf_initial_angular_rotation + lrf_constant_angular_vel_mag * (start_time[frame] - start_time[0])` subtracts `start_time[0]`, silently treating THIS FILE'S OWN first frame as the zero-angle reference. That's only correct if the file happens to start at absolute `start_time=0` - wrong by a constant offset for any partial/mid-simulation dump, and this wrong offset would NOT show up in a within-file frame-to-frame sweep test (it cancels out of any RELATIVE comparison), only across files - exactly why it wasn't caught by the sweep-test validation already done.
+
+**Proven wrong on real data, not just in theory**: `2f_SMF_forces_rotor.snc` (`start_time[0]=1964490`) and `f50_SMF_forces_rotor.snc` (`start_time[0]=2019090`, a genuinely different, later absolute point in the same simulation - the "f50" name is apparently literal) report IDENTICAL `lrf_initial_angular_rotation` (0.0) and `lrf_constant_angular_vel_mag`. That's only possible if `lrf_initial_angular_rotation` is a fixed, simulation-wide constant (the angle at absolute `start_time=0`), not something tied to whichever frame happens to be "frame 0" of a given file - so `start_time` must be one continuous absolute clock across dumps, not reset per file.
+
+**Fix**: drop the `- start_time[0]` term - `angle(frame) = lrf_initial_angular_rotation + lrf_constant_angular_vel_mag * start_time[frame]`. The SAME issue existed in how `nc_stats_path`'s `frame_meta` was matched to this file's rows (by raw index, same wrong assumption) - fixed via the new `_aligned_frame_meta()`, which matches by absolute `start_time` value instead of row index.
+
+**Validated after the fix**: within-file rate is unchanged (`2f`: `-2.0011 deg/frame`, `f50`: `-2.0011 deg/frame` - identical, as it must be, a constant additive correction doesn't change a slope) - all prior rate/sign validation still holds. New cross-file check that only makes sense with the fix: `f50`'s frame-0 angle (`-3700.0239 deg`) minus `2f`'s frame-0 angle (`-3599.9683 deg`) = `-100.02 deg`, vs. `50 frames * -2.0011 deg/frame = -100.06 deg` - matches to within 0.04 deg, strong independent evidence `f50` really does start ~50 frames after `2f` in ABSOLUTE terms, and that the corrected formula now tracks a genuine shared reference across different files (exactly the property that was broken before, and exactly what the user's question was probing for).
+
+**Still cannot rule out**: a fixed mounting/modeling misalignment between the LRF's own zero-orientation and the blade's actual geometry - not derivable from rotation rate/timestamps at all, by either formula. `to_h5()`'s new `blade_lrf_offset_deg` parameter exists for this (0 by default) - use it only if independently confirmed for a given case.
+
+### IMPORTANT constraint: `forces_out.h5` AND its source `.snc` are BOTH gone now - decisive sweep test moved to a fresh conversion instead
 
 HANDOFF's evidence #1/#2 (the sweep collapsing from ~317-330 deg to
 ~90-110 deg) was measured against `forces_out.h5` (829 frames, ~4.6
 revolutions) - the only real file with enough angular spread to actually
-show this bug. That file's ORIGINAL raw `.snc` **no longer exists** on
-HPC scratch (deleted to save space - see "File/data conventions" below),
-so the now-fixed `SNCReader.to_h5()` can't simply be re-run on it to
-produce a corrected version directly - there's no `.snc` left to convert.
+show this bug. That file's ORIGINAL raw `.snc` already didn't exist on
+HPC scratch (deleted to save space), and **the user has since deleted
+`forces_out.h5` itself too** - so the post-hoc-correction approach an
+earlier version of `verify_rotation_fix.py` used (correcting that file's
+already-stored, still-buggy force data directly, since there was no
+`.snc` left to re-convert) is no longer usable either. Not needed
+anymore, though: the fix now lives inside `SNCReader.to_h5()` itself, so
+any FRESH conversion already has correctly-rotated
+`Surface_X/Y/Z-Force` - there's nothing left to "correct" after the
+fact.
 
-**Next step, not yet run**: `verify_rotation_fix.py` (repo root, written
-this session) - applies the IDENTICAL rotation math directly to
-`forces_out.h5`'s ALREADY-STORED (buggy) `Surface_X/Y/Z-Force` arrays as
-a post-hoc correction (not a re-conversion), and re-runs HANDOFF's exact
-net-in-plane-angle-sweep test before/after. Run on the HPC as:
+**Next step, not yet run**: `verify_rotation_fix.py` (repo root,
+REWRITTEN this session to match - no longer applies any correction, just
+measures) - run it directly against a FRESH conversion (produced by the
+now-fixed `to_h5()`) of any real multi-frame case with enough frames to
+span a meaningful chunk of a revolution:
 
 ```bash
-python verify_rotation_fix.py /scratch/jmrendon/Rotor-alone/6e-5_6000rpm/forces_out.h5 \
-    --span-min 0.02 --omega-deg-per-frame -2.0
+python verify_rotation_fix.py /path/to/freshly_converted_forces.h5 \
+    --span-min 0.02 --frame-start 0 --frame-end 176 --frame-step 4
 ```
 
-(pass `--nc-stats /path/to/nc_stats.txt` instead of
-`--omega-deg-per-frame` if an `exaritool nc-stats.ri` dump for this case
-is available or can be regenerated - see the script's own docstring for
-why that's preferable when possible, and what assumption
-`--omega-deg-per-frame` makes instead). Expect the AFTER-correction
-sweep span to collapse to roughly HANDOFF's already-measured ~90-110 deg
-residual; if it instead balloons (toward the ~650-680 deg HANDOFF noted
-the WRONG sign produces), flip the sign in
-`SNCReader._write_surfel_group()` (currently `-angle(frame)`) and
-`verify_rotation_fix.py`'s own correction step to match, then re-run.
+It reports the net in-plane wall-shear angle's sweep across the chosen
+frame range, and - if the file was converted with `nc_stats_path` (so
+`Metadata/lrf_position_rad` is present) - the ACTUAL LRF rotation over
+the same range for direct comparison. **Pass criterion**: the measured
+sweep should be MUCH smaller than the actual LRF rotation (a few tens of
+degrees of real unsteady wobble at most) - if it instead tracks the
+actual rotation closely (or without `lrf_position_rad`, if it's anywhere
+near HANDOFF's original ~317-330 deg measurement), the fix isn't taking
+effect on this file (wrong sign in `SNCReader._write_surfel_group()` -
+currently `-angle(frame)` - or this file wasn't actually reconverted
+with the fixed code) and needs fixing before trusting anything
+downstream.
 
-Once this confirms (or corrects) the sign: re-run the SAME idea for
-`StripForces`'s radial/tangential (not yet directly tested, see "What's
-corrupted vs. safe" below), then move on to re-validating
+**Validated on synthetic data this session** (script logic, not the
+real-data sign - that's still the pending step above): a synthetic file
+with a force vector held fixed in a GLOBAL frame while spanning 80 deg
+of LRF rotation correctly showed an 80 deg measured sweep (matching the
+actual rotation exactly - the "still buggy" signature); the same setup
+with zero LRF rotation showed a 0 deg sweep (the "correctly fixed"
+signature). Both the `nc_stats_path`-available and unavailable output
+paths run without error.
+
+Once this confirms (or corrects) the sign on real data: re-run the SAME
+idea for `StripForces`'s radial/tangential (not yet directly tested, see
+"What's corrupted vs. safe" below), then move on to re-validating
 `separation_line()`/`migration_line()`/`critical_points()` and
 `StripForces`'s full time-domain suite - all still flagged UNRELIABLE
 until this happens (see those sections below).
@@ -730,14 +773,15 @@ not yet empirically checked):
   reconverting before `FrictionLines` can read it again.
 - **Now also**: a real, 829-frame (~4.6 revolution) transient case,
   `6e-5-6000rpm` (an isolated rotor in hover) -
-  `/scratch/jmrendon/Rotor-alone/6e-5_6000rpm/forces_out.h5` on the HPC,
-  already converted, this is the file the whole OPEN INVESTIGATION above
-  (both the resolved Cf-periodicity question and the still-open
-  reference-frame bug) was diagnosed against. **The raw `.snc` source
-  this was converted from no longer exists** (deleted from scratch to
-  save space) - not needed for the frame-bug fix itself (the already-
-  converted `.h5` has everything required), but if it's ever needed
-  again it only exists on the user's other computer (~3+ hour transfer).
+  `forces_out.h5`, this is the file the whole OPEN INVESTIGATION above
+  (both the resolved Cf-periodicity question and the reference-frame bug
+  evidence) was diagnosed against. **BOTH this file AND its raw `.snc`
+  source are now gone** (the `.snc` was already deleted from HPC scratch
+  to save space; the user has since deleted `forces_out.h5` itself too) -
+  this file can no longer be used for anything; the plan to verify the
+  reference-frame fix's sign has moved to running `verify_rotation_fix.py`
+  against a FRESH conversion instead (see the OPEN INVESTIGATION section
+  above - the rewritten script no longer needs this file at all).
   A small (2-frame) raw `.snc` for this same case DOES still exist on
   the HPC scratch (`f50_SMF_forces_rotor.snc`, despite the misleading
   "f50" name - it only has 2 frames) - this is what was used to pull the

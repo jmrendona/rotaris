@@ -1,60 +1,45 @@
 """
-Decisive sign/magnitude check for the Surface_X/Y/Z-Force reference-frame
-fix (converters/snc_reader.py) - see HANDOFF.md's OPEN INVESTIGATION.
+Post-fix sanity check for the Surface_X/Y/Z-Force reference-frame fix
+(converters/snc_reader.py) - see HANDOFF.md's OPEN INVESTIGATION.
 
-Why this exists as a STANDALONE script rather than just re-running
-SNCReader.to_h5() on the raw .snc: the 829-frame forces_out.h5
-(/scratch/jmrendon/Rotor-alone/6e-5_6000rpm/forces_out.h5) that HANDOFF's
-angle-sweep evidence was gathered against was converted from a raw .snc
-that no longer exists on HPC scratch (deleted to save space - see
-HANDOFF's "File/data conventions"). Without that source file, the fixed
-to_h5() can't be re-run to produce a corrected forces_out.h5 directly.
+An EARLIER version of this script applied the rotation as a POST-HOC
+correction to an already-converted, still-buggy forces_out.h5, since
+that file's source .snc no longer existed on HPC scratch. Both
+forces_out.h5 AND its source .snc are now gone entirely, so that
+approach is no longer usable - and it's no longer needed anyway, since
+the fix now lives inside SNCReader.to_h5() itself: Surface_X/Y/Z-Force
+in ANY freshly-converted file is already rotated into the LRF. This
+version checks a fresh conversion directly instead of correcting an old
+one.
 
-This script instead applies the IDENTICAL rotation math directly to the
-EXISTING (buggy) forces_out.h5's already-stored Surface_X/Y/Z-Force
-arrays - a post-hoc correction, not a re-conversion - and re-runs the
-exact net-in-plane-angle-vs-frame sweep test HANDOFF describes, so the
-fix's sign can be confirmed against the real 829-frame/~4.6-revolution
-case without needing the original .snc.
+What it checks: the net in-plane wall-shear angle (atan2 of the summed
+spanwise/chordwise wall-shear components over a span-cropped patch),
+tracked across a frame range spanning a meaningful chunk of a
+revolution. BEFORE the fix, this swept a full ~317-330 deg once per
+revolution (HANDOFF's evidence #1, measured against the now-deleted
+forces_out.h5) - a vector genuinely expressed in the blade's OWN (LRF)
+frame should NOT do this; it should stay small/flat, modulo real
+unsteady flow effects (e.g. the genuine once-per-revolution near-wall
+shear periodicity already confirmed separately - see HANDOFF's
+"RESOLVED: Cf-magnitude-growth investigation"). If a freshly-converted
+file STILL shows a large, nearly-360-deg-per-revolution sweep, the fix
+isn't taking effect (wrong sign in _write_surfel_group(), or this file
+wasn't actually reconverted with the fixed code) - if it stays small,
+the fix is confirmed on real data.
 
-Two ways to get the per-frame rotation angle, in order of preference:
-
-1. If you still have (or can regenerate) an `exaritool nc-stats.ri
-   <snc> -detail` dump for this exact case, pass --nc-stats and this
-   uses PowerFLOW's own authoritative lrf_position_rad directly (see
-   converters.snc_reader.parse_nc_stats()) - most trustworthy, no
-   assumptions.
-2. Otherwise, pass --omega-deg-per-frame (default -2.0, matching
-   HANDOFF's evidence #1/#3 for this case) - ASSUMES forces_out.h5 was
-   converted at the same per-frame dt as the small 2-frame raw .snc
-   (f50_SMF_forces_rotor.snc / 2f_SMF_forces_rotor.snc) evidence #3 was
-   measured from. Confirm this assumption holds (same case, same
-   conversion frame stride) before trusting the result if you use this
-   path - if forces_out.h5 used a different --first/--last stride, the
-   per-frame angle differs and this would silently give a wrong rate.
+If Metadata/lrf_position_rad is present (i.e. this file was converted
+with nc_stats_path), the script also reports how much the LRF itself
+actually rotated over the same frame range, for a direct, concrete
+comparison: "the blade turned this many degrees; the measured wall-shear
+direction only wobbled by this many" is the qualitative pass criterion.
 
 Usage:
-    python verify_rotation_fix.py /scratch/jmrendon/Rotor-alone/6e-5_6000rpm/forces_out.h5 \\
-        --span-min 0.02 --chord-axis 2 --span-axis 0 \\
-        [--nc-stats /path/to/nc_stats.txt] [--omega-deg-per-frame -2.0]
-
-Expected (from HANDOFF's evidence #1/#2, if the sign in the fix is
-right): BEFORE correction, the net in-plane wall-shear angle should
-sweep close to the previously-measured ~317-330 deg over one revolution
-(frames 0-176, step 4). AFTER correction (this script's output), that
-sweep should collapse to roughly the ~90-110 deg residual HANDOFF
-already measured by hand - if instead it BALLOONS (e.g. toward
-~650-680 deg, per HANDOFF's own note on what the wrong sign does),
-the sign in _rotation_angle()/_write_surfel_group() (currently
-"rotate by -angle(frame)") needs flipping, not the rate itself.
+    python verify_rotation_fix.py /path/to/freshly_converted_forces.h5 \\
+        --span-min 0.02 --frame-start 0 --frame-end 176 --frame-step 4
 """
 import argparse
-import sys
 import numpy as np
 import h5py
-
-sys.path.insert(0, '.')
-from converters.snc_reader import SNCReader, parse_nc_stats  # noqa: E402
 
 
 def net_angle(tau_chord, tau_span, mask):
@@ -73,19 +58,15 @@ def main():
     ap.add_argument('--frame-start', type=int, default=0)
     ap.add_argument('--frame-end', type=int, default=176)
     ap.add_argument('--frame-step', type=int, default=4)
-    ap.add_argument('--nc-stats', default=None)
-    ap.add_argument('--omega-deg-per-frame', type=float, default=-2.0)
     args = ap.parse_args()
 
     with h5py.File(args.h5_path, 'r') as f:
 
-        axis_direction = f['Metadata/lrf_axis_direction'][:]
-        axis_direction = axis_direction / np.linalg.norm(axis_direction)
         n_frames = f['Metadata/frame_index'].shape[0]
+        has_lrf_position = 'Metadata/lrf_position_rad' in f
+        lrf_position_rad = f['Metadata/lrf_position_rad'][:] if has_lrf_position else None
 
         labels = ['Upper', 'Lower'] if 'Upper' in f['Geometry'] else [None]
-
-        results = {}
 
         for label in labels:
 
@@ -97,49 +78,43 @@ def main():
             normals = np.column_stack([geo['Normal_X'][:], geo['Normal_Y'][:], geo['Normal_Z'][:]])
             force = np.stack([
                 data['Surface_X-Force'][:], data['Surface_Y-Force'][:], data['Surface_Z-Force'][:],
-            ], axis=-1)  # (n_frames, n_points, 3)
+            ], axis=-1)  # (n_frames, n_points, 3) - already rotated into the LRF by to_h5()
 
             span = positions[:, args.span_axis]
             span = span - (span.min() + span.max()) / 2
             mask = span >= args.span_min
 
             frames = list(range(args.frame_start, min(args.frame_end, n_frames), args.frame_step))
-
-            if args.nc_stats:
-                frame_meta = parse_nc_stats(args.nc_stats)
-                angles_deg = np.degrees([frame_meta[fr]['lrf_position_rad'] for fr in frames])
-            else:
-                angles_deg = args.omega_deg_per_frame * np.array(frames, dtype=float)
+            if len(frames) < 2:
+                raise ValueError(
+                    f"Only {len(frames)} frame(s) selected ({args.frame_start}..{args.frame_end} "
+                    f"step {args.frame_step}, n_frames={n_frames}) - need at least 2 to measure a sweep."
+                )
 
             f_normal = np.einsum('fpc,pc->fp', force[frames], normals)
             tau = force[frames] - f_normal[..., None] * normals[None, :, :]
-            tau_chord = tau[..., args.chord_axis]
-            tau_span = tau[..., args.span_axis]
+            angle = net_angle(tau[..., args.chord_axis], tau[..., args.span_axis], mask)
 
-            before = net_angle(tau_chord, tau_span, mask)
+            print(f"\n=== {label or 'unsplit'} ===")
+            print(f"Wall-shear angle: {angle[0]:.1f} -> {angle[-1]:.1f} deg "
+                  f"(sweep {angle.max() - angle.min():.1f} deg over {len(frames)} sampled frames, "
+                  f"{frames[0]}..{frames[-1]})")
 
-            # Post-hoc correction: rotate force about axis_direction by
-            # -angle(frame) BEFORE re-deriving tau - same operation
-            # SNCReader.to_h5()'s fix now applies at conversion time.
-            corrected_force = np.empty_like(force[frames])
-            for i, ang in enumerate(np.radians(angles_deg)):
-                corrected_force[i] = SNCReader._rotate_about_axis(force[frames[i]], axis_direction, -ang)
-
-            f_normal_c = np.einsum('fpc,pc->fp', corrected_force, normals)
-            tau_c = corrected_force - f_normal_c[..., None] * normals[None, :, :]
-            after = net_angle(tau_c[..., args.chord_axis], tau_c[..., args.span_axis], mask)
-
-            results[label or 'unsplit'] = (frames, before, after)
-
-    for label, (frames, before, after) in results.items():
-        print(f"\n=== {label} ===")
-        print(f"BEFORE correction: {before[0]:.1f} -> {before[-1]:.1f} deg "
-              f"(span {before[-1] - before[0]:.1f} deg)")
-        print(f"AFTER  correction: {after[0]:.1f} -> {after[-1]:.1f} deg "
-              f"(span {after[-1] - after[0]:.1f} deg)")
-        print("Expect BEFORE span ~317-330 deg (matches HANDOFF's prior measurement) and "
-              "AFTER span to COLLAPSE to roughly ~90-110 deg if the fix's sign is right - "
-              "if AFTER instead balloons (e.g. toward ~650-680 deg), the sign needs flipping.")
+            if has_lrf_position:
+                lrf_deg = np.degrees(lrf_position_rad[frames])
+                lrf_sweep = abs(lrf_deg[-1] - lrf_deg[0])
+                print(f"Actual LRF rotation over the same range: {lrf_sweep:.1f} deg")
+                print("  -> if the fix is correct, the wall-shear sweep above should be MUCH "
+                      "smaller than this (residual unsteady wobble, not a rotation artifact); "
+                      "if the two numbers are close, the fix isn't taking effect on this file.")
+            else:
+                print("(Metadata/lrf_position_rad not present - this file wasn't converted with "
+                      "nc_stats_path, so there's no independent 'how much did the blade actually "
+                      "rotate' figure to compare against here. Still meaningful on its own: "
+                      "HANDOFF's evidence #1 measured a ~317-330 deg sweep BEFORE the fix, over a "
+                      "similar frame range/step on a similar case - a sweep anywhere near that "
+                      "range here means the fix isn't taking effect; a small sweep (a few tens of "
+                      "degrees at most) means it is.)")
 
 
 if __name__ == '__main__':
