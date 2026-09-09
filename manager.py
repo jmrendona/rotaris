@@ -55,6 +55,8 @@ from bladeprocessor.tip_vortex_tracking import TipVortexPhaseAverage
 
 master_path = '/scratch/jmrendon/Rotor-alone/6e-5_6000rpm-transition/'
 
+print(40*'-')
+print('Opening FrictionLines file: ', os.path.join(master_path, '2025T_forces_rotor.h5'))
 fl = FrictionLines(
    os.path.join(master_path, '2025T_forces_rotor.h5'),
    r_tip=0.125,
@@ -62,12 +64,19 @@ fl = FrictionLines(
    rpm=6000,
 )
 
-# Dimensional wall shear vector (tau = F - (F.n)n), no rho_ref/rpm needed:
-tau = fl.wall_shear(surface='Upper', frame=None)  # frame=None -> average over every frame in the file
+# # Dimensional wall shear vector (tau = F - (F.n)n), no rho_ref/rpm needed:
+# tau = fl.wall_shear(surface='Upper', frame=None)  # frame=None -> average over every frame in the file
 
-# Cf magnitude and signed chordwise/spanwise components, one frame or the average:
-cf_mag = fl.cf(surface='Upper', frame=None, component=None)
-cf_chordwise_frame0 = fl.cf(surface='Upper', frame=0, component='chordwise')
+# # Cf magnitude and signed chordwise/spanwise components, one frame or the average:
+# cf_mag = fl.cf(surface='Upper', frame=None, component=None)
+# print(40*'-')
+# print('Average Cf magnitude: ', np.mean(cf_mag))
+# # cf_chordwise_frame0 = fl.cf(surface='Upper', frame=0, component='chordwise')
+
+# for frame in range(0,fl.n_frames,15):
+# 	cf_mag = fl.cf(surface='Upper', frame=frame, component=None)
+# 	print(40*'-')
+# 	print(f'Cf magnitude: {np.mean(cf_mag)} at frame {frame:03d}')
 
 # Cf vs local x/c at several radii, one plot per call - instantaneous and
 # average. span_min isolates one blade (REQUIRED in practice - without it,
@@ -77,29 +86,54 @@ cf_chordwise_frame0 = fl.cf(surface='Upper', frame=0, component='chordwise')
 # should peak sharply near x/c=0 and decay toward x/c=1; if it's flipped,
 # set reverse_chord=True - see README.md's "Two bugs found and fixed"):
 
-print(40*'-')
-print('Plotting Cf vs x/c at several radii, Upper surface, average over all frames')
-print(40*'-')
-print('Plotting Cf vs x/c magnitude')
-fl.plot_cf_radii(
-   radii=[0.045, 0.072, 0.100, 0.117, 0.122],
-   surface='Upper', frame=None, component=None, span_min=0.02, reverse_chord=True,
-   savepath=os.path.join(master_path, 'images/cf/cf_radii_mag_avg.png'),
-)
-print(40*'-')
-print('Plotting Cf vs x/c chordwise component')
-fl.plot_cf_radii(
-   radii=[0.045, 0.072, 0.100, 0.117, 0.122],
-   surface='Upper', frame=None, component='chordwise', span_min=0.02, reverse_chord=True,
-   savepath=os.path.join(master_path, 'images/cf/cf_radii_chordwise_avg.png'),
-)
-print(40*'-')
-print('Plotting Cf vs x/c spanwise component')
-fl.plot_cf_radii(
-   radii=[0.045, 0.072, 0.100, 0.117, 0.122],
-   surface='Upper', frame=None, component='spanwise', span_min=0.02, reverse_chord=True,
-   savepath=os.path.join(master_path, 'images/cf/cf_radii_spanwise_avg.png'),
-)
+# print(40*'-')
+# print('Plotting Cf vs x/c at several radii, Upper surface, average over all frames')
+# print(40*'-')
+# print('Plotting Cf vs x/c magnitude')
+# fl.plot_cf_radii(
+#    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+#    surface='Upper', frame=None, component=None, span_min=0.02, reverse_chord=True,
+#    savepath=os.path.join(master_path, 'images/cf/avg/cf_radii_mag_avg.png'),
+# )
+# print(40*'-')
+# print('Plotting Cf vs x/c chordwise component')
+# fl.plot_cf_radii(
+#    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+#    surface='Upper', frame=None, component='chordwise', span_min=0.02, reverse_chord=True,
+#    savepath=os.path.join(master_path, 'images/cf/avg/cf_radii_chordwise_avg.png'),
+# )
+# print(40*'-')
+# print('Plotting Cf vs x/c spanwise component')
+# fl.plot_cf_radii(
+#    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+#    surface='Upper', frame=None, component='spanwise', span_min=0.02, reverse_chord=True,
+#    savepath=os.path.join(master_path, 'images/cf/avg/cf_radii_spanwise_avg.png'),
+# )
+
+# for frame in range(0,fl.n_frames,15):
+# 	print(40*'-')
+# 	print(f'Plotting Cf vs x/c at several radii, Upper surface, average for frame {frame:03d}')
+# 	print(40*'-')
+# 	print('Plotting Cf vs x/c magnitude')
+# 	fl.plot_cf_radii(
+# 	radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+# 	surface='Upper', frame=frame, component=None, span_min=0.02, reverse_chord=True,
+# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_mag_frame{frame:03d}.png'),
+# 	)
+# 	print(40*'-')
+# 	print('Plotting Cf vs x/c chordwise component')
+# 	fl.plot_cf_radii(
+# 	radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+# 	surface='Upper', frame=frame, component='chordwise', span_min=0.02, reverse_chord=True,
+# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_chordwise_frame{frame:03d}.png'),
+# 	)
+# 	print(40*'-')
+# 	print('Plotting Cf vs x/c spanwise component')
+# 	fl.plot_cf_radii(
+# 	radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+# 	surface='Upper', frame=frame, component='spanwise', span_min=0.02, reverse_chord=True,
+# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_spanwise_frame{frame:03d}.png'),
+# 	)
 
 # Cf unsteadiness (RMS fluctuation about the mean - see README.md, "Cf
 # unsteadiness"): flags transition/wandering separation lines/moving
@@ -128,7 +162,7 @@ fl.plot_cf_radii(
 # reverse_chord must match what plot_cf_radii()/cf_at_radii() needed on
 # this case (see README.md, "Separation/reattachment line"):
 #sep_points = fl.separation_line(surface='Upper', frame=None, span_min=0.02, reverse_chord=True)
-#fl.save_separation_line(sep_points, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/cf/separation_line.txt')
+#fl.save_separation_line(sep_points, os.path.join(master_path, 'data/cf/separation_line.txt'))
 
 # Overlaid directly on friction_lines() (separation in red, reattachment in cyan):
 #fl.friction_lines(
@@ -145,7 +179,7 @@ fl.plot_cf_radii(
 # attempts backfired (see the README section and migration_line()'s own
 # docstring for the full story):
 #mig_points = fl.migration_line(surface='Upper', frame=None, span_min=0.02, reverse_chord=True)
-#fl.save_migration_line(mig_points, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/cf/migration_line.txt')
+#fl.save_migration_line(mig_points, os.path.join(master_path, 'data/cf/migration_line.txt'))
 
 #fl.friction_lines(
 #    surface='Upper', frame=None, span_min=0.02, show_migration_line=True,
