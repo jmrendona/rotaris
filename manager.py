@@ -138,24 +138,40 @@ fl = FrictionLines(
 # Cf unsteadiness (RMS fluctuation about the mean - see README.md, "Cf
 # unsteadiness"): flags transition/wandering separation lines/moving
 # vortex cores that the mean Cf field alone can miss.
-#fl.plot_cf_radii(
+# print(40*'-')
+# print('Plotting Cf RMS vs x/c at several radii, Upper surface, average over all frames')
+# print(40*'-')
+# print('Plotting Cf RMS vs x/c magnitude')
+# fl.plot_cf_radii(
 #    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 #    surface='Upper', frame=None, stat='rms', span_min=0.02, reverse_chord=True,
 #    savepath=os.path.join(master_path, 'images/cf/cf_rms_radii_avg.png'),
-#)
-#fl.friction_lines(
+# )
+# print(40*'-')
+# print('Plotting Cf RMS vs x/c color map')
+# fl.friction_lines(
 #    surface='Upper', frame=None, stat='rms', span_min=0.02,
 #    savepath=os.path.join(master_path, 'images/cf/cf_rms_map.png'),
-#)
+# )
 
 # Friction lines (Upper+Lower stacked by default) - span_min isolates one
 # blade half on a two-bladed rotor centered at span=0 (see the method's
 # docstring - there's no reliable automatic hub cutoff, pass what's right
 # for this case's mesh):
-#fl.friction_lines(
-#    frame=None, span_min=0.03,
-#    savepath=os.path.join(master_path, 'images/cf/friction_lines_avg.png'),
-#)
+# print(40*'-')
+# print('Plotting Friction Lines, Upper surface, average over all frames')
+# fl.friction_lines(
+#    frame=None, span_min=0.02,
+#    savepath=os.path.join(master_path, 'images/cf/avg/friction_lines_avg.png'),
+# )
+
+# for frame in range(0,fl.n_frames,15):
+# 	print(40*'-')
+# 	print(f'Plotting Friction Lines, Upper surface, for frame {frame:03d}')
+# 	fl.friction_lines(
+# 	frame=frame, span_min=0.02,
+# 	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_frame{frame:03d}.png'),
+# 	)
 
 # Separation/reattachment line (chordwise-Cf sign crossings) - restricted
 # to one blade section via span_min/span_max like everything else here;
@@ -165,11 +181,22 @@ fl = FrictionLines(
 #fl.save_separation_line(sep_points, os.path.join(master_path, 'data/cf/separation_line.txt'))
 
 # Overlaid directly on friction_lines() (separation in red, reattachment in cyan):
-#fl.friction_lines(
+# print(40*'-')
+# print('Plotting Friction Lines with separation/reattachment line, Upper surface, average over all frames')
+# fl.friction_lines(
 #    surface='Upper', frame=None, span_min=0.02, show_separation_line=True,
 #    separation_line_kwargs={'reverse_chord': True},
-#    savepath=os.path.join(master_path, 'images/cf/friction_lines_separation.png'),
-#)
+#    savepath=os.path.join(master_path, 'images/cf/avg/friction_lines_separation.png'),
+# )
+
+# for frame in range(0,fl.n_frames,15):
+# 	print(40*'-')
+# 	print(f'Plotting Friction Lines with separation/reattachment line, Upper surface, for frame {frame:03d}')
+# 	fl.friction_lines(
+# 	surface='Upper', frame=frame, span_min=0.02, show_separation_line=True,
+# 	separation_line_kwargs={'reverse_chord': True},
+# 	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_separation_frame{frame:03d}.png'),
+# 	)
 
 # Spanwise migration-reversal line (spanwise-Cf sign crossings - a
 # DIFFERENT physical phenomenon from separation/reattachment above, see
@@ -197,10 +224,20 @@ fl = FrictionLines(
 #print('Poincare index N+F-S =', fl.poincare_index(crit_points))  # see README.md - NOT expected to be 2 on this open, cropped selection
 
 # show_critical_points_index=True annotates the figure itself with N+F-S:
-#fl.friction_lines(
+# print(40*'-')
+# print('Plotting Friction Lines with critical points, Upper surface, average over all frames')
+# fl.friction_lines(
 #    surface='Upper', frame=None, span_min=0.02, show_critical_points=True, show_critical_points_index=True,
-#    savepath=os.path.join(master_path, 'images/cf/friction_lines_critical_points.png'),
-#)
+#    savepath=os.path.join(master_path, 'images/cf/avg/friction_lines_critical_points.png'),
+# )
+
+# for frame in range(0,fl.n_frames,15):
+# 	print(40*'-')
+# 	print(f'Plotting Friction Lines with critical points, Upper surface, for frame {frame:03d}')
+# 	fl.friction_lines(
+# 	surface='Upper', frame=frame, span_min=0.02, show_critical_points=True, show_critical_points_index=True,
+# 	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_critical_points_frame{frame:03d}.png'),
+# 	)
 
 # ------------- Any surface variable at radii (Cp, y+, RMS, ...) ------------- #
 #
