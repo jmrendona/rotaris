@@ -87,6 +87,100 @@ notes on threshold calibration if the default `--freeze-rel-threshold
 `Data/frozen` on an existing file post-hoc if you need to retune this
 without re-running the `pf2ens` extraction.
 
+### Tip-vortex phase-locked averaging: `bladeprocessor/TipVortexPhaseAverage`
+
+Quaglia et al.'s tip-vortex tracking methodology: N meridional planes
+evenly spaced in azimuth, each capturing the wake at one instant - since
+a shed vortex convects azimuthally at (approximately) the rotor's own
+rotation rate, relabeling each plane's index by one step every frame
+(matching plane spacing to the per-frame rotation angle exactly)
+reconstructs a "virtual" co-rotating sequence that always shows the same
+relative wake age, regardless of absolute time - i.e. a phase-locked,
+shedding-referenced average, without needing to detect any shedding
+event explicitly (see the class docstring for the full derivation,
+including why - for this project's 2-bladed rotor - one full 360-degree
+relabeling cycle already coincides with two blade-passage periods).
+
+**Extraction**: `fnc-meridional-sweep` already does everything needed -
+use a ONE-SIDED `--inplane-range 0 <R>` (not the two-sided default) so
+each plane has exactly one search zone for later vortex-core work, and
+set `--angle-step` to match this dataset's own per-frame rotation angle
+exactly (not an arbitrary round number) so the relabeling is exact, not
+approximate. One-sided planes don't get the opposite azimuth for free
+the way a two-sided diametral plane does, so covering the full rotor
+needs planes across the full 360 degrees, not just 180:
+
+```bash
+python convert.py fnc-meridional-sweep SMR-VR8.fnc tv_planes/ \
+    --angle-start 0 --angle-end 358 --angle-step 2 \
+    --inplane-range 0 0.13 --variables vx,vy,vz \
+    --first 0 --last 199 --nc-stats nc_stats.txt
+```
+
+(pass `--nc-stats` - already saved or fresh - so the resulting files carry
+`Metadata/lrf_position_rad`, needed to auto-detect the rotation direction
+below; `--angle-step` here, 2 degrees, is illustrative - use this
+project's own actual per-frame rotation angle, e.g. the same ~2.0011
+deg/frame already established for the `6e-5-6000rpm` case in
+`HANDOFF.md`'s reference-frame investigation, not a re-derived or
+assumed value.)
+
+**Averaging**:
+
+```python
+import glob
+from bladeprocessor.tip_vortex_tracking import TipVortexPhaseAverage
+
+paths = sorted(glob.glob('tv_planes/plane_*deg.h5'))
+tva = TipVortexPhaseAverage(paths, spacing_deg=2.0)  # match --angle-step above
+result = tva.compute(['vx', 'vy', 'vz'], cylindrical=True)
+# result[label]['v_r' / 'v_theta' / 'v_z' / 'count'], one entry per age
+# label in range(tva.n_planes) - see compute()'s docstring
+```
+
+**Visualization**:
+
+```python
+tva.plot_age_label(result, label=5, variable='v_r', savepath='tv_age5_vr.png')
+```
+
+Shows whatever radial range the extracted planes actually cover (one-
+sided here, e.g. `[0, R]`) - NOT mirrored into a full-diameter picture.
+If you want the classic full-diameter tip-vortex visualization instead,
+that means deliberately pairing one age label with another (offset by
+half the relabeling cycle - see the class docstring) - a distinct choice
+from what `plot_age_label()` shows by default, not built automatically.
+
+**Two things flagged as open, not silently assumed** (see the module's
+own docstrings for the full reasoning):
+- Whether `pf2ens`'s `vx`/`vy`/`vz` are the absolute (lab-frame) or
+  relative (rotating-frame) velocity is NOT yet verified - structurally
+  the same class of question as the `Surface_X/Y/Z-Force` reference-frame
+  bug fixed in `SNCReader`, but for a different tool/extraction path,
+  needing its own check. `cylindrical_velocity()`'s `omega_rad_s`
+  frame-correction parameter is there for once this is resolved; leave
+  it `None` (`compute()`'s default) until then.
+- The `axis_origin` used for that same frame correction's radius follows
+  `RotorBladePosition`'s own precedent (the raw, uncorrected
+  `lrf_axis_origin`) rather than an independently-verified correction via
+  `parse_case_origin_mks()` - see that function's docstring.
+
+**Validated** (synthetic data only - no real `pf2ens` extraction run yet):
+the coordinate-rotation math for `cylindrical_velocity()` against
+hand/numerically-derived radial and tangential unit vectors at multiple
+angles, for all three rotation axes (an initial x/y-axis implementation
+was wrong for the y-axis case specifically - caught and fixed by
+differentiating `fnc_plane._rotate_about_axis()`'s own forward rotation
+numerically, not re-derived by hand a second time); the frame correction
+against an analytic solid-body-rotation field (recovers exactly zero
+relative velocity, as it must); the relabeling index formula against a
+hand-worked example for both rotation directions; and two full
+end-to-end synthetic runs through `compute()` itself (a plain scalar
+with deliberately-injected invalid samples, confirming `Data/valid` is
+respected, and a full velocity field round-tripped through the
+cylindrical conversion) - both recovered the exact known answer at every
+age label.
+
 ## 2. Conversion Forces, Normals, Geometry → `SNCReader` (raw `.snc`)
 
 `converters/snc_reader.py` reads a PowerFLOW surface measurement `.snc`

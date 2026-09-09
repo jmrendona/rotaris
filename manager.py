@@ -1,3 +1,4 @@
+import glob
 import numpy as np
 from converters.forces_strip import ForcesCSVConverter
 from converters.span_2_radius import SpanConverter
@@ -6,6 +7,7 @@ from bladeprocessor.surface_field import SurfaceField, SurfaceFieldComparator
 from bladeprocessor.friction_lines import FrictionLines
 from bladeprocessor.surface_variable import SurfaceVariable
 from bladeprocessor.strip_forces import StripForces
+from bladeprocessor.tip_vortex_tracking import TipVortexPhaseAverage
 
 # ------------- Convertors ------------- #
 
@@ -231,6 +233,31 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cp/cp_surface_avg.png',
 #)
 
+# Leading-edge stagnation point (potential-flow interaction with a
+# downstream obstruction shifts it off the LE, toward whichever surface
+# sees the higher effective incidence - see README.md, "Leading-edge
+# stagnation point"). Sweeps span in bins, searching BOTH surfaces
+# together (unlike everything else here, which is already split) for the
+# local Cp maximum near x/c=0:
+#points_stag = sv.stagnation_line(stat='mean', span_min=0.03)
+
+# Compare the mean against a couple of individual frames - the "does it
+# move frame to frame" question this was built for:
+#sv.plot_stagnation_line(
+#    {'mean': points_stag, 'frame 0': sv.stagnation_line(frame=0, span_min=0.03),
+#     'frame 50': sv.stagnation_line(frame=50, span_min=0.03)},
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cp/stagnation_vs_span.png',
+#)
+#sv.save_stagnation_line(points_stag, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/cp/stagnation_mean.txt')
+
+# Or see it directly on the blade contour, jumping between the Upper/Lower
+# subplots as it migrates sides - needs BOTH surfaces plotted:
+#sv.plot_variable_surface(
+#    lambda s: -sv.cp(surface=s, stat='mean'),
+#    cbar_label='-Cp', span_min=0.03, show_stagnation_line=True,
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cp/cp_surface_with_stagnation.png',
+#)
+
 # Cp resampled onto a common (r/R, x/c) grid, compared against a second
 # case with the same geometry (c_ref must be passed explicitly - see
 # README.md for why):
@@ -382,3 +409,50 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 # Hanson-model-ready output file (radius/chord/harmonic/magnitude/phase,
 # self-contained, no need for this class or the .snc-derived file again):
 #sf_inst.save_harmonics(h_phase, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/forces/strip_harmonics.h5')
+
+# ------------- Tip-vortex tracking: phase-locked plane averaging (see README.md) ------------- #
+#
+# Extraction is a cluster job (needs pf2ens - see run_conversion.sh), not
+# run here - ONE-SIDED inplane_range (not the two-sided default) so each
+# plane has a single search zone, spanning the FULL 360deg (one-sided
+# planes don't get the opposite azimuth for free the way a two-sided
+# diametral plane does), and --angle-step matched EXACTLY to this case's
+# own per-frame rotation angle (~2.0011 deg/frame for 6e-5_6000rpm - see
+# HANDOFF.md's reference-frame investigation - not a re-derived or
+# rounded value) so the relabeling below is exact, not approximate:
+#
+#   sbatch run_conversion.sh fnc-meridional-sweep SMR-VR8.fnc \
+#       /storage/renj3003/rotor-alone/6e-5_6000rpm/data/fnc/tip_vortex_planes/ \
+#       --angle-start 0 --angle-end 358 --angle-step 2.0011 \
+#       --inplane-range 0 0.13 --variables vx,vy,vz \
+#       --first 0 --last 199 --nc-stats nc_stats.txt
+#
+# (--nc-stats matters here beyond timing metadata: it's what lets
+# TipVortexPhaseAverage auto-detect the rotation direction below, from
+# the resulting files' own Metadata/lrf_position_rad.)
+
+#plane_paths = sorted(glob.glob(
+#    '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/fnc/tip_vortex_planes/plane_*deg.h5'
+#))
+#tva = TipVortexPhaseAverage(plane_paths, spacing_deg=2.0011)
+
+# cylindrical=True (default) converts (vx, vy, vz) into (v_r, v_theta, v_z) -
+# omega_rad_s is deliberately NOT passed here (see README.md, "Two things
+# flagged as open" - whether pf2ens's velocity is absolute or relative to
+# the LRF is not yet verified, unlike Surface_X/Y/Z-Force):
+#result = tva.compute(['vx', 'vy', 'vz'], cylindrical=True)
+
+# One age label's averaged field, on whatever radial range the planes
+# actually cover (one-sided here - NOT mirrored into a full diameter,
+# see README.md):
+#tva.plot_age_label(
+#    result, label=5, variable='v_r',
+#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/tip_vortex/age5_vr.png',
+#)
+
+# Every age label in one pass, e.g. for an animation across "wake age":
+#for label in range(tva.n_planes):
+#    tva.plot_age_label(
+#        result, label=label, variable='v_r',
+#        savepath=f'/storage/renj3003/rotor-alone/6e-5_6000rpm/images/tip_vortex/age{label}_vr.png',
+#    )
