@@ -201,7 +201,7 @@ class SurfaceVariable:
             raise ValueError(f"Unknown stat '{stat}' - use 'mean', 'rms', or 'raw_rms'.")
 
     def cp(self, surface: str = 'Upper', frame: int = None, stat: str = 'mean',
-           pressure_variable: str = 'Static_Pressure'):
+           pressure_variable: str = 'static_pressure'):
 
         '''
         Pressure coefficient, Cp = (p - pref) / q_ref, with q_ref =
@@ -478,7 +478,7 @@ class SurfaceVariable:
         return fig, ax
 
     def plot_cp_radii(self, radii, frame: int = None, stat: str = 'mean',
-                       pressure_variable: str = 'Static_Pressure', surface=('Upper', 'Lower'),
+                       pressure_variable: str = 'static_pressure', surface=('Upper', 'Lower'),
                        tol: float = 0.0015, n_chord_bins: int = 75, span_min: float = None,
                        span_max: float = None, chord_percentile: float = 0.1, edge_crop: float = 0.0,
                        reverse_chord: bool = False, marker_size: float = 12, cmap: str = 'cividis',
@@ -531,7 +531,7 @@ class SurfaceVariable:
                                    savepath=savepath, dpi=dpi)
 
     def pressure_fluctuation(self, frame: int, surface: str = 'Upper',
-                              pressure_variable: str = 'Static_Pressure'):
+                              pressure_variable: str = 'static_pressure'):
 
         '''
         Instantaneous pressure fluctuation, p'(frame) = p(frame) - p_mean,
@@ -564,7 +564,7 @@ class SurfaceVariable:
         return p_frame - p_mean
 
     def plot_pressure_fluctuation(self, frame: int, surface=('Upper', 'Lower'),
-                                   pressure_variable: str = 'Static_Pressure', span_min: float = None,
+                                   pressure_variable: str = 'static_pressure', span_min: float = None,
                                    span_max: float = None, value_clip_percentile: float = 99,
                                    marker_size: float = 1, cmap: str = 'cividis', figsize: tuple = None,
                                    savepath: str = None, dpi: int = 150):
@@ -590,7 +590,7 @@ class SurfaceVariable:
                                            savepath=savepath, dpi=dpi)
 
     def stagnation_line(self, frame: int = None, stat: str = 'mean',
-                         pressure_variable: str = 'Static_Pressure',
+                         pressure_variable: str = 'static_pressure',
                          span_min: float = None, span_max: float = None,
                          n_span_bins: int = 200, chord_percentile: float = 0.1,
                          reverse_chord: bool = False, search_xc_max: float = 0.2):
