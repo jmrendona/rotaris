@@ -1,3 +1,4 @@
+import os
 import glob
 import numpy as np
 from converters.span_2_radius import SpanConverter
@@ -8,62 +9,36 @@ from bladeprocessor.surface_variable import SurfaceVariable
 from bladeprocessor.strip_forces import StripForces
 from bladeprocessor.tip_vortex_tracking import TipVortexPhaseAverage
 
-# ------------- Convertors ------------- #
-
-#forces = ForcesCSVConverter(
-#    file_path='/scratch/renj3003/rotor-alone/6e-5_6000rpm/data/forces_strip',
-#    file_pattern='Force-Graph-*.csv',
-#    dt=0.000056
-#)
-
-#forces.convert('forces_strips.h5')
-
-# timesteps = np.arange(0,46)
-
-# for ts in timesteps:
-# 	span_to_radius = SpanConverter(
-#     	input_path=f'/scratch/renj3003/rotor-alone/6e-5_6000rpm-transitional/data/friction_lines/x-force/t{ts:02d}',
-#     	output_path=f'/scratch/renj3003/rotor-alone/6e-5_6000rpm-transitional/data/friction_lines/x-force/t{ts:02d}/{ts:02d}t_x-force_radius.h5',
-#     	variable_col='Value (Up)[ForcePerArea:newton/m^2]',
-#     	span_col='Position (Up)[Length:m]',
-#     	chord_length=0.025,
-#     	resolution=0.025/100,
-#         coordinate_system='cartesian',
-#     	surface_split=False
-# 	)
-
-# 	span_to_radius.convert()
-
 # ------------- Post processing ------------- #
 
 #blade_cp = BladePostProcessor('/scratch/renj3003/rotor-alone/15e-6_6000rpm/data/cp/pstat_radius.h5', rpm = 6000, pref = 101325, rho_ref = 1.204)
 
 #blade_cp.plot_radii(var_name = 'pressure', idx_list = [100, 200, 300, 400], mode = 'cp')
 
-case_2025 = SurfaceField(
-	"/storage/renj3003/rotor-alone/UdeS_Case/6e-5_6000rpm/data/cp/pstatic_cartesian.h5",
-	var_name = 'pstatic',
-	r_tip = 0.125,
-	c_ref = 0.025
-)
+# case_2025 = SurfaceField(
+# 	"/storage/renj3003/rotor-alone/UdeS_Case/6e-5_6000rpm/data/cp/pstatic_cartesian.h5",
+# 	var_name = 'pstatic',
+# 	r_tip = 0.125,
+# 	c_ref = 0.025
+# )
 
-case_2025T = SurfaceField(
-	"/storage/renj3003/rotor-alone/UdeS_Case/6e-5_6000rpm-transitional/data/cp/pstatic_cartesian.h5",
-	var_name = 'pstatic',
-	r_tip = 0.125
-)
+# case_2025T = SurfaceField(
+# 	"/storage/renj3003/rotor-alone/UdeS_Case/6e-5_6000rpm-transitional/data/cp/pstatic_cartesian.h5",
+# 	var_name = 'pstatic',
+# 	r_tip = 0.125
+# )
 
-case_2026 = SurfaceField(
-	"/storage/renj3003/rotor-alone/UdeS_Case/15e-6_6000rpm/data/cp/pstatic_cartesian.h5",
-	var_name = 'pstatic',
-	r_tip = 0.125
-)
+# case_2026 = SurfaceField(
+# 	"/storage/renj3003/rotor-alone/UdeS_Case/15e-6_6000rpm/data/cp/pstatic_cartesian.h5",
+# 	var_name = 'pstatic',
+# 	r_tip = 0.125
+# )
 
-case_2025.plot_contour(normalize=False, cbar_label='Static Pressure [Pa]', levels=np.linspace(98000, 101800, 100),savepath='/storage/renj3003/rotor-alone/UdeS_Case/6e-5_6000rpm/images/pstatic/avg_pstatic.png')
+# case_2025.plot_contour(normalize=False, cbar_label='Static Pressure [Pa]', levels=np.linspace(98000, 101800, 100),savepath='/storage/renj3003/rotor-alone/UdeS_Case/6e-5_6000rpm/images/pstatic/avg_pstatic.png')
 
-comparator = SurfaceFieldComparator({'2025': case_2025, '2025-T': case_2025T, '2026': case_2026})
+# comparator = SurfaceFieldComparator({'2025': case_2025, '2025-T': case_2025T, '2026': case_2026})
 
-comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(98000, 101800, 100), savepath='/storage/renj3003/rotor-alone/UdeS_Case/Comparison/images/cp/avg_pstatic_comparison.png')
+# comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(98000, 101800, 100), savepath='/storage/renj3003/rotor-alone/UdeS_Case/Comparison/images/cp/avg_pstatic_comparison.png')
 
 # ------------- Wall shear / friction lines ------------- #
 #
@@ -78,19 +53,21 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 # (q_ref = 0.5*rho_ref*(omega*r)^2, matching BladePostProcessor.compute_cf()
 # above - see README.md's "Equations" section for the full derivation).
 
-#fl = FrictionLines(
-#    '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/forces/forces_rotor.h5',
-#    r_tip=0.125,
-#    rho_ref=1.22523,
-#    rpm=6000,
-#)
+master_path = '/scratch/jmrendon/Rotor-alone/6e-5_6000rpm-transition/'
+
+fl = FrictionLines(
+   os.path.join(master_path, '2025T_forces_rotor.h5'),
+   r_tip=0.125,
+   rho_ref=1.22523,
+   rpm=6000,
+)
 
 # Dimensional wall shear vector (tau = F - (F.n)n), no rho_ref/rpm needed:
-#tau = fl.wall_shear(surface='Upper', frame=None)  # frame=None -> average over every frame in the file
+tau = fl.wall_shear(surface='Upper', frame=None)  # frame=None -> average over every frame in the file
 
 # Cf magnitude and signed chordwise/spanwise components, one frame or the average:
-#cf_mag = fl.cf(surface='Upper', frame=None, component=None)
-#cf_chordwise_frame0 = fl.cf(surface='Upper', frame=0, component='chordwise')
+cf_mag = fl.cf(surface='Upper', frame=None, component=None)
+cf_chordwise_frame0 = fl.cf(surface='Upper', frame=0, component='chordwise')
 
 # Cf vs local x/c at several radii, one plot per call - instantaneous and
 # average. span_min isolates one blade (REQUIRED in practice - without it,
@@ -99,16 +76,30 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 # leading vs. trailing edge (no automatic detection - check per case, Cf
 # should peak sharply near x/c=0 and decay toward x/c=1; if it's flipped,
 # set reverse_chord=True - see README.md's "Two bugs found and fixed"):
-#fl.plot_cf_radii(
-#    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
-#    surface='Upper', frame=None, component=None, span_min=0.02, reverse_chord=True,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/cf_radii_avg.png',
-#)
-#fl.plot_cf_radii(
-#    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
-#    surface='Upper', frame=0, component='chordwise', span_min=0.02, reverse_chord=True,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/cf_radii_chordwise_frame0.png',
-#)
+
+print(40*'-')
+print('Plotting Cf vs x/c at several radii, Upper surface, average over all frames')
+print(40*'-')
+print('Plotting Cf vs x/c magnitude')
+fl.plot_cf_radii(
+   radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+   surface='Upper', frame=None, component=None, span_min=0.02, reverse_chord=True,
+   savepath=os.path.join(master_path, 'images/cf/cf_radii_mag_avg.png'),
+)
+print(40*'-')
+print('Plotting Cf vs x/c chordwise component')
+fl.plot_cf_radii(
+   radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+   surface='Upper', frame=None, component='chordwise', span_min=0.02, reverse_chord=True,
+   savepath=os.path.join(master_path, 'images/cf/cf_radii_chordwise_avg.png'),
+)
+print(40*'-')
+print('Plotting Cf vs x/c spanwise component')
+fl.plot_cf_radii(
+   radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+   surface='Upper', frame=None, component='spanwise', span_min=0.02, reverse_chord=True,
+   savepath=os.path.join(master_path, 'images/cf/cf_radii_spanwise_avg.png'),
+)
 
 # Cf unsteadiness (RMS fluctuation about the mean - see README.md, "Cf
 # unsteadiness"): flags transition/wandering separation lines/moving
@@ -116,11 +107,11 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #fl.plot_cf_radii(
 #    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 #    surface='Upper', frame=None, stat='rms', span_min=0.02, reverse_chord=True,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/cf_rms_radii_avg.png',
+#    savepath=os.path.join(master_path, 'images/cf/cf_rms_radii_avg.png'),
 #)
 #fl.friction_lines(
 #    surface='Upper', frame=None, stat='rms', span_min=0.02,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/cf_rms_map.png',
+#    savepath=os.path.join(master_path, 'images/cf/cf_rms_map.png'),
 #)
 
 # Friction lines (Upper+Lower stacked by default) - span_min isolates one
@@ -129,7 +120,7 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 # for this case's mesh):
 #fl.friction_lines(
 #    frame=None, span_min=0.03,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/friction_lines_avg.png',
+#    savepath=os.path.join(master_path, 'images/cf/friction_lines_avg.png'),
 #)
 
 # Separation/reattachment line (chordwise-Cf sign crossings) - restricted
@@ -143,7 +134,7 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #fl.friction_lines(
 #    surface='Upper', frame=None, span_min=0.02, show_separation_line=True,
 #    separation_line_kwargs={'reverse_chord': True},
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/friction_lines_separation.png',
+#    savepath=os.path.join(master_path, 'images/cf/friction_lines_separation.png'),
 #)
 
 # Spanwise migration-reversal line (spanwise-Cf sign crossings - a
@@ -159,7 +150,7 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #fl.friction_lines(
 #    surface='Upper', frame=None, span_min=0.02, show_migration_line=True,
 #    migration_line_kwargs={'reverse_chord': True},
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/friction_lines_migration.png',
+#    savepath=os.path.join(master_path, 'images/cf/friction_lines_migration.png'),
 #)
 
 # Vortex-footprint critical points (node/saddle/focus - see README.md,
@@ -174,7 +165,7 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 # show_critical_points_index=True annotates the figure itself with N+F-S:
 #fl.friction_lines(
 #    surface='Upper', frame=None, span_min=0.02, show_critical_points=True, show_critical_points_index=True,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cf/friction_lines_critical_points.png',
+#    savepath=os.path.join(master_path, 'images/cf/friction_lines_critical_points.png'),
 #)
 
 # ------------- Any surface variable at radii (Cp, y+, RMS, ...) ------------- #
@@ -210,12 +201,12 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #sv.plot_cp_radii(
 #    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 #    frame=None, stat='mean', span_min=0.03, reverse_chord=True,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cp/cp_radii_avg.png',
+#    savepath=os.path.join(master_path, 'images/cp/cp_radii_avg.png'),
 #)
 #sv.plot_cp_radii(
 #    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 #    frame=0, span_min=0.03, reverse_chord=True,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cp/cp_radii_frame0.png',
+#    savepath=os.path.join(master_path, 'images/cp/cp_radii_frame0.png'),
 #)
 
 # ------------- Any surface variable over the whole blade + case comparison ------------- #
@@ -229,7 +220,7 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #sv.plot_variable_surface(
 #    lambda s: -sv.cp(surface=s, stat='mean'),
 #    cbar_label='-Cp', span_min=0.03,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cp/cp_surface_avg.png',
+#    savepath=os.path.join(master_path, 'images/cp/cp_surface_avg.png'),
 #)
 
 # Leading-edge stagnation point (potential-flow interaction with a
@@ -245,16 +236,16 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #sv.plot_stagnation_line(
 #    {'mean': points_stag, 'frame 0': sv.stagnation_line(frame=0, span_min=0.03),
 #     'frame 50': sv.stagnation_line(frame=50, span_min=0.03)},
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cp/stagnation_vs_span.png',
+#    savepath=os.path.join(master_path, 'images/cp/stagnation_vs_span.png'),
 #)
-#sv.save_stagnation_line(points_stag, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/cp/stagnation_mean.txt')
+#sv.save_stagnation_line(points_stag, os.path.join(master_path, 'data/cp/stagnation_mean.txt'))
 
 # Or see it directly on the blade contour, jumping between the Upper/Lower
 # subplots as it migrates sides - needs BOTH surfaces plotted:
 #sv.plot_variable_surface(
 #    lambda s: -sv.cp(surface=s, stat='mean'),
 #    cbar_label='-Cp', span_min=0.03, show_stagnation_line=True,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/cp/cp_surface_with_stagnation.png',
+#    savepath=os.path.join(master_path, 'images/cp/cp_surface_with_stagnation.png'),
 #)
 
 # Cp resampled onto a common (r/R, x/c) grid, compared against a second
@@ -275,8 +266,8 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #                            var_name='Cp 2026', c_ref=0.025, span_min=0.03)
 
 #comparator_sv = SurfaceFieldComparator({'2025': field_2025, '2026': field_2026})
-#comparator_sv.plot_cases(cbar_label='Cp', savepath='/storage/renj3003/rotor-alone/Comparison/images/cp/cp_comparison.png')
-#comparator_sv.plot_delta('2025', '2026', cbar_label='Cp delta', savepath='/storage/renj3003/rotor-alone/Comparison/images/cp/cp_delta.png')
+#comparator_sv.plot_cases(cbar_label='Cp', savepath=os.path.join(master_path, 'images/cp/cp_comparison.png'))
+#comparator_sv.plot_delta('2025', '2026', cbar_label='Cp delta', savepath=os.path.join(master_path, 'images/cp/cp_delta.png'))
 
 # Pressure fluctuation p'(frame) = p(frame) - p_mean, one blade contour
 # per frame - needs a multi-frame file to show a real signal (a
@@ -284,14 +275,14 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #for frame in range(sv.n_frames):
 #    sv.plot_pressure_fluctuation(
 #        frame, span_min=0.03,
-#        savepath=f'/storage/renj3003/rotor-alone/6e-5_6000rpm/images/pfluct/p_fluct_frame{frame:03d}.png',
+#        savepath=os.path.join(master_path, f'images/pfluct/p_fluct_frame{frame:03d}.png'),
 #    )
 
 # Prms needs no new method - it's already variable(stat='rms'):
 #sv.plot_variable_surface(
 #    lambda s: sv.variable('static_pressure', surface=s, stat='rms'),
 #    cbar_label='$P_{rms}$ [Pa]', span_min=0.03,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/pfluct/p_rms_surface.png',
+#    savepath=os.path.join(master_path, 'images/pfluct/p_rms_surface.png'),
 #)
 
 # Point time trace + Welch periodogram (wall pressure fluctuations at one
@@ -301,12 +292,12 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #sv.plot_timetrace(
 #    'static_pressure', span_pct=80, chord_pct=90, surface='Upper',
 #    ylabel='Static pressure [Pa]', dt=0.000056,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/spectra/p_timetrace_80_90.png',
+#    savepath=os.path.join(master_path, 'images/spectra/p_timetrace_80_90.png'),
 #)
 #sv.plot_periodogram(
 #    'static_pressure', span_pct=80, chord_pct=90, surface='Upper',
 #    ylabel='PSD [Pa$^2$/Hz]', dt=0.000056,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/spectra/p_periodogram_80_90.png',
+#    savepath=os.path.join(master_path, 'images/spectra/p_periodogram_80_90.png'),
 #)
 
 # ------------- Strip forces (Hanson's method input) ------------- #
@@ -324,16 +315,16 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #)
 
 #result = sf.compute(span_min=0.02, n_span_bins=20)
-#sf.save(result, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/forces/strip_forces.h5', dt=0.000056)
+#sf.save(result, os.path.join(master_path, 'data/forces/strip_forces.h5'), dt=0.000056)
 
 #sf.plot_bar_forces(
 #    result, show_totals=True,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_forces_bar.png',
+#    savepath=os.path.join(master_path, 'images/forces/strip_forces_bar.png'),
 #)
 
 # Chordwise-subdivided (non-compact-chord case - see README.md):
 #result_2d = sf.compute(span_min=0.02, n_span_bins=20, n_chord_bins=5)
-#sf.save(result_2d, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/forces/strip_forces_2d.h5', dt=0.000056)
+#sf.save(result_2d, os.path.join(master_path, 'data/forces/strip_forces_2d.h5'), dt=0.000056)
 
 # Integrated totals (thrust/torque/radial/tangential force, independent of
 # strip binning - see README.md, "Integrated totals"). result['totals']
@@ -348,13 +339,13 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 # n_rot is rev/s, NOT RPM:
 #sf.plot_bar_forces(
 #    result, show_totals=True, rho=1.22523, n_rot=6000 / 60, diameter=0.25,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_forces_bar_coeffs.png',
+#    savepath=os.path.join(master_path, 'images/forces/strip_forces_bar_coeffs.png'),
 #)
 
 # Physical radius instead of r/R on the x-axis:
 #sf.plot_bar_forces(
 #    result, show_totals=True, normalize_radius=False,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_forces_bar_radius.png',
+#    savepath=os.path.join(master_path, 'images/forces/strip_forces_bar_radius.png'),
 #)
 
 # ------------- Time domain / phase-locked / harmonics (Hanson's method) ------------- #
@@ -372,7 +363,7 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 # Raw per-strip time trace (see README.md, "Time trace"):
 #sf_inst.plot_time_trace(
 #    result_inst, dt=0.000056, component='axial', strips=[0, 4, 9, 14, 19],
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_time_trace.png',
+#    savepath=os.path.join(master_path, 'images/forces/strip_time_trace.png'),
 #)
 
 # Phase-locked (revolution-folded) force vs azimuth (see README.md,
@@ -380,7 +371,7 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #phase_locked = sf_inst.phase_lock(result_inst, dt=0.000056, n_azimuth_bins=72)
 #sf_inst.plot_vs_angle(
 #    phase_locked, component='axial', strips=[0, 4, 9, 14, 19],
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_vs_angle.png',
+#    savepath=os.path.join(master_path, 'images/forces/strip_vs_angle.png'),
 #)
 
 # Harmonics of the rotation frequency - Hanson's method's actual |F_n(r)|
@@ -388,7 +379,7 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #h = sf_inst.harmonics(result_inst, dt=0.000056, component='axial', n_harmonics=17)
 #sf_inst.plot_harmonics(
 #    h, strips=[0, 4, 9, 14, 19],
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_harmonics.png',
+#    savepath=os.path.join(master_path, 'images/forces/strip_harmonics.png'),
 #)
 
 # With phase (needed before actually handing this to Hanson's model, or
@@ -397,7 +388,7 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 #h_phase = sf_inst.harmonics(result_inst, dt=0.000056, component='axial', n_harmonics=17, return_phase=True)
 #sf_inst.plot_harmonics(
 #    h_phase, strips=[0, 4, 9, 14, 19], show_phase=True,
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/forces/strip_harmonics_phase.png',
+#    savepath=os.path.join(master_path, 'images/forces/strip_harmonics_phase.png'),
 #)
 #peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
 
@@ -407,7 +398,7 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 
 # Hanson-model-ready output file (radius/chord/harmonic/magnitude/phase,
 # self-contained, no need for this class or the .snc-derived file again):
-#sf_inst.save_harmonics(h_phase, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/forces/strip_harmonics.h5')
+#sf_inst.save_harmonics(h_phase, os.path.join(master_path, 'data/forces/strip_harmonics.h5'))
 
 # ------------- Tip-vortex tracking: phase-locked plane averaging (see README.md) ------------- #
 #
@@ -446,12 +437,12 @@ comparator.plot_cases(cbar_label='Static Pressure [Pa]', levels=np.linspace(9800
 # see README.md):
 #tva.plot_age_label(
 #    result, label=5, variable='v_r',
-#    savepath='/storage/renj3003/rotor-alone/6e-5_6000rpm/images/tip_vortex/age5_vr.png',
+#    savepath=os.path.join(master_path, 'images/tip_vortex/age5_vr.png'),
 #)
 
 # Every age label in one pass, e.g. for an animation across "wake age":
 #for label in range(tva.n_planes):
 #    tva.plot_age_label(
 #        result, label=label, variable='v_r',
-#        savepath=f'/storage/renj3003/rotor-alone/6e-5_6000rpm/images/tip_vortex/age{label}_vr.png',
+#        savepath=os.path.join(master_path, f'images/tip_vortex/age{label}_vr.png'),
 #    )
