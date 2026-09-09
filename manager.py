@@ -1,6 +1,5 @@
 import glob
 import numpy as np
-from converters.forces_strip import ForcesCSVConverter
 from converters.span_2_radius import SpanConverter
 from bladeprocessor.blades_postproc import BladePostProcessor
 from bladeprocessor.surface_field import SurfaceField, SurfaceFieldComparator
