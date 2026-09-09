@@ -54,15 +54,19 @@ from bladeprocessor.tip_vortex_tracking import TipVortexPhaseAverage
 # above - see README.md's "Equations" section for the full derivation).
 
 master_path = '/scratch/jmrendon/Rotor-alone/6e-5_6000rpm-transition/'
+inst_force_file = '2025T_forces_rotor.h5'
+avg_force_file = '2025T_avg_forces_rotor.h5'
+inst_pressure_file = ''
+avg_pressure_file = '2025T_avg_pressure_rotor.h5'
 
-print(40*'-')
-print('Opening FrictionLines file: ', os.path.join(master_path, '2025T_forces_rotor.h5'))
-fl = FrictionLines(
-   os.path.join(master_path, '2025T_forces_rotor.h5'),
-   r_tip=0.125,
-   rho_ref=1.22523,
-   rpm=6000,
-)
+# print(40*'-')
+# print('Opening FrictionLines file: ', os.path.join(master_path, inst_force_file))
+# fl = FrictionLines(
+#    os.path.join(master_path, inst_force_file),
+#    r_tip=0.125,
+#    rho_ref=1.22523,
+#    rpm=6000,
+# )
 
 # # Dimensional wall shear vector (tau = F - (F.n)n), no rho_ref/rpm needed:
 # tau = fl.wall_shear(surface='Upper', frame=None)  # frame=None -> average over every frame in the file
@@ -247,13 +251,25 @@ fl = FrictionLines(
 # file for any variable stored there instead (Skin_Friction, y+ if
 # present, etc.) - see README.md, "Any surface variable at radii".
 
-#sv = SurfaceVariable(
-#    '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/pressure/pressure_rotor.h5',
-#    r_tip=0.125,
-#    rho_ref=1.22523,
-#    rpm=6000,
-#    pref=101325,
-#)
+print(40*'-')
+print('Opening SurfaceVariable file: ', os.path.join(master_path, avg_pressure_file))
+sv_pressure = SurfaceVariable(
+   os.path.join(master_path, avg_pressure_file),
+   r_tip=0.125,
+   rho_ref=1.22523,
+   rpm=6000,
+   pref=101325,
+)
+
+print(40*'-')
+print('Opening SurfaceVariable file: ', os.path.join(master_path, avg_force_file))
+sv_forces = SurfaceVariable(
+   os.path.join(master_path, avg_force_file),
+   r_tip=0.125,
+   rho_ref=1.22523,
+   rpm=6000,
+   pref=101325,
+)
 
 # Raw access to any stored variable - instantaneous, mean, or rms/raw_rms:
 #yplus_mean = sv.variable('y+', surface='Upper', frame=None, stat='mean')
@@ -269,12 +285,14 @@ fl = FrictionLines(
 # isolates one blade half (see friction_lines() above for why), and
 # reverse_chord fixes which end is the leading vs. trailing edge (no
 # automatic detection - check per case, see the method's docstring):
-#sv.plot_cp_radii(
-#    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
-#    frame=None, stat='mean', span_min=0.03, reverse_chord=True,
-#    savepath=os.path.join(master_path, 'images/cp/cp_radii_avg.png'),
-#)
-#sv.plot_cp_radii(
+print(40*'-')
+print('Plotting Cp vs x/c at several radii, average over all frames')
+sv_pressure.plot_cp_radii(
+   radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+   frame=None, stat='mean', span_min=0.02, reverse_chord=True,
+   savepath=os.path.join(master_path, 'images/cp/cp_radii_avg.png'),
+)
+#sv_pressure.plot_cp_radii(
 #    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 #    frame=0, span_min=0.03, reverse_chord=True,
 #    savepath=os.path.join(master_path, 'images/cp/cp_radii_frame0.png'),
@@ -288,11 +306,21 @@ fl = FrictionLines(
 # see README.md, "Whole-blade surface plot" / "Cross-case comparison".
 
 # Whole-blade -Cp scatter, both surfaces:
-#sv.plot_variable_surface(
-#    lambda s: -sv.cp(surface=s, stat='mean'),
-#    cbar_label='-Cp', span_min=0.03,
-#    savepath=os.path.join(master_path, 'images/cp/cp_surface_avg.png'),
-#)
+print(40*'-')
+print('Plotting -Cp surface scatter, average over all frames')
+sv_pressure.plot_variable_surface(
+   lambda s: -sv_pressure.cp(surface=s, stat='mean'),
+   cbar_label='-Cp', span_min=0.02,
+   savepath=os.path.join(master_path, 'images/cp/cp_surface_avg.png'),
+)
+
+print(40*'-')
+print('Plotting Skin Friction surface scatter, average over all frames')
+sv_forces.plot_variable_surface(
+   lambda s: sv_forces.variable('Skin_Friction', surface=s, stat='mean'),
+   cbar_label='Skin Friction [Pa]', span_min=0.02,
+   savepath=os.path.join(master_path, 'images/cf/avg/cf_surface_avg.png'),
+)
 
 # Leading-edge stagnation point (potential-flow interaction with a
 # downstream obstruction shifts it off the LE, toward whichever surface
