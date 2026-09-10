@@ -1085,6 +1085,6 @@ def plot_frame(h5_path: str, variable: str, frame_index: int = 0, savepath: str 
     fig.tight_layout()
 
     if savepath:
-        fig.savefig(savepath, dpi=200)
+        fig.savefig(savepath, dpi=600)
 
     return fig, ax

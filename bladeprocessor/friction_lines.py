@@ -505,7 +505,7 @@ class FrictionLines:
     def plot_cf_radii(self, radii, surface: str = 'Upper', frame: int = None, component: str = None,
                        stat: str = 'mean', tol: float = 0.0015, n_chord_bins: int = 150, span_min: float = None,
                        span_max: float = None, reverse_chord: bool = False, cmap: str = 'cividis',
-                       ax=None, savepath: str = None, dpi: int = 150):
+                       ax=None, savepath: str = None, dpi: int = 600):
 
         '''
         Plot Cf vs. local chordwise position for several radii on one set
@@ -595,7 +595,7 @@ class FrictionLines:
     def plot_cf_phase_portrait(self, component_pair=(None, 'chordwise'), surface: str = 'Upper',
                                 span_min: float = None, span_max: float = None, ax=None,
                                 cmap: str = 'cividis', linewidth: float = 1.5, aspect='auto',
-                                savepath: str = None, dpi: int = 150):
+                                savepath: str = None, dpi: int = 600):
 
         '''
         Whole-selection Cf PHASE PORTRAIT - the same convergence
@@ -749,7 +749,7 @@ class FrictionLines:
                                          span_min: float = None, span_max: float = None,
                                          n_span_bins: int = 10, min_count: int = 10, strips=None,
                                          n_cols: int = 4, cmap: str = 'cividis', aspect='auto',
-                                         savepath: str = None, dpi: int = 150):
+                                         savepath: str = None, dpi: int = 600):
 
         '''
         Per-strip version of plot_cf_phase_portrait() - one small phase-
@@ -1648,7 +1648,7 @@ class FrictionLines:
                         show_migration_line: bool = False, migration_line_kwargs: dict = None,
                         show_critical_points: bool = False, critical_points_kwargs: dict = None,
                         show_critical_points_index: bool = False,
-                        figsize: tuple = None, savepath: str = None, dpi: int = 150):
+                        figsize: tuple = None, savepath: str = None, dpi: int = 600):
 
         '''
         Friction lines: a dense scatter of Cf magnitude over the blade

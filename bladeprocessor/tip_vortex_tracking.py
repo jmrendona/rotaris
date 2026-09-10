@@ -417,7 +417,7 @@ class TipVortexPhaseAverage:
 
     def plot_age_label(self, result: dict, label: int, variable: str, min_count: int = 1,
                         ax=None, cmap: str = 'turbo', levels=100, cbar_label: str = None,
-                        savepath: str = None, dpi: int = 150):
+                        savepath: str = None, dpi: int = 600):
 
         '''
         Filled-contour plot of one age label's phase-locked-averaged

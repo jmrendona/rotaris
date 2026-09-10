@@ -421,7 +421,7 @@ class SurfaceVariable:
                        tol: float = 0.0015, n_chord_bins: int = 75, span_min: float = None,
                        span_max: float = None, chord_percentile: float = 0.1, edge_crop: float = 0.0,
                        reverse_chord: bool = False, marker_size: float = 12, cmap: str = 'cividis',
-                       ax=None, savepath: str = None, dpi: int = 150):
+                       ax=None, savepath: str = None, dpi: int = 600):
 
         '''
         Plot of an arbitrary field vs local x/c at several radii, BOTH
@@ -482,7 +482,7 @@ class SurfaceVariable:
                        tol: float = 0.0015, n_chord_bins: int = 75, span_min: float = None,
                        span_max: float = None, chord_percentile: float = 0.1, edge_crop: float = 0.0,
                        reverse_chord: bool = False, marker_size: float = 12, cmap: str = 'cividis',
-                       ax=None, savepath: str = None, dpi: int = 150):
+                       ax=None, savepath: str = None, dpi: int = 600):
 
         '''
         Convenience wrapper: plot_at_radii() for Cp (see cp()).
@@ -567,7 +567,7 @@ class SurfaceVariable:
                                    pressure_variable: str = 'static_pressure', span_min: float = None,
                                    span_max: float = None, value_clip_percentile: float = 99,
                                    marker_size: float = 1, cmap: str = 'cividis', figsize: tuple = None,
-                                   savepath: str = None, dpi: int = 150):
+                                   savepath: str = None, dpi: int = 600):
 
         '''
         Convenience wrapper: plot_variable_surface() for one frame's
@@ -765,7 +765,7 @@ class SurfaceVariable:
 
     def plot_stagnation_line(self, points_by_label: dict, ax=None, x_axis: str = 'r',
                               colors: dict = None, marker_size: float = 20,
-                              savepath: str = None, dpi: int = 150):
+                              savepath: str = None, dpi: int = 600):
 
         '''
         Plot stagnation_line()'s signed_xc vs span or radius, one line
@@ -981,7 +981,7 @@ class SurfaceVariable:
     def plot_timetrace(self, name: str, span_pct: float, chord_pct: float, surface: str = 'Upper',
                         tol: float = 0.0015, chord_percentile: float = 0.1, reverse_chord: bool = False,
                         span_min: float = None, span_max: float = None, dt: float = None,
-                        ylabel: str = None, ax=None, savepath: str = None, dpi: int = 150):
+                        ylabel: str = None, ax=None, savepath: str = None, dpi: int = 600):
 
         '''
         Plot timetrace() as a connected line vs time (or frame index if
@@ -1096,7 +1096,7 @@ class SurfaceVariable:
                           fs: float = None, dt: float = None, nperseg: int = None, detrend='constant',
                           tol: float = 0.0015, chord_percentile: float = 0.1, reverse_chord: bool = False,
                           span_min: float = None, span_max: float = None, ylabel: str = None, ax=None,
-                          savepath: str = None, dpi: int = 150, **welch_kwargs):
+                          savepath: str = None, dpi: int = 600, **welch_kwargs):
 
         '''
         Plot periodogram() as log-log PSD vs frequency - the standard way
@@ -1142,7 +1142,7 @@ class SurfaceVariable:
                                marker_size: float = 1, cmap: str = 'cividis', figsize: tuple = None,
                                show_stagnation_line: bool = False, stagnation_kwargs: dict = None,
                                stagnation_color: str = 'red', stagnation_marker_size: float = 40,
-                               savepath: str = None, dpi: int = 150):
+                               savepath: str = None, dpi: int = 600):
 
         '''
         Scatter of an arbitrary scalar field over the blade surface (raw

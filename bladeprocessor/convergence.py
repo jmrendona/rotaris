@@ -77,7 +77,7 @@ def cumulative_mean(series, dt: float = None, rpm: float = None):
 
 
 def plot_cumulative_mean(series, dt: float = None, rpm: float = None, ylabel: str = None,
-                          ax=None, color: str = 'tab:blue', savepath: str = None, dpi: int = 150):
+                          ax=None, color: str = 'tab:blue', savepath: str = None, dpi: int = 600):
 
     '''
     Plot cumulative_mean()'s running mean vs. elapsed time (or frame
@@ -206,7 +206,7 @@ def cumulative_stats(series, dt: float = None, rpm: float = None, sync_to_revolu
 
 
 def plot_cumulative_stats(series, dt: float = None, rpm: float = None, sync_to_revolution: bool = False,
-                           ylabel: str = None, color: str = 'tab:blue', savepath: str = None, dpi: int = 150):
+                           ylabel: str = None, color: str = 'tab:blue', savepath: str = None, dpi: int = 600):
 
     '''
     Two-panel plot of cumulative_stats()'s running mean (top) and running
@@ -312,7 +312,7 @@ def autocorrelation(series, max_lag: int = None):
 
 def plot_autocorrelation_windows(series, n_windows: int = 2, max_lag: int = None, dt: float = None,
                                   labels=None, ax=None, cmap: str = 'cividis',
-                                  savepath: str = None, dpi: int = 150):
+                                  savepath: str = None, dpi: int = 600):
 
     '''
     The MEANINGFUL version of the "R(s) is even for a stationary process"

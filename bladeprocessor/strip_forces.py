@@ -458,29 +458,35 @@ class StripForces:
     def plot_bar_forces(self, result: dict, frame: int = None, ax=None, bar_width: float = None,
                          colors=('tab:blue', 'tab:orange', 'tab:green'), show_totals: bool = False,
                          normalize_radius: bool = True, rho: float = None, n_rot: float = None,
-                         diameter: float = None, savepath: str = None, dpi: int = 150):
+                         diameter: float = None, savepath: str = None, dpi: int = 600):
 
         '''
-        Bar chart of per-strip force (left axis) plus its running
-        cumulative sum across strips, root to tip (right axis, dashed
-        lines) - matches this project's earlier PowerVIZ-based reference
-        plot (images/forces/bar_forces/Force-Graph-1-bar_forces.png),
-        for direct visual comparison against that established style.
+        Bar chart of per-strip force plus its running cumulative sum
+        across strips, root to tip (right axis, dashed lines) -
+        matches this project's earlier PowerVIZ-based reference plot
+        (images/forces/bar_forces/Force-Graph-1-bar_forces.png), for
+        direct visual comparison against that established style.
         Only meaningful for n_chord_bins=None results (one bar per
         radial strip) - a chord-subdivided result has more than one
         value per strip and doesn't reduce to a single bar chart this
         way.
+
+        All three force components share one left axis (ax) - a
+        separate scale per component was tried and made the plot
+        too visually busy, so axial's larger magnitude just means
+        radial/tangential read smaller on the shared scale; see
+        show_totals for the exact numeric values regardless. The
+        cumulative/integrated curve (right axis, ax2) is unchanged.
 
         frame : int or None
             A specific frame index for an instantaneous bar chart, or
             None (default) to average over every frame in the file
             first - same convention as FrictionLines/SurfaceVariable.
         show_totals : bool
-            If True, annotate the figure with a text box, same style as
-            FrictionLines' Poincare-index annotation, in the lower-left
-            (near the root, where the bars themselves stay small - see
-            the class's own validated example - so the box doesn't sit
-            on top of data). Reads compute()'s OWN embedded
+            If True, annotate the figure with a text box in the
+            upper-left corner (inside the axes) - clear of the legend,
+            which sits below the x-axis label instead of inside the
+            plot. Reads compute()'s OWN embedded
             result['totals'], not a fresh total_loads() call -
             guaranteed to match the exact span_min/span_max this
             particular result was built with (see compute()'s docstring
@@ -559,7 +565,7 @@ class StripForces:
         tangential = reduce(result['tangential']) / norm_force
 
         if ax is None:
-            fig, ax = plt.subplots(figsize=(10, 6))
+            fig, ax = plt.subplots(figsize=(8, 8))
         else:
             fig = ax.figure
 
@@ -579,7 +585,9 @@ class StripForces:
         ax.set_ylabel(r'$C_F$ [-]' if coefficients else 'Force [N]')
         ax2.set_ylabel(r'$C_{F,\Sigma}$ [-]' if coefficients else 'Integrated Force [N]')
         ax.grid(True, linestyle='--', alpha=0.6)
-        ax.legend(loc='upper left')
+        # Below the x-axis label rather than inside the plot, so it
+        # never competes with the show_totals box (upper-right corner).
+        ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=3, frameon=True)
 
         if show_totals:
             totals = result['totals']
@@ -606,16 +614,18 @@ class StripForces:
                     f"Radial force = {reduce_scalar(totals['radial_force']):.4g} N\n"
                     f"Tangential force = {reduce_scalar(totals['tangential_force']):.4g} N"
                 )
-            # lower-left: near the root, where the bars themselves stay
-            # small (see plot), so the box doesn't sit on top of data -
-            # and clear of the legend, which occupies the upper-left.
-            ax.text(0.02, 0.35, note, transform=ax.transAxes, fontsize=11, va='center', ha='left',
-                    bbox=dict(facecolor='white', edgecolor='black', alpha=0.85))
+            # Upper-left corner, inside the axes - clear of the legend
+            # (now below the plot, outside the axes).
+            ax.text(0.02, 0.98, note, transform=ax.transAxes, fontsize=18, va='top', ha='left',
+                    zorder=10, bbox=dict(facecolor='white', edgecolor='black', alpha=1.0))
 
         fig.tight_layout()
 
         if savepath:
-            fig.savefig(savepath, dpi=dpi)
+            # bbox_inches='tight': the legend now sits below the axes
+            # (bbox_to_anchor) - tight_layout() alone doesn't reserve
+            # space for it, so it would get clipped without this.
+            fig.savefig(savepath, dpi=dpi, bbox_inches='tight')
 
         return fig, (ax, ax2)
 
@@ -632,7 +642,7 @@ class StripForces:
     }
 
     def plot_time_trace(self, result: dict, dt: float, component: str = 'axial', strips=None,
-                         ax=None, cmap: str = 'cividis', savepath: str = None, dpi: int = 150):
+                         ax=None, cmap: str = 'cividis', savepath: str = None, dpi: int = 600):
 
         '''
         Raw per-strip force vs time - one line per strip (color-coded),
@@ -781,7 +791,7 @@ class StripForces:
         return out
 
     def plot_vs_angle(self, phase_locked: dict, component: str = 'axial', strips=None, polar: bool = True,
-                       ax=None, cmap: str = 'cividis', savepath: str = None, dpi: int = 150):
+                       ax=None, cmap: str = 'cividis', savepath: str = None, dpi: int = 600):
 
         '''
         Phase-locked force vs rotor azimuth - matches this project's
@@ -1075,7 +1085,7 @@ class StripForces:
                 data.create_dataset('phase', data=harmonics_result['phase'])
 
     def plot_harmonics(self, harmonics_result: dict, strips=None, show_phase: bool = False, ax=None,
-                        cmap: str = 'cividis', savepath: str = None, dpi: int = 150):
+                        cmap: str = 'cividis', savepath: str = None, dpi: int = 600):
 
         '''
         Bar chart of harmonics()'s |F_n(r)| vs harmonic number, log
@@ -1160,7 +1170,7 @@ class StripForces:
 
     def plot_phase_portrait(self, loads: dict, component_pair=('axial', 'radial'), ax=None,
                              cmap: str = 'cividis', linewidth: float = 1.5, aspect='auto',
-                             savepath: str = None, dpi: int = 150):
+                             savepath: str = None, dpi: int = 600):
 
         '''
         Whole-blade PHASE PORTRAIT: one integrated force component
@@ -1257,7 +1267,7 @@ class StripForces:
 
     def plot_phase_portrait_by_strip(self, result: dict, component_pair=('axial', 'radial'), strips=None,
                                       n_cols: int = 4, cmap: str = 'cividis', aspect='auto',
-                                      savepath: str = None, dpi: int = 150):
+                                      savepath: str = None, dpi: int = 600):
 
         '''
         Per-strip version of plot_phase_portrait() - one small phase-
