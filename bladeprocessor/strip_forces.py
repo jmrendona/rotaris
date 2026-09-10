@@ -1155,3 +1155,205 @@ class StripForces:
             fig.savefig(savepath, dpi=dpi)
 
         return (fig, (ax, ax_phase)) if show_phase else (fig, ax)
+
+    _TOTALS_KEY_MAP = {'axial': 'thrust', 'radial': 'radial_force', 'tangential': 'tangential_force'}
+
+    def plot_phase_portrait(self, loads: dict, component_pair=('axial', 'radial'), ax=None,
+                             cmap: str = 'cividis', linewidth: float = 1.5, aspect='auto',
+                             savepath: str = None, dpi: int = 150):
+
+        '''
+        Whole-blade PHASE PORTRAIT: one integrated force component
+        plotted against another, over time - e.g. axial vs radial, or
+        radial vs tangential (NOT a polar/angular plot despite an
+        informal "polar plot" name sometimes used for this - see
+        plot_vs_angle() for force-vs-azimuth; this is force-vs-force). A
+        convergence diagnostic, not a physical-space or angular one: for
+        a rotor that has settled into truly periodic operation, this
+        traces a CLOSED, REPEATING loop, one revolution retracing
+        (approximately) the same path as the last. A simulation that
+        hasn't converged yet instead shows a trajectory that DRIFTS - a
+        slowly expanding/contracting spiral, or a loop that shifts
+        position over time - rather than closing on itself. This is the
+        standard "phase portrait"/Lissajous-figure technique from
+        nonlinear dynamics for visualizing whether a system has reached
+        a periodic limit cycle (see e.g. Strogatz, "Nonlinear Dynamics
+        and Chaos", for the general technique) applied here to rotor
+        load convergence - see README.md's convergence-checking section
+        for related methods and literature, and
+        plot_phase_portrait_by_strip() for the per-strip version (a
+        whole-blade check like this one can hide a small, spatially
+        localized convergence issue if it's a small fraction of the
+        total integrated load).
+
+        The trajectory is colored by frame index - this is what actually
+        makes drift visible, not just the raw shape: a converged, closed
+        loop shows early- and late-time colors interleaved around the
+        SAME path (every revolution retraces close to the same curve),
+        while a still-drifting trajectory shows early/late colors
+        spatially SEPARATED (e.g. one color band on the inside of a
+        spiral, a different one on the outside).
+
+        Parameters
+        ----------
+        loads : dict
+            total_loads()'s return value, or a compute() result's own
+            'totals' key (both have the same keys) - NOT compute()'s
+            per-strip arrays directly, see plot_phase_portrait_by_strip()
+            for that.
+        component_pair : (str, str)
+            Which two of 'axial', 'radial', 'tangential' to plot against
+            each other (x, y) - same component names as elsewhere in
+            this class; internally mapped to loads' own key names
+            ('thrust', 'radial_force', 'tangential_force').
+        aspect : 'auto' or 'equal'
+            'equal' only makes visual sense when both components share a
+            comparable magnitude (e.g. radial vs tangential, both
+            usually small - see total_loads()'s docstring) - axial
+            (thrust) is typically much larger than either, so 'equal'
+            there would squash the very structure you're trying to see.
+            'auto' (default) lets each axis scale independently.
+
+        Returns
+        -------
+        (fig, ax)
+        '''
+
+        from matplotlib.collections import LineCollection
+
+        x = np.asarray(loads[self._TOTALS_KEY_MAP[component_pair[0]]])
+        y = np.asarray(loads[self._TOTALS_KEY_MAP[component_pair[1]]])
+        if len(x) < 2:
+            raise ValueError(f"Need at least 2 frames for a phase portrait - got {len(x)}.")
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(6, 6))
+        else:
+            fig = ax.figure
+
+        points = np.column_stack([x, y]).reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        lc = LineCollection(segments, cmap=cmap, array=np.arange(len(x) - 1), linewidth=linewidth)
+        ax.add_collection(lc)
+
+        xpad = 0.05 * ((x.max() - x.min()) or 1.0)
+        ypad = 0.05 * ((y.max() - y.min()) or 1.0)
+        ax.set_xlim(x.min() - xpad, x.max() + xpad)
+        ax.set_ylim(y.min() - ypad, y.max() + ypad)
+        ax.set_aspect(aspect)
+
+        cbar = fig.colorbar(lc, ax=ax)
+        cbar.set_label('Frame index')
+
+        ax.set_xlabel(self._COMPONENT_LABELS[component_pair[0]])
+        ax.set_ylabel(self._COMPONENT_LABELS[component_pair[1]])
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+
+        if savepath:
+            fig.savefig(savepath, dpi=dpi)
+
+        return fig, ax
+
+    def plot_phase_portrait_by_strip(self, result: dict, component_pair=('axial', 'radial'), strips=None,
+                                      n_cols: int = 4, cmap: str = 'cividis', aspect='auto',
+                                      savepath: str = None, dpi: int = 150):
+
+        '''
+        Per-strip version of plot_phase_portrait() - one small phase-
+        portrait subplot per radial strip, arranged in a grid, so cycle-
+        to-cycle convergence can be visually compared ACROSS the blade at
+        once. A strip whose loop hasn't closed yet (still drifting)
+        points at a LOCALIZED convergence issue at that particular span
+        location - something plot_phase_portrait()'s whole-blade check
+        could miss entirely if that strip is a small enough fraction of
+        the total integrated load. Same underlying diagnostic and the
+        same frame-index coloring - see that method's docstring for both.
+
+        Parameters
+        ----------
+        result : dict
+            compute()'s return value - per-radial-strip only
+            (n_chord_bins=None), same restriction as plot_bar_forces()/
+            plot_time_trace().
+        component_pair : (str, str)
+            Same as plot_phase_portrait() - 'axial', 'radial', or
+            'tangential', read directly from result[component] here (no
+            key-name mapping needed, unlike the totals dict).
+        strips : array-like of int, optional
+            Which strip indices to plot - None (default) plots every
+            valid strip. As with plot_time_trace(), a real case can have
+            far more strips than fit legibly on one figure - pick a
+            representative subset if needed.
+        n_cols : int
+            Number of subplot columns - rows are added as needed.
+
+        Returns
+        -------
+        (fig, axes)
+            axes : np.ndarray of Axes, shape (n_rows, n_cols) - unused
+            trailing axes (if the strip count doesn't fill the last row)
+            are turned off, not left blank-but-visible.
+        '''
+
+        from matplotlib.collections import LineCollection
+
+        if result['chord'] is not None:
+            raise ValueError(
+                "plot_phase_portrait_by_strip() only supports a per-radial-strip result "
+                "(compute(n_chord_bins=None))."
+            )
+
+        radius = result['radius']
+        valid = np.flatnonzero(~np.isnan(radius))
+        sel = valid if strips is None else np.asarray(strips)
+        if len(sel) == 0:
+            raise ValueError("No strips to plot - check strips= or compute()'s span_min/span_max/n_span_bins.")
+
+        x_all = result[component_pair[0]]  # (n_frames, n_span_bins)
+        y_all = result[component_pair[1]]
+        n_frames = x_all.shape[0]
+        if n_frames < 2:
+            raise ValueError(f"Need at least 2 frames for a phase portrait - got {n_frames}.")
+
+        n_cols = min(n_cols, len(sel))
+        n_rows = int(np.ceil(len(sel) / n_cols))
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.2 * n_cols, 3.2 * n_rows), squeeze=False)
+        axes_flat = axes.ravel()
+
+        last_lc = None
+        for ax, i in zip(axes_flat, sel):
+
+            x, y = x_all[:, i], y_all[:, i]
+            points = np.column_stack([x, y]).reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            lc = LineCollection(segments, cmap=cmap, array=np.arange(n_frames - 1), linewidth=1.2)
+            ax.add_collection(lc)
+            last_lc = lc
+
+            xpad = 0.05 * ((x.max() - x.min()) or 1.0)
+            ypad = 0.05 * ((y.max() - y.min()) or 1.0)
+            ax.set_xlim(x.min() - xpad, x.max() + xpad)
+            ax.set_ylim(y.min() - ypad, y.max() + ypad)
+            ax.set_aspect(aspect)
+            ax.set_title(f'Strip {i + 1} (r={radius[i]:.3f} m)', fontsize=10)
+            ax.grid(True, alpha=0.3)
+            ax.locator_params(axis='x', nbins=3)
+            ax.locator_params(axis='y', nbins=4)
+            ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+
+        for ax in axes_flat[len(sel):]:
+            ax.axis('off')
+
+        fig.supxlabel(self._COMPONENT_LABELS[component_pair[0]])
+        fig.supylabel(self._COMPONENT_LABELS[component_pair[1]])
+        fig.tight_layout()
+
+        if last_lc is not None:
+            fig.colorbar(last_lc, ax=axes_flat[:len(sel)].tolist(), label='Frame index', shrink=0.6)
+
+        if savepath:
+            fig.savefig(savepath, dpi=dpi)
+
+        return fig, axes
