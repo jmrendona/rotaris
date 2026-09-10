@@ -243,6 +243,25 @@ avg_pressure_file = '2026DNS_avg_pressure_rotor.h5'
 # 	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_critical_points_frame{frame:03d}_2026.png'),
 # 	)
 
+# Convergence checking: Cf phase portrait (see README.md, "Convergence
+# checking: wall-shear/Cf phase portraits") - near-wall/viscous
+# quantities converge MORE SLOWLY than integrated forces, so this needs
+# checking separately from StripForces' phase portraits even if those
+# already look converged:
+# print(40*'-')
+# print('Plotting Cf phase portrait (magnitude vs chordwise), Upper surface')
+# fl.plot_cf_phase_portrait(
+#    component_pair=(None, 'chordwise'), surface='Upper', span_min=0.02,
+#    savepath=os.path.join(master_path, 'images/cf/cf_phase_portrait_mag_chordwise.png'),
+# )
+
+# print(40*'-')
+# print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
+# fl.plot_cf_phase_portrait_by_strip(
+#    component_pair=('spanwise', 'chordwise'), surface='Upper', span_min=0.02, n_span_bins=10,
+#    savepath=os.path.join(master_path, 'images/cf/cf_phase_portrait_by_strip.png'),
+# )
+
 # ------------- Any surface variable at radii (Cp, y+, RMS, ...) ------------- #
 #
 # Input: a convert_snc_to_h5(..., surface_split=True) file - the pressure
@@ -612,8 +631,7 @@ sf_avg.plot_bar_forces(
 # drifting/spiraling trajectory means it hasn't yet. Needs an "inst" file,
 # same as the time-domain block above - a single already-averaged frame
 # has no trajectory to trace. See README.md, "Convergence checking: phase
-# portraits" for the full explanation and more convergence-checking ideas
-# from the literature.
+# portraits" for the full explanation.
 
 # print(40*'-')
 # print('Plotting whole-blade phase portrait (axial vs tangential)')
@@ -628,6 +646,18 @@ sf_avg.plot_bar_forces(
 # sf_inst.plot_phase_portrait_by_strip(
 #    result_inst, component_pair=('axial', 'radial'), strips=[0, 2, 4, 6, 8, 9],
 #    savepath=os.path.join(master_path, 'images/forces/phase_portrait_by_strip_axial_radial.png'),
+# )
+
+# Convergence checking: cumulative (running) mean vs revolutions included
+# (see README.md, "Convergence checking: running/cumulative mean") - a
+# converged quantity's running mean flattens to a horizontal asymptote.
+# Not tied to StripForces specifically - takes any plain 1D array:
+# from bladeprocessor.convergence import plot_cumulative_mean
+# print(40*'-')
+# print('Plotting cumulative mean of thrust vs revolutions included')
+# plot_cumulative_mean(
+#    totals_inst['thrust'], dt=0.000056, rpm=6000, ylabel='Thrust [N]',
+#    savepath=os.path.join(master_path, 'images/forces/thrust_cumulative_mean.png'),
 # )
 
 # ------------- Tip-vortex tracking: phase-locked plane averaging (see README.md) ------------- #

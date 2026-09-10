@@ -330,8 +330,7 @@ class FrictionLines:
             tau = self.wall_shear(surface=surface, frame=None)
             return self._cf_value(tau, component) / q_ref
 
-        tau_all = self._wall_shear_all_frames(surface)  # (n_frames, n_points, 3)
-        cf_all = self._cf_value(tau_all, component) / q_ref[None, :]  # (n_frames, n_points)
+        cf_all = self.cf_time_series(surface=surface, component=component)  # (n_frames, n_points)
 
         if stat == 'rms':
             return np.sqrt(((cf_all - cf_all.mean(axis=0)) ** 2).mean(axis=0))
@@ -339,6 +338,34 @@ class FrictionLines:
             return np.sqrt((cf_all ** 2).mean(axis=0))
         else:
             raise ValueError(f"Unknown stat '{stat}' - use 'mean', 'rms', or 'raw_rms'.")
+
+    def cf_time_series(self, surface: str = 'Upper', component: str = None) -> np.ndarray:
+
+        '''
+        Skin friction coefficient at EVERY frame, unreduced - shape
+        (n_frames, n_points). Unlike cf(frame=None), which always
+        reduces across frames via `stat`, this keeps the full per-frame
+        series - needed for anything that tracks how Cf actually evolves
+        frame to frame (e.g. plot_cf_phase_portrait()), rather than a
+        single reduced snapshot. `cf(stat='rms'/'raw_rms')` is built on
+        top of this internally.
+
+        Parameters
+        ----------
+        component : None, 'chordwise', or 'spanwise' - see cf().
+
+        Returns
+        -------
+        np.ndarray, shape (n_frames, n_points)
+        '''
+
+        if self.rho_ref is None or self.rpm is None:
+            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cf.")
+
+        q_ref = self._q_ref(surface)
+        tau_all = self._wall_shear_all_frames(surface)  # (n_frames, n_points, 3)
+
+        return self._cf_value(tau_all, component) / q_ref[None, :]
 
     def cf_at_radii(self, radii, surface: str = 'Upper', frame: int = None, component: str = None,
                      stat: str = 'mean', tol: float = 0.0015, n_chord_bins: int = 150, span_min: float = None,
@@ -558,6 +585,255 @@ class FrictionLines:
             fig.savefig(savepath, dpi=dpi)
 
         return fig, ax
+
+    _CF_COMPONENT_LABELS = {
+        None: r'$C_f$ [-]',
+        'chordwise': r'$C_{f,chordwise}$ [-]',
+        'spanwise': r'$C_{f,spanwise}$ [-]',
+    }
+
+    def plot_cf_phase_portrait(self, component_pair=(None, 'chordwise'), surface: str = 'Upper',
+                                span_min: float = None, span_max: float = None, ax=None,
+                                cmap: str = 'cividis', linewidth: float = 1.5, aspect='auto',
+                                savepath: str = None, dpi: int = 150):
+
+        '''
+        Whole-selection Cf PHASE PORTRAIT - the same convergence
+        diagnostic as StripForces.plot_phase_portrait(), applied to
+        wall-shear/Cf instead of integrated forces (see README.md,
+        "Convergence checking" - near-wall/viscous quantities are known
+        to converge MORE SLOWLY than pressure-driven integrated loads, so
+        a whole-blade force check looking converged doesn't guarantee
+        this does too; this project's own Cf-periodicity investigation,
+        HANDOFF.md's "RESOLVED: Cf-magnitude-growth investigation", is a
+        concrete example of that on this exact case).
+
+        Plots the SPATIAL MEAN (over every selected surfel, optionally
+        span_min/span_max-cropped - same two-blade-mixing reason as
+        cf_at_radii()/friction_lines()) of one Cf component against
+        another, at every frame. A closed, repeating loop means Cf has
+        settled into periodic behavior; a trajectory that keeps drifting
+        (an expanding/contracting spiral, or a loop shifting position)
+        means it hasn't yet - colored by frame index, same as
+        StripForces' version, since that's what actually reveals drift
+        (early/late colors interleaved on the same path = converged;
+        spatially separated = still drifting).
+
+        Uses the spatial MEAN of Cf per frame, not an area-weighted
+        integrated force the way StripForces sums actual Newtons - this
+        class doesn't carry surfel area, and a representative, repeatable
+        per-frame scalar is all this diagnostic needs, not a literal
+        physical load.
+
+        Parameters
+        ----------
+        component_pair : (str, str)
+            Any two of None (magnitude), 'chordwise', 'spanwise' - same
+            component names cf() uses (default compares magnitude
+            against the chordwise/separation-relevant component).
+        surface, span_min, span_max : see cf()/cf_at_radii() - span
+            cropping matters here for the identical reason it does
+            everywhere else in this class (an unfiltered multi-blade
+            selection mixes both blades' Cf into one spatial mean).
+        aspect : 'auto' or 'equal' - see StripForces.plot_phase_portrait()
+            for when 'equal' does/doesn't make visual sense (comparable
+            magnitude components only).
+
+        Returns
+        -------
+        (fig, ax)
+        '''
+
+        from matplotlib.collections import LineCollection
+
+        span, _ = self._span_chord(surface)
+        mask = np.ones(len(span), dtype=bool)
+        if span_min is not None:
+            mask &= span >= span_min
+        if span_max is not None:
+            mask &= span <= span_max
+        if mask.sum() < 1:
+            raise ValueError("No points after span_min/span_max cropping - check span_min/span_max.")
+
+        x = self.cf_time_series(surface=surface, component=component_pair[0])[:, mask].mean(axis=1)
+        y = self.cf_time_series(surface=surface, component=component_pair[1])[:, mask].mean(axis=1)
+        if len(x) < 2:
+            raise ValueError(f"Need at least 2 frames for a phase portrait - got {len(x)}.")
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(6, 6))
+        else:
+            fig = ax.figure
+
+        points = np.column_stack([x, y]).reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        lc = LineCollection(segments, cmap=cmap, array=np.arange(len(x) - 1), linewidth=linewidth)
+        ax.add_collection(lc)
+
+        xpad = 0.05 * ((x.max() - x.min()) or 1.0)
+        ypad = 0.05 * ((y.max() - y.min()) or 1.0)
+        ax.set_xlim(x.min() - xpad, x.max() + xpad)
+        ax.set_ylim(y.min() - ypad, y.max() + ypad)
+        ax.set_aspect(aspect)
+
+        cbar = fig.colorbar(lc, ax=ax)
+        cbar.set_label('Frame index')
+
+        ax.set_xlabel(self._CF_COMPONENT_LABELS[component_pair[0]])
+        ax.set_ylabel(self._CF_COMPONENT_LABELS[component_pair[1]])
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+
+        if savepath:
+            fig.savefig(savepath, dpi=dpi)
+
+        return fig, ax
+
+    def _cf_binned_time_series(self, components, surface: str = 'Upper', span_min: float = None,
+                                span_max: float = None, n_span_bins: int = 10, min_count: int = 10):
+
+        '''
+        Per-span-bin, per-frame spatial MEAN of one or more Cf
+        components - shared helper for plot_cf_phase_portrait_by_strip().
+        Same span-bin architecture as StripForces.compute() (root-to-tip
+        equal-width bins over the cropped span range), but averaging Cf
+        within each bin/frame rather than summing an area-weighted force
+        - see plot_cf_phase_portrait()'s docstring for why a mean, not an
+        integrated load, is what this diagnostic needs.
+
+        Returns
+        -------
+        radius : np.ndarray, shape (n_span_bins,) - mean physical radius
+            of each bin (NaN where empty).
+        series : dict[component, np.ndarray of shape (n_frames, n_span_bins)]
+            NaN columns where a bin was empty (below min_count).
+        '''
+
+        span, _ = self._span_chord(surface)
+        r = self._radius(surface)
+
+        mask = np.ones(len(span), dtype=bool)
+        if span_min is not None:
+            mask &= span >= span_min
+        if span_max is not None:
+            mask &= span <= span_max
+        if mask.sum() < min_count:
+            raise ValueError(
+                f"Only {int(mask.sum())} points after span_min/span_max cropping - "
+                "check span_min/span_max."
+            )
+
+        span_m, r_m = span[mask], r[mask]
+        series_all = {c: self.cf_time_series(surface=surface, component=c)[:, mask] for c in components}
+        n_frames = next(iter(series_all.values())).shape[0]
+
+        span_edges = np.linspace(span_m.min(), span_m.max(), n_span_bins + 1)
+        radius_out = np.full(n_span_bins, np.nan)
+        out = {c: np.full((n_frames, n_span_bins), np.nan) for c in components}
+
+        for i in range(n_span_bins):
+
+            in_bin = (span_m >= span_edges[i]) & (
+                span_m < span_edges[i + 1] if i < n_span_bins - 1 else span_m <= span_edges[i + 1]
+            )
+            if in_bin.sum() < min_count:
+                continue
+
+            radius_out[i] = r_m[in_bin].mean()
+            for c in components:
+                out[c][:, i] = series_all[c][:, in_bin].mean(axis=1)
+
+        return radius_out, out
+
+    def plot_cf_phase_portrait_by_strip(self, component_pair=(None, 'chordwise'), surface: str = 'Upper',
+                                         span_min: float = None, span_max: float = None,
+                                         n_span_bins: int = 10, min_count: int = 10, strips=None,
+                                         n_cols: int = 4, cmap: str = 'cividis', aspect='auto',
+                                         savepath: str = None, dpi: int = 150):
+
+        '''
+        Per-strip version of plot_cf_phase_portrait() - one small phase-
+        portrait subplot per radial strip, arranged in a grid, so
+        cycle-to-cycle Cf convergence can be visually compared ACROSS the
+        blade at once. A strip whose loop hasn't closed yet points at a
+        LOCALIZED convergence issue at that span location - something a
+        whole-selection check (plot_cf_phase_portrait()) could miss if
+        it's a small enough fraction of the spatial mean. Same
+        diagnostic and frame-index coloring - see that method's
+        docstring for both.
+
+        Parameters
+        ----------
+        n_span_bins, min_count : see StripForces.compute() - same
+            root-to-tip equal-width binning.
+        strips : array-like of int, optional
+            Which bin indices to plot - None (default) plots every
+            non-empty bin.
+        n_cols : number of subplot columns - rows are added as needed.
+
+        Returns
+        -------
+        (fig, axes)
+        '''
+
+        from matplotlib.collections import LineCollection
+
+        radius, series = self._cf_binned_time_series(
+            component_pair, surface=surface, span_min=span_min, span_max=span_max,
+            n_span_bins=n_span_bins, min_count=min_count,
+        )
+
+        valid = np.flatnonzero(~np.isnan(radius))
+        sel = valid if strips is None else np.asarray(strips)
+        if len(sel) == 0:
+            raise ValueError("No strips to plot - check strips= or span_min/span_max/n_span_bins.")
+
+        x_all, y_all = series[component_pair[0]], series[component_pair[1]]
+        n_frames = x_all.shape[0]
+        if n_frames < 2:
+            raise ValueError(f"Need at least 2 frames for a phase portrait - got {n_frames}.")
+
+        n_cols = min(n_cols, len(sel))
+        n_rows = int(np.ceil(len(sel) / n_cols))
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.2 * n_cols, 3.2 * n_rows), squeeze=False)
+        axes_flat = axes.ravel()
+
+        last_lc = None
+        for ax, i in zip(axes_flat, sel):
+
+            x, y = x_all[:, i], y_all[:, i]
+            points = np.column_stack([x, y]).reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            lc = LineCollection(segments, cmap=cmap, array=np.arange(n_frames - 1), linewidth=1.2)
+            ax.add_collection(lc)
+            last_lc = lc
+
+            xpad = 0.05 * ((x.max() - x.min()) or 1.0)
+            ypad = 0.05 * ((y.max() - y.min()) or 1.0)
+            ax.set_xlim(x.min() - xpad, x.max() + xpad)
+            ax.set_ylim(y.min() - ypad, y.max() + ypad)
+            ax.set_aspect(aspect)
+            ax.set_title(f'Strip {i + 1} (r={radius[i]:.3f} m)', fontsize=10)
+            ax.grid(True, alpha=0.3)
+            ax.locator_params(axis='x', nbins=3)
+            ax.locator_params(axis='y', nbins=4)
+            ax.ticklabel_format(axis='x', style='sci', scilimits=(0, 0))
+
+        for ax in axes_flat[len(sel):]:
+            ax.axis('off')
+
+        fig.supxlabel(self._CF_COMPONENT_LABELS[component_pair[0]])
+        fig.supylabel(self._CF_COMPONENT_LABELS[component_pair[1]])
+        fig.tight_layout()
+
+        if last_lc is not None:
+            fig.colorbar(last_lc, ax=axes_flat[:len(sel)].tolist(), label='Frame index', shrink=0.6)
+
+        if savepath:
+            fig.savefig(savepath, dpi=dpi)
+
+        return fig, axes
 
     def separation_line(self, surface: str = 'Upper', frame: int = None, span_min: float = None,
                          span_max: float = None, n_span_bins: int = 200, n_chord_bins: int = 200,

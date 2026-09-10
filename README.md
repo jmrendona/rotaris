@@ -1481,6 +1481,66 @@ sf.plot_phase_portrait_by_strip(result, component_pair=('axial', 'radial'),
                                  savepath='phase_portrait_by_strip.png')
 ```
 
+### Convergence checking: wall-shear/Cf phase portraits - `FrictionLines.plot_cf_phase_portrait()` / `plot_cf_phase_portrait_by_strip()`
+
+Same diagnostic as `StripForces`' phase portraits above, applied to
+wall-shear/Cf instead of integrated forces. This matters as its own,
+separate check: near-wall/viscous quantities are known to converge more
+slowly than pressure-driven integrated loads - a whole-blade force phase
+portrait already looking converged does NOT guarantee Cf has too. This
+project's own `HANDOFF.md` (`"RESOLVED: Cf-magnitude-growth
+investigation"`) found a real, once-per-revolution Cf variation on this
+project's own case even where thrust looked flat - a concrete
+demonstration of exactly this gap.
+
+Plots the SPATIAL MEAN of one Cf component against another, at every
+frame (not an area-weighted integrated force - `FrictionLines` doesn't
+carry surfel area, and a representative, repeatable per-frame scalar is
+all this diagnostic needs):
+
+```python
+fl.plot_cf_phase_portrait(component_pair=(None, 'chordwise'), surface='Upper',
+                           span_min=0.02, savepath='cf_phase_portrait.png')
+```
+
+`component_pair` takes any two of `None` (magnitude), `'chordwise'`,
+`'spanwise'` - the same component names `cf()` uses. Same frame-index
+coloring, same `aspect='auto'`/`'equal'` guidance, and the same per-strip
+grid variant for localizing WHERE on the blade Cf is still evolving:
+
+```python
+fl.plot_cf_phase_portrait_by_strip(component_pair=('spanwise', 'chordwise'), surface='Upper',
+                                    span_min=0.02, n_span_bins=10, strips=[0, 3, 6, 9],
+                                    savepath='cf_phase_portrait_by_strip.png')
+```
+
+Built on the new `cf_time_series()` (the full per-frame Cf array,
+unreduced - `cf(stat='rms'/'raw_rms')` is now implemented on top of this
+internally too, same numbers as before, just no longer duplicating the
+computation).
+
+### Convergence checking: running/cumulative mean - `bladeprocessor/convergence.py`
+
+The cumulative (running) mean of any scalar time series as a function of
+how many samples/revolutions have been included so far - a converged
+quantity's cumulative mean flattens to a horizontal asymptote; a
+still-rising or oscillating one means more revolutions are needed.
+Deliberately NOT a method on any one class - takes a plain 1D array, so
+it works on `StripForces.total_loads()['thrust']`, the spatial mean
+behind a Cf phase portrait above, or any other per-frame scalar:
+
+```python
+from bladeprocessor.convergence import plot_cumulative_mean
+
+loads = sf.total_loads(span_min=0.02)
+plot_cumulative_mean(loads['thrust'], dt=0.000056, rpm=6000, ylabel='Thrust [N]',
+                      savepath='thrust_cumulative_mean.png')
+```
+
+Passing both `dt` and `rpm` adds a second x-axis (top) in revolutions
+included, so "how many cycles until this flattens out" is readable
+directly rather than converting frame counts by hand.
+
 ## What's still open
 
 - Iso-radius / (r/R, x/c) resampling directly from raw `.snc` surfel
