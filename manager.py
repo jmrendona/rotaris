@@ -53,11 +53,11 @@ from bladeprocessor.tip_vortex_tracking import TipVortexPhaseAverage
 # (q_ref = 0.5*rho_ref*(omega*r)^2, matching BladePostProcessor.compute_cf()
 # above - see README.md's "Equations" section for the full derivation).
 
-master_path = '/scratch/jmrendon/Rotor-alone/6e-5_6000rpm-transition/'
-inst_force_file = '2025T_forces_rotor.h5'
-avg_force_file = '2025T_avg_forces_rotor.h5'
+master_path = '/scratch/jmrendon/Rotor-alone/1e-5_6000rpm-dns'
+inst_force_file = '2026DNS_forces_rotor.h5'
+avg_force_file = '2026DNS_avg_forces_rotor.h5'
 inst_pressure_file = ''
-avg_pressure_file = '2025T_avg_pressure_rotor.h5'
+avg_pressure_file = '2026DNS_avg_pressure_rotor.h5'
 
 # print(40*'-')
 # print('Opening FrictionLines file: ', os.path.join(master_path, inst_force_file))
@@ -97,21 +97,21 @@ avg_pressure_file = '2025T_avg_pressure_rotor.h5'
 # fl.plot_cf_radii(
 #    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 #    surface='Upper', frame=None, component=None, span_min=0.02, reverse_chord=True,
-#    savepath=os.path.join(master_path, 'images/cf/avg/cf_radii_mag_avg.png'),
+#    savepath=os.path.join(master_path, 'images/cf/avg/cf_radii_mag_avg_2026.png'),
 # )
 # print(40*'-')
 # print('Plotting Cf vs x/c chordwise component')
 # fl.plot_cf_radii(
 #    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 #    surface='Upper', frame=None, component='chordwise', span_min=0.02, reverse_chord=True,
-#    savepath=os.path.join(master_path, 'images/cf/avg/cf_radii_chordwise_avg.png'),
+#    savepath=os.path.join(master_path, 'images/cf/avg/cf_radii_chordwise_avg_2026.png'),
 # )
 # print(40*'-')
 # print('Plotting Cf vs x/c spanwise component')
 # fl.plot_cf_radii(
 #    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 #    surface='Upper', frame=None, component='spanwise', span_min=0.02, reverse_chord=True,
-#    savepath=os.path.join(master_path, 'images/cf/avg/cf_radii_spanwise_avg.png'),
+#    savepath=os.path.join(master_path, 'images/cf/avg/cf_radii_spanwise_avg_2026.png'),
 # )
 
 # for frame in range(0,fl.n_frames,15):
@@ -122,21 +122,21 @@ avg_pressure_file = '2025T_avg_pressure_rotor.h5'
 # 	fl.plot_cf_radii(
 # 	radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 # 	surface='Upper', frame=frame, component=None, span_min=0.02, reverse_chord=True,
-# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_mag_frame{frame:03d}.png'),
+# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_mag_frame{frame:03d}_2026.png'),
 # 	)
 # 	print(40*'-')
 # 	print('Plotting Cf vs x/c chordwise component')
 # 	fl.plot_cf_radii(
 # 	radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 # 	surface='Upper', frame=frame, component='chordwise', span_min=0.02, reverse_chord=True,
-# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_chordwise_frame{frame:03d}.png'),
+# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_chordwise_frame{frame:03d}_2026.png'),
 # 	)
 # 	print(40*'-')
 # 	print('Plotting Cf vs x/c spanwise component')
 # 	fl.plot_cf_radii(
 # 	radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 # 	surface='Upper', frame=frame, component='spanwise', span_min=0.02, reverse_chord=True,
-# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_spanwise_frame{frame:03d}.png'),
+# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_spanwise_frame{frame:03d}_2026.png'),
 # 	)
 
 # Cf unsteadiness (RMS fluctuation about the mean - see README.md, "Cf
@@ -165,16 +165,16 @@ avg_pressure_file = '2025T_avg_pressure_rotor.h5'
 # print(40*'-')
 # print('Plotting Friction Lines, Upper surface, average over all frames')
 # fl.friction_lines(
-#    frame=None, span_min=0.02,
-#    savepath=os.path.join(master_path, 'images/cf/avg/friction_lines_avg.png'),
+#    frame=None, span_min=0.02, surface='Upper',
+#    savepath=os.path.join(master_path, 'images/cf/avg/friction_lines_avg_2026.png'),
 # )
 
 # for frame in range(0,fl.n_frames,15):
 # 	print(40*'-')
 # 	print(f'Plotting Friction Lines, Upper surface, for frame {frame:03d}')
 # 	fl.friction_lines(
-# 	frame=frame, span_min=0.02,
-# 	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_frame{frame:03d}.png'),
+# 	   frame=frame, span_min=0.02, surface='Upper',
+# 	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_frame{frame:03d}_2026.png'),
 # 	)
 
 # Separation/reattachment line (chordwise-Cf sign crossings) - restricted
@@ -190,16 +190,16 @@ avg_pressure_file = '2025T_avg_pressure_rotor.h5'
 # fl.friction_lines(
 #    surface='Upper', frame=None, span_min=0.02, show_separation_line=True,
 #    separation_line_kwargs={'reverse_chord': True},
-#    savepath=os.path.join(master_path, 'images/cf/avg/friction_lines_separation.png'),
+#    savepath=os.path.join(master_path, 'images/cf/avg/friction_lines_separation_2026.png'),
 # )
 
 # for frame in range(0,fl.n_frames,15):
 # 	print(40*'-')
 # 	print(f'Plotting Friction Lines with separation/reattachment line, Upper surface, for frame {frame:03d}')
 # 	fl.friction_lines(
-# 	surface='Upper', frame=frame, span_min=0.02, show_separation_line=True,
-# 	separation_line_kwargs={'reverse_chord': True},
-# 	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_separation_frame{frame:03d}.png'),
+# 	   surface='Upper', frame=frame, span_min=0.02, show_separation_line=True,
+# 	   separation_line_kwargs={'reverse_chord': True},
+# 	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_separation_frame{frame:03d}_2026.png'),
 # 	)
 
 # Spanwise migration-reversal line (spanwise-Cf sign crossings - a
@@ -232,7 +232,7 @@ avg_pressure_file = '2025T_avg_pressure_rotor.h5'
 # print('Plotting Friction Lines with critical points, Upper surface, average over all frames')
 # fl.friction_lines(
 #    surface='Upper', frame=None, span_min=0.02, show_critical_points=True, show_critical_points_index=True,
-#    savepath=os.path.join(master_path, 'images/cf/avg/friction_lines_critical_points.png'),
+#    savepath=os.path.join(master_path, 'images/cf/avg/friction_lines_critical_points_2026.png'),
 # )
 
 # for frame in range(0,fl.n_frames,15):
@@ -240,7 +240,7 @@ avg_pressure_file = '2025T_avg_pressure_rotor.h5'
 # 	print(f'Plotting Friction Lines with critical points, Upper surface, for frame {frame:03d}')
 # 	fl.friction_lines(
 # 	surface='Upper', frame=frame, span_min=0.02, show_critical_points=True, show_critical_points_index=True,
-# 	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_critical_points_frame{frame:03d}.png'),
+# 	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_critical_points_frame{frame:03d}_2026.png'),
 # 	)
 
 # ------------- Any surface variable at radii (Cp, y+, RMS, ...) ------------- #
@@ -261,15 +261,15 @@ sv_pressure = SurfaceVariable(
    pref=101325,
 )
 
-print(40*'-')
-print('Opening SurfaceVariable file: ', os.path.join(master_path, avg_force_file))
-sv_forces = SurfaceVariable(
-   os.path.join(master_path, avg_force_file),
-   r_tip=0.125,
-   rho_ref=1.22523,
-   rpm=6000,
-   pref=101325,
-)
+# print(40*'-')
+# print('Opening SurfaceVariable file: ', os.path.join(master_path, avg_force_file))
+# sv_forces = SurfaceVariable(
+#    os.path.join(master_path, avg_force_file),
+#    r_tip=0.125,
+#    rho_ref=1.22523,
+#    rpm=6000,
+#    pref=101325,
+# )
 
 # Raw access to any stored variable - instantaneous, mean, or rms/raw_rms:
 #yplus_mean = sv.variable('y+', surface='Upper', frame=None, stat='mean')
@@ -285,18 +285,18 @@ sv_forces = SurfaceVariable(
 # isolates one blade half (see friction_lines() above for why), and
 # reverse_chord fixes which end is the leading vs. trailing edge (no
 # automatic detection - check per case, see the method's docstring):
-# print(40*'-')
-# print('Plotting Cp vs x/c at several radii, average over all frames')
+print(40*'-')
+print('Plotting Cp vs x/c at several radii, average over all frames')
+sv_pressure.plot_cp_radii(
+   radii=[0.045, 0.072, 0.100, 0.117, 0.122],
+   frame=None, stat='mean', span_min=0.02, reverse_chord=True,
+   savepath=os.path.join(master_path, 'images/cp/cp_radii_avg_2026DNS.png'),
+)
 # sv_pressure.plot_cp_radii(
-#    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
-#    frame=None, stat='mean', span_min=0.02, reverse_chord=True,
-#    savepath=os.path.join(master_path, 'images/cp/cp_radii_avg.png'),
-# )
-#sv_pressure.plot_cp_radii(
 #    radii=[0.045, 0.072, 0.100, 0.117, 0.122],
 #    frame=0, span_min=0.03, reverse_chord=True,
 #    savepath=os.path.join(master_path, 'images/cp/cp_radii_frame0.png'),
-#)
+# )
 
 # ------------- Any surface variable over the whole blade + case comparison ------------- #
 #
@@ -306,13 +306,13 @@ sv_forces = SurfaceVariable(
 # see README.md, "Whole-blade surface plot" / "Cross-case comparison".
 
 # Whole-blade -Cp scatter, both surfaces:
-# print(40*'-')
-# print('Plotting -Cp surface scatter, average over all frames')
-# sv_pressure.plot_variable_surface(
-#    lambda s: -sv_pressure.cp(surface=s, stat='mean'),
-#    cbar_label='-Cp', span_min=0.02, surface='Upper',
-#    savepath=os.path.join(master_path, 'images/cp/cp_surface_avg_upper.png'),
-# )
+print(40*'-')
+print('Plotting -Cp surface scatter, average over all frames')
+sv_pressure.plot_variable_surface(
+   lambda s: -sv_pressure.cp(surface=s, stat='mean'),
+   cbar_label='-Cp', span_min=0.02, surface='Upper',
+   savepath=os.path.join(master_path, 'images/cp/cp_surface_avg_upper_2026DNS.png'),
+)
 
 # print(40*'-')
 # print('Plotting Skin Friction surface scatter, average over all frames')
@@ -425,13 +425,13 @@ result = sf_avg.compute(span_min=0.02, n_span_bins=10)
 print(40*'-')
 print('Plotting strip forces bar chart averageg over all frames')
 sf_avg.plot_bar_forces(
-   result, show_totals=True,
-   savepath=os.path.join(master_path, 'images/forces/strip_forces_bar_avg.png'),
+   result, show_totals=False,
+   savepath=os.path.join(master_path, 'images/forces/strip_forces_bar_avg_2026DNS.png'),
 )
 
-# Chordwise-subdivided (non-compact-chord case - see README.md):
-#result_2d = sf.compute(span_min=0.02, n_span_bins=20, n_chord_bins=5)
-#sf.save(result_2d, os.path.join(master_path, 'data/forces/strip_forces_2d.h5'), dt=0.000056)
+# # Chordwise-subdivided (non-compact-chord case - see README.md):
+# #result_2d = sf.compute(span_min=0.02, n_span_bins=20, n_chord_bins=5)
+# #sf.save(result_2d, os.path.join(master_path, 'data/forces/strip_forces_2d.h5'), dt=0.000056)
 
 # Integrated totals (thrust/torque/radial/tangential force, independent of
 # strip binning - see README.md, "Integrated totals"). result['totals']
@@ -449,8 +449,8 @@ print('torque [N.m]:', result['totals']['torque'].mean())
 print(40*'-')
 print('Plotting strip forces bar chart averageg over all frames with non-dimensional coefficients')
 sf_avg.plot_bar_forces(
-   result, show_totals=True, rho=1.22523, n_rot=6000 / 60, diameter=0.25,
-   savepath=os.path.join(master_path, 'images/forces/strip_forces_bar_coeffs_avg.png'),
+   result, show_totals=False, rho=1.22523, n_rot=6000 / 60, diameter=0.25,
+   savepath=os.path.join(master_path, 'images/forces/strip_forces_bar_coeffs_avg_2026DNS.png'),
 )
 
 # Physical radius instead of r/R on the x-axis:
@@ -465,136 +465,136 @@ sf_avg.plot_bar_forces(
 # README.md, "Average vs. instantaneous cases". Needs rpm (set on
 # StripForces itself, not compute()) for phase_lock()/harmonics().
 
-print(40*'-')
-print('Opening StripForces file: ', os.path.join(master_path, inst_force_file))
-sf_inst = StripForces(
-   os.path.join(master_path, inst_force_file),
-   r_tip=0.125, rpm=6000,
-)
+# print(40*'-')
+# print('Opening StripForces file: ', os.path.join(master_path, inst_force_file))
+# sf_inst = StripForces(
+#    os.path.join(master_path, inst_force_file),
+#    r_tip=0.125, rpm=6000,
+# )
 
-print(40*'-')
-print('Computing instantaneous strip forces')
-result_inst = sf_inst.compute(span_min=0.02, n_span_bins=10)
+# print(40*'-')
+# print('Computing instantaneous strip forces')
+# result_inst = sf_inst.compute(span_min=0.02, n_span_bins=10)
 
-# Raw per-strip time trace (see README.md, "Time trace"):
-print(40*'-')
-print('Plotting instantaneous strip forces time trace for the axial component')
-sf_inst.plot_time_trace(
-   result_inst, dt=0.000056, component='axial', strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, 'images/forces/strip_time_trace_axial.png'),
-)
+# # Raw per-strip time trace (see README.md, "Time trace"):
+# print(40*'-')
+# print('Plotting instantaneous strip forces time trace for the axial component')
+# sf_inst.plot_time_trace(
+#    result_inst, dt=0.000056, component='axial', strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, 'images/forces/strip_time_trace_axial.png'),
+# )
 
-print(40*'-')
-print('Plotting instantaneous strip forces time trace for the radial component')
-sf_inst.plot_time_trace(
-   result_inst, dt=0.000056, component='radial', strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, 'images/forces/strip_time_trace_radial.png'),
-)
+# print(40*'-')
+# print('Plotting instantaneous strip forces time trace for the radial component')
+# sf_inst.plot_time_trace(
+#    result_inst, dt=0.000056, component='radial', strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, 'images/forces/strip_time_trace_radial.png'),
+# )
 
-print(40*'-')
-print('Plotting instantaneous strip forces time trace for the tangential component')
-sf_inst.plot_time_trace(
-   result_inst, dt=0.000056, component='tangential', strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, 'images/forces/strip_time_trace_tangential.png'),
-)
+# print(40*'-')
+# print('Plotting instantaneous strip forces time trace for the tangential component')
+# sf_inst.plot_time_trace(
+#    result_inst, dt=0.000056, component='tangential', strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, 'images/forces/strip_time_trace_tangential.png'),
+# )
 
-# Phase-locked (revolution-folded) force vs azimuth (see README.md,
-# "Phase-locked (revolution-folded) forces"):
-print(40*'-')
-print('Plotting phase-locked forces vs azimuth for the axial component')
-phase_locked = sf_inst.phase_lock(result_inst, dt=0.000056, n_azimuth_bins=72)
-sf_inst.plot_vs_angle(
-   phase_locked, component='axial', strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, 'images/forces/strip_vs_angle_axial.png'),
-)
+# # Phase-locked (revolution-folded) force vs azimuth (see README.md,
+# # "Phase-locked (revolution-folded) forces"):
+# print(40*'-')
+# print('Plotting phase-locked forces vs azimuth for the axial component')
+# phase_locked = sf_inst.phase_lock(result_inst, dt=0.000056, n_azimuth_bins=72)
+# sf_inst.plot_vs_angle(
+#    phase_locked, component='axial', strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, 'images/forces/strip_vs_angle_axial.png'),
+# )
 
-print(40*'-')
-print('Plotting phase-locked forces vs azimuth for the radial component')
-phase_locked = sf_inst.phase_lock(result_inst, dt=0.000056, n_azimuth_bins=72)
-sf_inst.plot_vs_angle(
-   phase_locked, component='radial', strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, 'images/forces/strip_vs_angle_radial.png'),
-)
+# print(40*'-')
+# print('Plotting phase-locked forces vs azimuth for the radial component')
+# phase_locked = sf_inst.phase_lock(result_inst, dt=0.000056, n_azimuth_bins=72)
+# sf_inst.plot_vs_angle(
+#    phase_locked, component='radial', strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, 'images/forces/strip_vs_angle_radial.png'),
+# )
 
-print(40*'-')
-print('Plotting phase-locked forces vs azimuth for the tangential component')
-phase_locked = sf_inst.phase_lock(result_inst, dt=0.000056, n_azimuth_bins=72)
-sf_inst.plot_vs_angle(
-   phase_locked, component='tangential', strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, 'images/forces/strip_vs_angle_tangential.png'),
-)
+# print(40*'-')
+# print('Plotting phase-locked forces vs azimuth for the tangential component')
+# phase_locked = sf_inst.phase_lock(result_inst, dt=0.000056, n_azimuth_bins=72)
+# sf_inst.plot_vs_angle(
+#    phase_locked, component='tangential', strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, 'images/forces/strip_vs_angle_tangential.png'),
+# )
 
-# Harmonics of the rotation frequency - Hanson's method's actual |F_n(r)|
-# input (see README.md, "Harmonics (Hanson's method's actual input)"):
-print(40*'-')
-print('Plotting harmonics for the axial component')
-h = sf_inst.harmonics(result_inst, dt=0.000056, component='axial', n_harmonics=17)
-sf_inst.plot_harmonics(
-   h, strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, 'images/forces/strip_harmonics_axial.png'),
-)
+# # Harmonics of the rotation frequency - Hanson's method's actual |F_n(r)|
+# # input (see README.md, "Harmonics (Hanson's method's actual input)"):
+# print(40*'-')
+# print('Plotting harmonics for the axial component')
+# h = sf_inst.harmonics(result_inst, dt=0.000056, component='axial', n_harmonics=17)
+# sf_inst.plot_harmonics(
+#    h, strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, 'images/forces/strip_harmonics_axial.png'),
+# )
 
-print(40*'-')
-print('Plotting harmonics for the radial component')
-h = sf_inst.harmonics(result_inst, dt=0.000056, component='radial', n_harmonics=17)
-sf_inst.plot_harmonics(
-   h, strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, 'images/forces/strip_harmonics_radial.png'),
-)
+# print(40*'-')
+# print('Plotting harmonics for the radial component')
+# h = sf_inst.harmonics(result_inst, dt=0.000056, component='radial', n_harmonics=17)
+# sf_inst.plot_harmonics(
+#    h, strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, 'images/forces/strip_harmonics_radial.png'),
+# )
 
-print(40*'-')
-print('Plotting harmonics for the tangential component')
-h = sf_inst.harmonics(result_inst, dt=0.000056, component='tangential', n_harmonics=17)
-sf_inst.plot_harmonics(
-   h, strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, 'images/forces/strip_harmonics_tangential.png'),
-)
+# print(40*'-')
+# print('Plotting harmonics for the tangential component')
+# h = sf_inst.harmonics(result_inst, dt=0.000056, component='tangential', n_harmonics=17)
+# sf_inst.plot_harmonics(
+#    h, strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, 'images/forces/strip_harmonics_tangential.png'),
+# )
 
-# With phase (needed before actually handing this to Hanson's model, or
-# to check a harmonic's peak azimuth against a known physical cause -
-# see README.md, "Phase"):
-print(40*'-')
-print('Plotting harmonics with phase for the axial component')
-h_phase = sf_inst.harmonics(result_inst, dt=0.000056, component='axial', n_harmonics=17, return_phase=True)
-sf_inst.plot_harmonics(
-   h_phase, strips=[0, 2, 4, 6, 8, 9], show_phase=True,
-   savepath=os.path.join(master_path, 'images/forces/strip_harmonics_phase_axial.png'),
-)
+# # With phase (needed before actually handing this to Hanson's model, or
+# # to check a harmonic's peak azimuth against a known physical cause -
+# # see README.md, "Phase"):
+# print(40*'-')
+# print('Plotting harmonics with phase for the axial component')
+# h_phase = sf_inst.harmonics(result_inst, dt=0.000056, component='axial', n_harmonics=17, return_phase=True)
+# sf_inst.plot_harmonics(
+#    h_phase, strips=[0, 2, 4, 6, 8, 9], show_phase=True,
+#    savepath=os.path.join(master_path, 'images/forces/strip_harmonics_phase_axial.png'),
+# )
 
-print(40*'-')
-print('Computing peak azimuth of each harmonic for the axial component')
-peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
-print(40*'-')
-print('Axial component peak azimuth of each harmonic (deg): ', peak_deg)
+# print(40*'-')
+# print('Computing peak azimuth of each harmonic for the axial component')
+# peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
+# print(40*'-')
+# print('Axial component peak azimuth of each harmonic (deg): ', peak_deg)
 
-print(40*'-')
-print('Plotting harmonics with phase for the radial component')
-h_phase = sf_inst.harmonics(result_inst, dt=0.000056, component='radial', n_harmonics=17, return_phase=True)
-sf_inst.plot_harmonics(
-   h_phase, strips=[0, 2, 4, 6, 8, 9], show_phase=True,
-   savepath=os.path.join(master_path, 'images/forces/strip_harmonics_phase_radial.png'),
-)
+# print(40*'-')
+# print('Plotting harmonics with phase for the radial component')
+# h_phase = sf_inst.harmonics(result_inst, dt=0.000056, component='radial', n_harmonics=17, return_phase=True)
+# sf_inst.plot_harmonics(
+#    h_phase, strips=[0, 2, 4, 6, 8, 9], show_phase=True,
+#    savepath=os.path.join(master_path, 'images/forces/strip_harmonics_phase_radial.png'),
+# )
 
-print(40*'-')
-print('Computing peak azimuth of each harmonic for the radial component')
-peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
-print(40*'-')
-print('Radial component peak azimuth of each harmonic (deg): ', peak_deg)
+# print(40*'-')
+# print('Computing peak azimuth of each harmonic for the radial component')
+# peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
+# print(40*'-')
+# print('Radial component peak azimuth of each harmonic (deg): ', peak_deg)
 
 
-print(40*'-')
-print('Plotting harmonics with phase for the tangential component')
-h_phase = sf_inst.harmonics(result_inst, dt=0.000056, component='tangential', n_harmonics=17, return_phase=True)
-sf_inst.plot_harmonics(
-   h_phase, strips=[0, 2, 4, 6, 8, 9], show_phase=True,
-   savepath=os.path.join(master_path, 'images/forces/strip_harmonics_phase_tangential.png'),
-)
+# print(40*'-')
+# print('Plotting harmonics with phase for the tangential component')
+# h_phase = sf_inst.harmonics(result_inst, dt=0.000056, component='tangential', n_harmonics=17, return_phase=True)
+# sf_inst.plot_harmonics(
+#    h_phase, strips=[0, 2, 4, 6, 8, 9], show_phase=True,
+#    savepath=os.path.join(master_path, 'images/forces/strip_harmonics_phase_tangential.png'),
+# )
 
-print(40*'-')
-print('Computing peak azimuth of each harmonic for the tangential component')
-peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
-print(40*'-')
-print('Tangential component peak azimuth of each harmonic (deg): ', peak_deg)
+# print(40*'-')
+# print('Computing peak azimuth of each harmonic for the tangential component')
+# peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
+# print(40*'-')
+# print('Tangential component peak azimuth of each harmonic (deg): ', peak_deg)
 
 
 # Reconstruction check against phase_lock()'s own empirical curve:
