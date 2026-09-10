@@ -1434,6 +1434,138 @@ present) to one self-contained `.h5` file giving the actual Hanson-model-ready
 artifact, usable without this class or the original `.snc`-derived file
 again.
 
+### Convergence checking: phase portraits - `plot_phase_portrait()` / `plot_phase_portrait_by_strip()`
+
+One integrated force component plotted against another, over time (e.g.
+axial vs. tangential) - **not** a spatial or angular plot despite an
+informal "polar plot" name sometimes used for this (that's
+`plot_vs_angle()`, force vs. *azimuth* - this is force vs. *force*). For
+a rotor that has settled into truly periodic operation, this traces a
+CLOSED, REPEATING loop; a simulation that hasn't converged yet instead
+shows a trajectory that drifts (an expanding/contracting spiral, or a
+loop that shifts position) rather than closing on itself. This is the
+standard "phase portrait" technique from nonlinear dynamics for
+visualizing whether a system has reached a periodic limit cycle (see
+Strogatz, *Nonlinear Dynamics and Chaos*, for the general method) - see
+"More convergence-checking ideas" below for the broader picture this
+fits into.
+
+```python
+loads = sf.total_loads(span_min=0.02)
+sf.plot_phase_portrait(loads, component_pair=('axial', 'tangential'),
+                        savepath='phase_portrait_axial_tangential.png')
+```
+
+The trajectory is colored by frame index - this is what actually reveals
+drift, not just the raw shape: a converged loop shows early- and
+late-time colors interleaved around the SAME path (so tightly overlapping
+it can look like a single flat color); a still-drifting one shows
+early/late colors spatially separated (e.g. dark on the inside of a
+spiral, light on the outside).
+
+`aspect='equal'` only makes visual sense when both components share a
+comparable magnitude (radial vs. tangential, both usually small - see
+`total_loads()`'s docstring) - `axial` (thrust) is typically much larger
+than either, so forcing `'equal'` there would squash the very structure
+you're trying to see; `'auto'` (default) scales each axis independently.
+
+**Per strip** - same diagnostic, one small subplot per radial strip in a
+grid, so a LOCALIZED convergence issue (a strip that hasn't closed its
+loop while the whole-blade integral already looks converged, because
+that strip is a small fraction of the total load) doesn't hide behind an
+otherwise-clean whole-blade check:
+
+```python
+sf.plot_phase_portrait_by_strip(result, component_pair=('axial', 'radial'),
+                                 strips=[0, 4, 9, 14, 19],
+                                 savepath='phase_portrait_by_strip.png')
+```
+
+### More convergence-checking ideas (literature)
+
+Phase portraits are one tool among several standard ways to check
+whether a periodic rotor simulation has actually reached its
+statistically/temporally converged state, beyond watching residuals
+drop. Roughly in order of how directly they build on what's already in
+this codebase:
+
+- **Revolution-to-revolution relative difference of integrated loads.**
+  Compute `total_loads()` (or `compute()`) for each successive
+  revolution and track the relative change between consecutive ones -
+  a direct, simple Cauchy-type convergence criterion (comparing
+  successive refinement/iteration levels rather than trusting one
+  snapshot), in the same spirit as the discretization-convergence
+  criteria described in Celik et al., *"Procedure for Estimation and
+  Reporting of Uncertainty Due to Discretization in CFD Applications,"*
+  ASME J. Fluids Eng. 130(7), 2008 (that paper's own focus is spatial
+  grid convergence, not temporal/cyclic - the Cauchy-criterion idea
+  carries over, the paper itself doesn't discuss rotor revolutions
+  specifically, so cite it for the general concept, not as a rotor-cycle
+  reference).
+- **Poincaré section (stroboscopic sampling).** Instead of the
+  continuous phase-portrait trajectory, sample it once per revolution at
+  a FIXED rotor azimuth (e.g. always at psi=0) across many revolutions,
+  and watch that single sampled point settle toward a fixed location
+  rather than continuing to move. A direct, standard complement to the
+  phase portrait above (same nonlinear-dynamics toolbox - Strogatz again)
+  and sometimes easier to read than the full trajectory when many
+  revolutions overlap densely.
+- **Split-run / batch-means check.** Compare the time-average computed
+  from the FIRST half of the available revolutions against the SECOND
+  half (or several successive blocks) - if they agree well, that's
+  direct evidence the mean has converged, not just that residuals are
+  small. This is the "method of batch means" for assessing steady-state
+  convergence in simulation output analysis (see Law, A.M., *Simulation
+  Modeling and Analysis*, McGraw-Hill - a standard reference for this
+  technique in general, not CFD-specific).
+- **Running/cumulative mean vs. number of cycles included.** Plot the
+  cumulative mean of a quantity (thrust, or a wall-shear statistic) as a
+  function of how many revolutions have been included so far - a
+  converged quantity's cumulative mean flattens to a horizontal
+  asymptote; still-rising or oscillating means more revolutions are
+  needed. Directly tied to the number of statistically independent
+  samples relative to the signal's own integral (correlation) time
+  scale - see Pope, S.B., *Turbulent Flows*, Cambridge University Press,
+  2000, on statistical convergence of turbulence statistics.
+- **Shear-stress-specific**: near-wall/viscous quantities are well known
+  to converge MORE SLOWLY than pressure-driven integrated loads in
+  scale-resolving CFD (see Pope again, and this project's own evidence:
+  HANDOFF.md's "RESOLVED: Cf-magnitude-growth investigation" found a
+  REAL, once-per-revolution periodic Cf variation on this project's own
+  case - not a bug, but a concrete demonstration that a near-wall
+  quantity can still be visibly evolving cycle-to-cycle under conditions
+  where integrated thrust already looks flat). Two natural extensions of
+  the tools already in this project, not yet built:
+    - Apply the SAME phase-portrait technique to `FrictionLines.cf()`/
+      `wall_shear()` instead of integrated forces - e.g. plot the
+      chordwise vs. spanwise wall-shear component at a fixed point (or
+      integrated over a strip) the same way, watching for the same
+      closed-loop-vs-drift signature.
+    - A FIELD-level convergence check: compare the time-averaged Cf
+      FIELD (over the whole blade) built from the first N revolutions
+      against N+1 (or more), via a single scalar metric (e.g. an L2 norm
+      of the field-to-field difference) - generalizes the per-strip
+      localization idea above to the full 2D field, showing not just
+      "has it converged" but "where on the blade is it still evolving."
+- **Spectral cleanliness.** A converged periodic signal's power spectral
+  density (`SurfaceVariable.periodogram()`, Welch's method) should show
+  clean, narrow peaks at the blade-passage frequency and its harmonics,
+  well above a low broadband floor - a still-transient run typically
+  shows a higher, less clean broadband floor contaminating those peaks.
+  Comparing the periodogram computed from an early vs. a late window of
+  the run is a direct way to see this settle.
+- **Autocorrelation at the period lag.** The autocorrelation of a
+  monitored signal (e.g. thrust vs. time) evaluated at a time lag of
+  exactly one revolution should approach 1 (perfect self-similarity one
+  period later) as the signal becomes truly periodic - a single number
+  that quantifies the same thing the phase portrait shows visually,
+  useful for tracking convergence progress as a scalar over the course
+  of a run rather than eyeballing a plot each time.
+
+None of the last few bullets are implemented in this codebase yet - they're
+listed here as documented options, not built tools, in case they're
+useful for a future pass at this same convergence-checking question.
+
 ## What's still open
 
 - Iso-radius / (r/R, x/c) resampling directly from raw `.snc` surfel

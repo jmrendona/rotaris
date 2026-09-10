@@ -605,6 +605,31 @@ sf_avg.plot_bar_forces(
 # self-contained, no need for this class or the .snc-derived file again):
 #sf_inst.save_harmonics(h_phase, os.path.join(master_path, 'data/forces/strip_harmonics.h5'))
 
+# ------------- Convergence checking: phase portraits (see README.md) ------------- #
+#
+# Fx-vs-Fy-style plots (one force component vs another, over time) - a
+# CLOSED loop means the run has settled into periodic operation; a
+# drifting/spiraling trajectory means it hasn't yet. Needs an "inst" file,
+# same as the time-domain block above - a single already-averaged frame
+# has no trajectory to trace. See README.md, "Convergence checking: phase
+# portraits" for the full explanation and more convergence-checking ideas
+# from the literature.
+
+# print(40*'-')
+# print('Plotting whole-blade phase portrait (axial vs tangential)')
+# totals_inst = sf_inst.total_loads(span_min=0.02)  # standalone total, same span as result_inst above
+# sf_inst.plot_phase_portrait(
+#    totals_inst, component_pair=('axial', 'tangential'),
+#    savepath=os.path.join(master_path, 'images/forces/phase_portrait_axial_tangential.png'),
+# )
+
+# print(40*'-')
+# print('Plotting per-strip phase portraits (axial vs radial) - localizes convergence issues by span')
+# sf_inst.plot_phase_portrait_by_strip(
+#    result_inst, component_pair=('axial', 'radial'), strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, 'images/forces/phase_portrait_by_strip_axial_radial.png'),
+# )
+
 # ------------- Tip-vortex tracking: phase-locked plane averaging (see README.md) ------------- #
 #
 # Extraction is a cluster job (needs pf2ens - see run_conversion.sh), not
