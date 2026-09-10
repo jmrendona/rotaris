@@ -660,6 +660,32 @@ sf_avg.plot_bar_forces(
 #    savepath=os.path.join(master_path, 'images/forces/thrust_cumulative_mean.png'),
 # )
 
+# Mean AND variance together (Pope's <U>/<u'^2> pair), synced to
+# revolution boundaries - REQUIRED to see a clean asymptote on a signal
+# with a real periodic component (see README.md, "Mean AND variance
+# together, synced to revolution boundaries" - a plain per-frame running
+# mean of such a signal shows a persistent ripple that this removes):
+# from bladeprocessor.convergence import plot_cumulative_stats
+# print(40*'-')
+# print('Plotting cumulative mean+variance of thrust, synced to revolution boundaries')
+# plot_cumulative_stats(
+#    totals_inst['thrust'], dt=0.000056, rpm=6000, sync_to_revolution=True, ylabel='Thrust [N]',
+#    savepath=os.path.join(master_path, 'images/forces/thrust_cumulative_stats_sync.png'),
+# )
+
+# Convergence checking: autocorrelation comparison between independent
+# windows (see README.md, "Convergence checking: autocorrelation" - NOT
+# a single-window "is rho(s) even" check, which is guaranteed to pass
+# trivially regardless of convergence - comparing INDEPENDENT windows is
+# what's actually meaningful):
+# from bladeprocessor.convergence import plot_autocorrelation_windows
+# print(40*'-')
+# print('Plotting thrust autocorrelation, first half vs second half of the run')
+# plot_autocorrelation_windows(
+#    totals_inst['thrust'], n_windows=2, dt=0.000056, labels=['First half', 'Second half'],
+#    savepath=os.path.join(master_path, 'images/forces/thrust_autocorrelation_windows.png'),
+# )
+
 # ------------- Tip-vortex tracking: phase-locked plane averaging (see README.md) ------------- #
 #
 # Extraction is a cluster job (needs pf2ens - see run_conversion.sh), not
