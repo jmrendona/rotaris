@@ -311,7 +311,19 @@ class SNCReader:
         # size on a fine-enough DNS mesh (confirmed on a real 8 GB .snc
         # file), which this subclass fixes. Behaves identically to
         # sio.netcdf_file otherwise.
-        self._f = _LargeRecordNetcdfFile(filename, mmap=False)
+        #
+        # mmap=True (not False): with mmap=False, _read_var_array() reads
+        # the ENTIRE interleaved record block (every variable, every
+        # surfel, every frame - "measurements") into one RAM buffer at
+        # open time, regardless of which frames/variables are actually
+        # used afterward - memory scales with the whole file, not with
+        # what variable()/to_h5() actually touch. Confirmed to OOM-kill a
+        # real HPC conversion job on a large .snc file. mmap=True uses the
+        # exact same strided-view logic (see _read_var_array's mmap
+        # branch) backed by an mmap instead of an eager read, so the OS
+        # only pages in bytes actually accessed - same data, same shapes,
+        # far lower peak RAM.
+        self._f = _LargeRecordNetcdfFile(filename, mmap=True)
         self._decode_metadata()
 
     @staticmethod
