@@ -63,23 +63,23 @@ inst_pressure_file = ''
 avg_pressure_file = '2026_avg_pressure_rotor.h5'
 case = '2026'
 
-print(40*'-')
-print('Opening FrictionLines file: ', os.path.join(master_path, inst_force_file))
-# span_min=0.02 here (not just on every call below) - for a whole-rotor
-# case with no separate blade parts to select via face_name at
-# conversion time, every single call below already passes span_min=0.02
-# anyway (to isolate one blade - see the note further down), so cropping
-# at load time means the (potentially huge) force field is only ever
-# read for the surviving ~half of the points, not the whole rotor - see
-# FrictionLines.__init__'s span_min/span_max docstring. Fixed a real OOM
-# on a ~660 GB case this way.
-fl = FrictionLines(
-   os.path.join(master_path, inst_force_file),
-   r_tip=0.125,
-   rho_ref=1.22523,
-   rpm=6000,
-   span_min=0.02,
-)
+# print(40*'-')
+# print('Opening FrictionLines file: ', os.path.join(master_path, inst_force_file))
+# # span_min=0.02 here (not just on every call below) - for a whole-rotor
+# # case with no separate blade parts to select via face_name at
+# # conversion time, every single call below already passes span_min=0.02
+# # anyway (to isolate one blade - see the note further down), so cropping
+# # at load time means the (potentially huge) force field is only ever
+# # read for the surviving ~half of the points, not the whole rotor - see
+# # FrictionLines.__init__'s span_min/span_max docstring. Fixed a real OOM
+# # on a ~660 GB case this way.
+# fl = FrictionLines(
+#    os.path.join(master_path, inst_force_file),
+#    r_tip=0.125,
+#    rho_ref=1.22523,
+#    rpm=6000,
+#    span_min=0.02,
+# )
 
 # # # Dimensional wall shear vector (tau = F - (F.n)n), no rho_ref/rpm needed:
 # # tau = fl.wall_shear(surface='Upper', frame=None)  # frame=None -> average over every frame in the file
@@ -531,7 +531,6 @@ sf_avg.plot_bar_forces(
 # # README.md, "Average vs. instantaneous cases". Needs rpm (set on
 # # StripForces itself, not compute()) for phase_lock()/harmonics().
 
-<<<<<<< HEAD
 print(40*'-')
 print('Opening StripForces file: ', os.path.join(master_path, inst_force_file))
 # span_min=0.02 at load time - see sf_avg above. This is the big
@@ -543,14 +542,6 @@ sf_inst = StripForces(
    r_tip=0.125, rpm=6000,
    span_min=0.02,
 )
-=======
-# print(40*'-')
-# print('Opening StripForces file: ', os.path.join(master_path, inst_force_file))
-# sf_inst = StripForces(
-#    os.path.join(master_path, inst_force_file),
-#    r_tip=0.125, rpm=6000,
-# )
->>>>>>> 4c9794b00ca897e9ab86214973515db63db21d59
 
 # print(40*'-')
 # print('Computing instantaneous strip forces')
