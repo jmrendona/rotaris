@@ -87,10 +87,30 @@ class FrictionLines:
         and thickness-wise for this case's mesh. Defaults (0, 2, 1) match
         every case seen in this project so far - override if a
         differently-oriented mesh ever comes up.
+    span_min, span_max : float, optional
+        Crop to span_min <= span <= span_max (centered Cartesian span,
+        same convention as cf()/friction_lines()'s own per-call
+        span_min/span_max) AT LOAD TIME, before the force field is read
+        off disk - not just as a post-hoc filter. _load() reads the full
+        (small, frame-independent) position array first to compute the
+        crop mask, then reads ONLY the surviving points' columns from
+        each per-frame Data/<surface>/Surface_*-Force dataset (h5py
+        boolean-column indexing), so a case with e.g. no separate blade
+        parts to select via face_name at conversion time (span_min=0.02
+        cropping out the inner ~half by point count) only ever holds
+        that fraction of the force field in RAM - confirmed to fix an
+        OOM on a real ~660 GB case whose whole-rotor force field alone
+        didn't fit in a node's memory. Every downstream method's own
+        span_min/span_max still works exactly as before - it's applied
+        on TOP of this (necessarily coarser-or-equal) load-time crop, not
+        replaced by it. None (default): no crop, identical behavior/
+        performance to before this parameter existed (a plain `[:]` read,
+        not boolean fancy-indexing).
     '''
 
     def __init__(self, filename: str, r_tip: float = None, rho_ref: float = None, rpm: float = None,
-                 span_axis: int = 0, chord_axis: int = 2, thickness_axis: int = 1):
+                 span_axis: int = 0, chord_axis: int = 2, thickness_axis: int = 1,
+                 span_min: float = None, span_max: float = None):
 
         self.filename = filename
         self.r_tip = r_tip
@@ -99,11 +119,18 @@ class FrictionLines:
         self.span_axis = span_axis
         self.chord_axis = chord_axis
         self.thickness_axis = thickness_axis
+        self.span_min = span_min
+        self.span_max = span_max
         self._load()
 
     def _load(self):
 
-        '''Load geometry, normals and the per-frame force field for both surfaces.'''
+        '''
+        Load geometry, normals and the per-frame force field for both
+        surfaces - cropped to span_min/span_max at the point-selection
+        level (see class docstring) if either is set, so the force field
+        actually read off disk only ever covers the surviving points.
+        '''
 
         with h5py.File(self.filename, 'r') as f:
 
@@ -120,19 +147,51 @@ class FrictionLines:
             self.n_frames = f['Metadata/frame_index'].shape[0]
 
             self.surfaces = {}
+            self._span_center = {}
+            self._chord_center = {}
             for label in ('Upper', 'Lower'):
 
                 geo = f[f'Geometry/{label}']
                 data = f[f'Data/{label}']
 
+                # Full (uncropped) positions - cheap, frame-independent -
+                # needed both to build the crop mask AND to preserve
+                # _span_chord()'s existing centering convention (always
+                # the FULL surface's own extent, matching how every
+                # downstream method's own per-call span_min/span_max has
+                # always worked - see that method).
+                positions_full = np.column_stack([geo['X'][:], geo['Y'][:], geo['Z'][:]])
+                span_full = positions_full[:, self.span_axis]
+                chord_full = positions_full[:, self.chord_axis]
+                self._span_center[label] = (span_full.min() + span_full.max()) / 2
+                self._chord_center[label] = (chord_full.min() + chord_full.max()) / 2
+
+                if self.span_min is not None or self.span_max is not None:
+                    span_centered = span_full - self._span_center[label]
+                    mask = np.ones(len(span_centered), dtype=bool)
+                    if self.span_min is not None:
+                        mask &= span_centered >= self.span_min
+                    if self.span_max is not None:
+                        mask &= span_centered <= self.span_max
+                    if not np.any(mask):
+                        raise ValueError(
+                            f"No points left on '{label}' after span_min={self.span_min}/"
+                            f"span_max={self.span_max} cropping at load time - check span_min/span_max."
+                        )
+                else:
+                    mask = slice(None)  # no crop - identical to the old plain `[:]` read
+
+                normals_full = np.column_stack(
+                    [geo['Normal_X'][:], geo['Normal_Y'][:], geo['Normal_Z'][:]])
+
                 self.surfaces[label] = {
-                    'positions': np.column_stack([geo['X'][:], geo['Y'][:], geo['Z'][:]]),
-                    'normals': np.column_stack([geo['Normal_X'][:], geo['Normal_Y'][:], geo['Normal_Z'][:]]),
+                    'positions': positions_full[mask],
+                    'normals': normals_full[mask],
                     'force': np.stack([
-                        data['Surface_X-Force'][:],
-                        data['Surface_Y-Force'][:],
-                        data['Surface_Z-Force'][:],
-                    ], axis=-1),  # shape (n_frames, n_points, 3)
+                        data['Surface_X-Force'][:, mask],
+                        data['Surface_Y-Force'][:, mask],
+                        data['Surface_Z-Force'][:, mask],
+                    ], axis=-1),  # shape (n_frames, n_selected, 3)
                 }
 
     def _radius(self, surface: str):
@@ -179,13 +238,19 @@ class FrictionLines:
         already validated in this project's friction_lines_normal_split.py
         - see class docstring for why this is Cartesian, not
         rotation-axis-derived).
+
+        Centered on the FULL surface's own extent (_load()'s
+        _span_center/_chord_center), NOT recomputed from
+        self.surfaces[surface]['positions'].min()/.max() - those are only
+        the load-time span_min/span_max-cropped survivors, and using
+        their own bounds would shift what "span"/"chord" mean depending
+        on the crop, breaking every downstream method's own span_min/
+        span_max (see __init__'s docstring).
         '''
 
         positions = self.surfaces[surface]['positions']
-        span = positions[:, self.span_axis]
-        chord = positions[:, self.chord_axis]
-        span = span - (span.min() + span.max()) / 2
-        chord = chord - (chord.min() + chord.max()) / 2
+        span = positions[:, self.span_axis] - self._span_center[surface]
+        chord = positions[:, self.chord_axis] - self._chord_center[surface]
 
         return span, chord
 

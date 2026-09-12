@@ -93,10 +93,23 @@ class StripForces:
         Which raw position column (0=X, 1=Y, 2=Z) is spanwise, chordwise,
         thickness-wise - see FrictionLines'/SurfaceVariable's docstrings
         for the same parameters; same defaults (0, 2, 1).
+    span_min, span_max : float, optional
+        Crop to span_min <= span <= span_max (centered Cartesian span,
+        same convention as compute()/total_loads()'s own per-call
+        span_min/span_max) AT LOAD TIME, before the force field is read
+        off disk - see FrictionLines' identical parameter for the full
+        rationale (this is the same fix, same reason: a whole-rotor case
+        with no separate blade parts to select via face_name at
+        conversion time still only needs the force field loaded for
+        whatever span_min/span_max every downstream call already narrows
+        to). Downstream methods' own span_min/span_max still applies on
+        TOP of this. None (default): no crop, identical behavior to
+        before this parameter existed.
     '''
 
     def __init__(self, filename: str, r_tip: float = None, rpm: float = None, span_axis: int = 0,
-                 chord_axis: int = 2, thickness_axis: int = 1):
+                 chord_axis: int = 2, thickness_axis: int = 1,
+                 span_min: float = None, span_max: float = None):
 
         self.filename = filename
         self.r_tip = r_tip
@@ -104,11 +117,19 @@ class StripForces:
         self.span_axis = span_axis
         self.chord_axis = chord_axis
         self.thickness_axis = thickness_axis
+        self.span_min = span_min
+        self.span_max = span_max
         self._load()
 
     def _load(self):
 
-        '''Load geometry, areas, per-frame force field, and rotor axis metadata - combining Upper+Lower if split.'''
+        '''
+        Load geometry, areas, per-frame force field, and rotor axis
+        metadata - combining Upper+Lower if split. Cropped to
+        span_min/span_max at the point-selection level (see class
+        docstring) if either is set, so the force field actually read
+        off disk only ever covers the surviving points.
+        '''
 
         with h5py.File(self.filename, 'r') as f:
 
@@ -120,22 +141,56 @@ class StripForces:
 
             labels = ['Upper', 'Lower'] if 'Upper' in f['Geometry'] else [None]
 
+            # First pass: full (uncropped) positions only - cheap,
+            # frame-independent - both to build the crop mask AND to
+            # preserve _span_chord()'s existing centering convention
+            # (the FULL, combined-across-labels blade extent, matching
+            # how every downstream method's own per-call span_min/
+            # span_max has always worked - see that method).
+            positions_full_parts = []
+            for label in labels:
+                geo_path = f'Geometry/{label}' if label else 'Geometry'
+                geo = f[geo_path]
+                positions_full_parts.append(np.column_stack([geo['X'][:], geo['Y'][:], geo['Z'][:]]))
+
+            positions_full = np.concatenate(positions_full_parts, axis=0)
+            span_full = positions_full[:, self.span_axis]
+            chord_full = positions_full[:, self.chord_axis]
+            self._span_center = (span_full.min() + span_full.max()) / 2
+            self._chord_center = (chord_full.min() + chord_full.max()) / 2
+
             positions_parts, area_parts, force_parts = [], [], []
 
-            for label in labels:
+            for label, positions_full_label in zip(labels, positions_full_parts):
 
                 geo_path = f'Geometry/{label}' if label else 'Geometry'
                 data_path = f'Data/{label}' if label else 'Data'
                 geo = f[geo_path]
                 data = f[data_path]
 
-                positions_parts.append(np.column_stack([geo['X'][:], geo['Y'][:], geo['Z'][:]]))
-                area_parts.append(geo['Area'][:])
+                if self.span_min is not None or self.span_max is not None:
+                    span_label = positions_full_label[:, self.span_axis] - self._span_center
+                    mask = np.ones(len(span_label), dtype=bool)
+                    if self.span_min is not None:
+                        mask &= span_label >= self.span_min
+                    if self.span_max is not None:
+                        mask &= span_label <= self.span_max
+                    if not np.any(mask):
+                        raise ValueError(
+                            f"No points left{f' on {label}' if label else ''} after "
+                            f"span_min={self.span_min}/span_max={self.span_max} cropping at "
+                            "load time - check span_min/span_max."
+                        )
+                else:
+                    mask = slice(None)  # no crop - identical to the old plain `[:]` read
+
+                positions_parts.append(positions_full_label[mask])
+                area_parts.append(geo['Area'][mask])
                 force_parts.append(np.stack([
-                    data['Surface_X-Force'][:],
-                    data['Surface_Y-Force'][:],
-                    data['Surface_Z-Force'][:],
-                ], axis=-1))  # (n_frames, n_points_label, 3)
+                    data['Surface_X-Force'][:, mask],
+                    data['Surface_Y-Force'][:, mask],
+                    data['Surface_Z-Force'][:, mask],
+                ], axis=-1))  # (n_frames, n_selected_label, 3)
 
             self.positions = np.concatenate(positions_parts, axis=0)
             self.area = np.concatenate(area_parts, axis=0)
@@ -143,12 +198,17 @@ class StripForces:
 
     def _span_chord(self):
 
-        '''Raw Cartesian (span, chord) position, centered - see FrictionLines._span_chord().'''
+        '''
+        Raw Cartesian (span, chord) position, centered - see
+        FrictionLines._span_chord(). Centered on the FULL blade's own
+        extent (_load()'s _span_center/_chord_center), NOT recomputed
+        from self.positions.min()/.max() - see FrictionLines._span_chord()
+        for why (those are only the load-time span_min/span_max-cropped
+        survivors).
+        '''
 
-        span = self.positions[:, self.span_axis]
-        chord = self.positions[:, self.chord_axis]
-        span = span - (span.min() + span.max()) / 2
-        chord = chord - (chord.min() + chord.max()) / 2
+        span = self.positions[:, self.span_axis] - self._span_center
+        chord = self.positions[:, self.chord_axis] - self._chord_center
 
         return span, chord
 

@@ -65,11 +65,20 @@ case = '2025'
 
 print(40*'-')
 print('Opening FrictionLines file: ', os.path.join(master_path, inst_force_file))
+# span_min=0.02 here (not just on every call below) - for a whole-rotor
+# case with no separate blade parts to select via face_name at
+# conversion time, every single call below already passes span_min=0.02
+# anyway (to isolate one blade - see the note further down), so cropping
+# at load time means the (potentially huge) force field is only ever
+# read for the surviving ~half of the points, not the whole rotor - see
+# FrictionLines.__init__'s span_min/span_max docstring. Fixed a real OOM
+# on a ~660 GB case this way.
 fl = FrictionLines(
    os.path.join(master_path, inst_force_file),
    r_tip=0.125,
    rho_ref=1.22523,
    rpm=6000,
+   span_min=0.02,
 )
 
 # # Dimensional wall shear vector (tau = F - (F.n)n), no rho_ref/rpm needed:
@@ -464,9 +473,14 @@ sv_forces.plot_variable_surface(
 
 print(40*'-')
 print('Opening StripForces file: ', os.path.join(master_path, inst_force_file))
+# span_min=0.02 at load time (see FrictionLines' fl = ... above for why) -
+# every compute()/total_loads() call below already passes span_min=0.02
+# anyway to isolate one blade, so this crops the force field actually
+# read off disk to the same subset, instead of loading the whole rotor.
 sf_avg = StripForces(
    os.path.join(master_path, avg_force_file),
    r_tip=0.125,
+   span_min=0.02,
 )
 
 print(40*'-')
@@ -519,9 +533,14 @@ sf_avg.plot_bar_forces(
 
 print(40*'-')
 print('Opening StripForces file: ', os.path.join(master_path, inst_force_file))
+# span_min=0.02 at load time - see sf_avg above. This is the big
+# multi-frame/transient file, so this is the crop that actually matters
+# for memory (the one that OOM-killed a real ~660 GB whole-rotor case
+# before this parameter existed).
 sf_inst = StripForces(
    os.path.join(master_path, inst_force_file),
    r_tip=0.125, rpm=6000,
+   span_min=0.02,
 )
 
 print(40*'-')

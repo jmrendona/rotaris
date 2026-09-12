@@ -596,6 +596,24 @@ not implemented.
 recomputed normals aren't trustworthy for this, see "Splitting into
 upper/lower surface"). Every quantity below is per-surfel unless noted.
 
+### Memory: crop with `span_min`/`span_max` at load time, not just per-call
+
+`FrictionLines(..., span_min=..., span_max=...)` and
+`StripForces(..., span_min=..., span_max=...)` accept the same
+`span_min`/`span_max` every method below already takes per-call, but
+applied when the file is FIRST opened, not just as a filter afterward.
+Without this, `_load()` reads the force field for every point in the
+file into memory, even if you're always going to crop it down (e.g. a
+whole-rotor case with no separate blade parts split out at conversion
+time - `span_min=0.02` to isolate one blade is required in practice for
+this project, see below - meaning roughly half the loaded points are
+never actually used by anything). Setting it in the constructor instead
+means the force field is only ever read off disk for the surviving
+points - confirmed to fix a real out-of-memory kill on an HPC job
+converting/post-processing a ~660 GB whole-rotor case. If you don't set
+it, behavior and performance are identical to before this parameter
+existed.
+
 ### Input: every raw frame, never a PowerFLOW-pre-averaged `.snc`
 
 **Feed `SNCReader`/`FrictionLines` the original, multi-frame `.snc` file
@@ -1214,6 +1232,10 @@ Per-radial-strip, time-resolved axial/radial/tangential force. These data
 are the raw input Hanson's tonal noise method needs (harmonics of
 unsteady sectional loading), computed directly from a `SNCReader.to_h5()` 
 conversion.
+
+`StripForces(..., span_min=..., span_max=...)` accepts the same
+constructor-level crop as `FrictionLines` - see "Memory: crop with
+`span_min`/`span_max` at load time, not just per-call" above.
 
 Per-surfel force = `Surface_X/Y/Z-Force` (Pa) x `Area` (m²), projected
 onto a physical basis computed at every surfel (not once for the whole
