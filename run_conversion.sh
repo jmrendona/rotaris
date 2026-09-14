@@ -8,7 +8,7 @@
 #
 # Usage:
 #   sbatch run_conversion.sh forces               <snc_path> <output.h5> [--surface-split] [--face-name NAME]
-#   sbatch run_conversion.sh pressure             <snc_path> <output.h5> --first N --last M [--surface-split] [--nc-stats FILE] [--reference-frame N] [--work-dir DIR]
+#   sbatch run_conversion.sh pressure             <snc_path> <output.h5> --first N --last M [--surface-split] [--nc-stats FILE] [--reference-frame N] [--work-dir DIR] [--face-names NAME1,NAME2,...]
 #   sbatch run_conversion.sh fnc-meridional       <fnc_path> <output.h5>  --angle DEG --variables v1,v2 --first N --last M [--freeze-mask-variable v1] [--plot out.png --plot-variable v1]
 #   sbatch run_conversion.sh fnc-meridional-sweep <fnc_path> <output_dir> --angle-start A0 --angle-end A1 --angle-step DA --variables v1,v2 --first N --last M [--freeze-mask-variable v1]
 #   sbatch run_conversion.sh fnc-iso-radius       <fnc_path> <output.h5>  --radius R --variables v1,v2 --first N --last M
@@ -41,7 +41,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --time=04:00:00               # ADJUST ME - depends on file size / frame count
 #SBATCH --account=rrg-moreaust-ac
-#SBATCH --job-name=RA-Beam_emma_no-interaction-forces
+#SBATCH --job-name=RA-Beam_emma_no-interaction-pressure
 #SBATCH --output=%x_%j_out.txt
 #SBATCH --error=%x_%j_err.txt
 #SBATCH --mail-user=renj3003@usherbrooke.ca   # ADJUST ME if needed

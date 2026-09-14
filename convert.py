@@ -81,6 +81,7 @@ def run_pressure(args):
         reference_frame=args.reference_frame,
         work_dir=args.work_dir,
         surface_split=args.surface_split,
+        face_names=args.face_names.split(',') if args.face_names else None,
     )
     print(f'wrote {args.output}')
 
@@ -267,6 +268,14 @@ def build_parser():
                            help='Split into Upper/Lower surface groups, classification borrowed '
                                 'from the raw .snc file via nearest-neighbor matching (see '
                                 'EnsightFrame.surface_split).')
+    pressure.add_argument('--face-names', default=None,
+                           help='Comma-separated face names to pass to pf2ens (e.g. '
+                                '"/rotor::blade1,/rotor::blade2") - default: every face present '
+                                'in this .snc, printed at run time (see '
+                                'ensight_to_h5.convert_snc_to_h5\'s face_names docstring for why '
+                                'this is explicit rather than left to pf2ens\'s own default, which '
+                                'was confirmed to silently include only one of two same-kind '
+                                'faces on a real multi-blade-face case).')
     pressure.set_defaults(func=run_pressure)
 
     fnc_meridional = subparsers.add_parser(

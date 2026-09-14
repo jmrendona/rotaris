@@ -60,7 +60,7 @@ master_path = '/scratch/jmrendon/Rotor-strut/emma_case'
 inst_force_file = 'RA-beam_forces_rotor.h5'
 avg_force_file = 'RA-beam-no-interaction_avg_forces_rotor.h5'
 inst_pressure_file = ''
-avg_pressure_file = 'RA-beam-no-interaction_avg_pressure_rotor.h5'
+avg_pressure_file = 'RA-beam_avg_pressure_rotor.h5'
 case = 'RA-beam'
 
 print(40*'-')
@@ -110,21 +110,21 @@ print(40*'-')
 print('Plotting Cf vs x/c magnitude')
 fl.plot_cf_radii(
    radii=[0.03, 0.055, 0.072, 0.08, 0.095],#[0.045, 0.072, 0.100, 0.117, 0.122],
-   frame=None, component=None, span_min=0.02, reverse_chord=True,
+   frame=None, component=None, span_min=0.02, reverse_chord=False,
    savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_mag_avg_{case}.png'),
 )
 print(40*'-')
 print('Plotting Cf vs x/c chordwise component')
 fl.plot_cf_radii(
    radii=[0.03, 0.055, 0.072, 0.08, 0.095],
-   frame=None, component='chordwise', span_min=0.02, reverse_chord=True,
+   frame=None, component='chordwise', span_min=0.02, reverse_chord=False,
    savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_chordwise_avg_{case}.png'),
 )
 print(40*'-')
 print('Plotting Cf vs x/c spanwise component')
 fl.plot_cf_radii(
    radii=[0.03, 0.055, 0.072, 0.08, 0.095],
-   frame=None, component='spanwise', span_min=0.02, reverse_chord=True,
+   frame=None, component='spanwise', span_min=0.02, reverse_chord=False,
    savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_spanwise_avg_{case}.png'),
 )
 
@@ -135,21 +135,21 @@ for frame in range(0,fl.n_frames,15):
 	print('Plotting Cf vs x/c magnitude')
 	fl.plot_cf_radii(
 	radii=[0.03, 0.055, 0.072, 0.08, 0.095],
-	frame=frame, component=None, span_min=0.02, reverse_chord=True,
+	frame=frame, component=None, span_min=0.02, reverse_chord=False,
 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_mag_frame{frame:03d}_{case}.png'),
 	)
 	print(40*'-')
 	print('Plotting Cf vs x/c chordwise component')
 	fl.plot_cf_radii(
 	radii=[0.03, 0.055, 0.072, 0.08, 0.095],
-	frame=frame, component='chordwise', span_min=0.02, reverse_chord=True,
+	frame=frame, component='chordwise', span_min=0.02, reverse_chord=False,
 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_chordwise_frame{frame:03d}_{case}.png'),
 	)
 	print(40*'-')
 	print('Plotting Cf vs x/c spanwise component')
 	fl.plot_cf_radii(
 	radii=[0.03, 0.055, 0.072, 0.08, 0.095],
-	frame=frame, component='spanwise', span_min=0.02, reverse_chord=True,
+	frame=frame, component='spanwise', span_min=0.02, reverse_chord=False,
 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_spanwise_frame{frame:03d}_{case}.png'),
 	)
 
@@ -162,7 +162,7 @@ print(40*'-')
 print('Plotting Cf RMS vs x/c magnitude')
 fl.plot_cf_radii(
    radii=[0.03, 0.055, 0.072, 0.08, 0.095],
-   surface='Upper', frame=None, stat='rms', span_min=0.02, reverse_chord=True,
+   surface='Upper', frame=None, stat='rms', span_min=0.02, reverse_chord=False,
    savepath=os.path.join(master_path, f'images/cf/cf_rms_radii_avg_{case}.png'),
 )
 print(40*'-')
@@ -203,7 +203,7 @@ print(40*'-')
 print('Plotting Friction Lines with separation/reattachment line, Upper surface, average over all frames')
 fl.friction_lines(
    surface='Upper', frame=None, span_min=0.02, show_separation_line=True,
-   separation_line_kwargs={'reverse_chord': True},
+   separation_line_kwargs={'reverse_chord': False},
    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_separation_{case}.png'),
 )
 
@@ -212,7 +212,7 @@ for frame in range(0,fl.n_frames,15):
 	print(f'Plotting Friction Lines with separation/reattachment line, Upper surface, for frame {frame:03d}')
 	fl.friction_lines(
 	   surface='Upper', frame=frame, span_min=0.02, show_separation_line=True,
-	   separation_line_kwargs={'reverse_chord': True},
+	   separation_line_kwargs={'reverse_chord': False},
 	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_separation_frame{frame:03d}_{case}.png'),
 	)
 
@@ -352,7 +352,7 @@ print(40*'-')
 print('Plotting Cp vs x/c at several radii, average over all frames')
 sv_pressure.plot_cp_radii(
    radii=[0.03, 0.05, 0.072, 0.08, 0.095],
-   frame=None, stat='mean', span_min=0.02, reverse_chord=True,
+   frame=None, stat='mean', span_min=0.02, reverse_chord=False,
    savepath=os.path.join(master_path, f'images/cp/cp_radii_avg_{case}.png'),
 )
 # sv_pressure.plot_cp_radii(

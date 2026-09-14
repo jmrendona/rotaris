@@ -70,6 +70,17 @@ class EnsightFrame:
         FNCVolumeFrame.mesh() in fnc_plane.py - confirmed on the HPC:
         IndexError: index (0) out of range for this dataset, from an
         empty multiblock after the doubled path failed to open).
+
+        pf2ens writes ONE BLOCK PER INCLUDED FACE (see convert_snc_to_h5's
+        face_names), not one block total - confirmed on a real 3-face case
+        (blade1/blade2/hub): `multiblock[0]` alone silently kept only the
+        FIRST face and dropped the other two, with no error anywhere (this
+        is what was actually still wrong after convert_snc_to_h5 was fixed
+        to pass all present faces to pf2ens's `-i` - pf2ens was correctly
+        including everything, this method was the one throwing data away
+        afterward). combine() merges every block into one mesh; a case
+        that only ever had one block (the original isolated-rotor case,
+        one lumped face) is unaffected either way.
         '''
 
         if self._mesh is None:
@@ -82,7 +93,7 @@ class EnsightFrame:
                 multiblock = reader.read()
             finally:
                 os.chdir(cwd)
-            self._mesh = multiblock[0]
+            self._mesh = multiblock.combine(merge_points=False)
 
         return self._mesh
 
@@ -337,7 +348,7 @@ class EnsightSeriesWriter:
 def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_frame: int,
                        nc_stats_path: str = None, variables: list = None,
                        reference_frame: int = None, work_dir: str = None,
-                       surface_split: bool = False):
+                       surface_split: bool = False, face_names: list = None):
 
     '''
     Run the full pipeline for a range of frames within a single process:
@@ -371,6 +382,25 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
         classification borrowed from the raw .snc file, matched by
         nearest position (see EnsightFrame.surface_split and
         raw_positions_to_ensight_frame), by default False.
+    face_names : list of str, optional
+        Which faces to pass to pf2ens's `-i/--include_faces` (e.g.
+        `['/rotor::blade1', '/rotor::blade2', '/rotor::hub']`). None
+        (default): auto-detect and include EVERY face that actually has
+        surfel data in this .snc (via the raw `face` tag array, not just
+        the full face_names/part_names catalog, which lists faces that
+        may not have any measurement in THIS particular file) - printed
+        for visibility either way (see below). Explicitly listing every
+        present face, rather than omitting `-i` and trusting pf2ens's own
+        default, matters on a mesh with more than one same-kind face
+        (e.g. `/rotor::blade1` AND `/rotor::blade2` as SEPARATE named
+        faces, not lumped into one shared face like this project's
+        original isolated-rotor case) - confirmed on a real case that
+        pf2ens's default (no `-i` at all) silently returned only ONE of
+        the two blade faces, with no error, while SNCReader.to_h5() (which
+        reads the raw per-surfel `face` tag directly and applies no such
+        default) correctly captured both. Pass an explicit subset here if
+        you only want specific face(s) (e.g. just one blade) instead of
+        everything merged.
 
     Note
     ----
@@ -414,6 +444,32 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
     else:
         reference_positions = reference_upper = None
 
+    # Faces actually carrying surfel data in THIS .snc (not just every
+    # face declared in the case's full geometry catalog - face_names has
+    # entries, e.g. wind-tunnel walls/inlets, that never show up in the
+    # raw per-surfel `face` tag array at all for a measurement file
+    # scoped to just the rotor) - see face_names parameter docstring for
+    # why this can't just be left to pf2ens's own default.
+    present_face_ids = np.unique(ref_reader._f.variables['face'][:])
+    present_face_names = [ref_reader.face_names[i] for i in present_face_ids]
+
+    if face_names is None:
+        include_faces = present_face_names
+    else:
+        unknown = set(face_names) - set(present_face_names)
+        if unknown:
+            raise ValueError(
+                f"face_names {sorted(unknown)} not present in '{snc_path}' - faces actually "
+                f"present: {present_face_names}."
+            )
+        include_faces = face_names
+
+    print(
+        f"pf2ens will include {len(include_faces)} face(s) (of {len(present_face_names)} present "
+        f"in this file): {include_faces}. Pass face_names=[...] to convert_snc_to_h5() "
+        "(or --face-names on the command line) to restrict to a subset instead."
+    )
+
     ref_reader.close()
 
     writer = EnsightSeriesWriter(
@@ -446,7 +502,7 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
             basename = f'frame_{frame}'
 
             subprocess.run(
-                ['pf2ens', '-f', str(frame), '-b', basename, snc_path_abs],
+                ['pf2ens', '-f', str(frame), '-b', basename, '-i', ','.join(include_faces), snc_path_abs],
                 check=True, cwd=work_dir,
             )
 
@@ -485,12 +541,19 @@ def main():
                          help='Split into Upper/Lower surface groups, classification borrowed '
                               'from the raw .snc file via nearest-neighbor matching (see '
                               'EnsightFrame.surface_split).')
+    parser.add_argument('--face-names', default=None,
+                         help='Comma-separated face names to pass to pf2ens (e.g. '
+                              '"/rotor::blade1,/rotor::blade2") - default: every face present in '
+                              'this .snc, printed at run time (see convert_snc_to_h5\'s face_names '
+                              'docstring for why this is explicit rather than left to pf2ens\'s '
+                              'own default).')
     args = parser.parse_args()
 
     convert_snc_to_h5(
         args.snc_path, args.output_path, args.first, args.last,
         nc_stats_path=args.nc_stats, reference_frame=args.reference_frame,
         work_dir=args.work_dir, surface_split=args.surface_split,
+        face_names=args.face_names.split(',') if args.face_names else None,
     )
 
 
