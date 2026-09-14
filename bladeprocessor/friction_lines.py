@@ -2,6 +2,8 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 
+from bladeprocessor._axis_validation import validate_chord_span_thickness_axes
+
 plt.rcParams.update({
     "text.usetex": True,
     "font.family": "serif",
@@ -85,8 +87,25 @@ class FrictionLines:
     span_axis, chord_axis, thickness_axis : int
         Which raw position column (0=X, 1=Y, 2=Z) is spanwise, chordwise,
         and thickness-wise for this case's mesh. Defaults (0, 2, 1) match
-        every case seen in this project so far - override if a
-        differently-oriented mesh ever comes up.
+        the original isolated-rotor case - override if a differently-
+        oriented mesh ever comes up (confirmed to matter: a case with a
+        real blade pitch angle had chord_axis/thickness_axis effectively
+        swapped relative to these defaults, which squashed every
+        chord-based plot down to a sliver instead of raising an error -
+        see validate_axes below). thickness_axis should be whichever raw
+        axis the blade's local surface normal is actually closest to
+        (physically always true for a lifting blade, regardless of
+        pitch/twist/sweep); span_axis/chord_axis are the remaining two,
+        told apart by matching known span/chord length, NOT derivable
+        from the rotation axis alone (see class docstring above).
+    validate_axes : bool
+        If True (default), check span_axis/chord_axis/thickness_axis
+        against this file's own per-surfel normals right after loading
+        (see bladeprocessor._axis_validation.validate_chord_span_thickness_axes)
+        and raise a clear error immediately if they don't match the
+        geometry, instead of silently producing a wrong (e.g. squashed-
+        looking) result. Set False only if you're confident the check
+        doesn't apply to this file.
     span_min, span_max : float, optional
         Crop to span_min <= span <= span_max (centered Cartesian span,
         same convention as cf()/friction_lines()'s own per-call
@@ -110,7 +129,7 @@ class FrictionLines:
 
     def __init__(self, filename: str, r_tip: float = None, rho_ref: float = None, rpm: float = None,
                  span_axis: int = 0, chord_axis: int = 2, thickness_axis: int = 1,
-                 span_min: float = None, span_max: float = None):
+                 span_min: float = None, span_max: float = None, validate_axes: bool = True):
 
         self.filename = filename
         self.r_tip = r_tip
@@ -122,6 +141,10 @@ class FrictionLines:
         self.span_min = span_min
         self.span_max = span_max
         self._load()
+
+        if validate_axes:
+            normals = np.concatenate([s['normals'] for s in self.surfaces.values()], axis=0)
+            validate_chord_span_thickness_axes(normals, self.span_axis, self.chord_axis, self.thickness_axis)
 
     def _load(self):
 

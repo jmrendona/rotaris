@@ -2,6 +2,8 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 
+from bladeprocessor._axis_validation import validate_chord_span_thickness_axes
+
 plt.rcParams.update({
     "text.usetex": True,
     "font.family": "serif",
@@ -92,7 +94,18 @@ class StripForces:
     span_axis, chord_axis, thickness_axis : int
         Which raw position column (0=X, 1=Y, 2=Z) is spanwise, chordwise,
         thickness-wise - see FrictionLines'/SurfaceVariable's docstrings
-        for the same parameters; same defaults (0, 2, 1).
+        for the same parameters; same defaults (0, 2, 1). Only used by
+        _span_chord() (span_min/span_max cropping, and n_chord_bins'
+        chordwise sub-binning in compute()) - the axial/radial/tangential
+        basis itself (_basis()) is built purely from the rotor's own
+        rotation axis, so it's unaffected either way; see validate_axes.
+    validate_axes : bool
+        If True (default), check span_axis/chord_axis/thickness_axis
+        against this file's own per-surfel normals right after loading
+        and raise a clear error if they don't match the geometry - see
+        FrictionLines' identical parameter and
+        bladeprocessor._axis_validation.validate_chord_span_thickness_axes.
+        Set False only if you're confident the check doesn't apply here.
     span_min, span_max : float, optional
         Crop to span_min <= span <= span_max (centered Cartesian span,
         same convention as compute()/total_loads()'s own per-call
@@ -109,7 +122,7 @@ class StripForces:
 
     def __init__(self, filename: str, r_tip: float = None, rpm: float = None, span_axis: int = 0,
                  chord_axis: int = 2, thickness_axis: int = 1,
-                 span_min: float = None, span_max: float = None):
+                 span_min: float = None, span_max: float = None, validate_axes: bool = True):
 
         self.filename = filename
         self.r_tip = r_tip
@@ -121,11 +134,17 @@ class StripForces:
         self.span_max = span_max
         self._load()
 
+        if validate_axes:
+            validate_chord_span_thickness_axes(self.normals, self.span_axis, self.chord_axis, self.thickness_axis)
+
     def _load(self):
 
         '''
-        Load geometry, areas, per-frame force field, and rotor axis
-        metadata - combining Upper+Lower if split. Cropped to
+        Load geometry, areas, normals (only used by validate_axes and
+        _span_chord()'s axis bookkeeping - NOT by _basis()'s
+        axial/radial/tangential projection, which never needed them),
+        per-frame force field, and rotor axis metadata - combining
+        Upper+Lower if split. Cropped to
         span_min/span_max at the point-selection level (see class
         docstring) if either is set, so the force field actually read
         off disk only ever covers the surviving points.
@@ -159,7 +178,7 @@ class StripForces:
             self._span_center = (span_full.min() + span_full.max()) / 2
             self._chord_center = (chord_full.min() + chord_full.max()) / 2
 
-            positions_parts, area_parts, force_parts = [], [], []
+            positions_parts, area_parts, force_parts, normal_parts = [], [], [], []
 
             for label, positions_full_label in zip(labels, positions_full_parts):
 
@@ -186,6 +205,8 @@ class StripForces:
 
                 positions_parts.append(positions_full_label[mask])
                 area_parts.append(geo['Area'][mask])
+                normal_parts.append(np.column_stack(
+                    [geo['Normal_X'][:], geo['Normal_Y'][:], geo['Normal_Z'][:]])[mask])
                 force_parts.append(np.stack([
                     data['Surface_X-Force'][:, mask],
                     data['Surface_Y-Force'][:, mask],
@@ -194,6 +215,7 @@ class StripForces:
 
             self.positions = np.concatenate(positions_parts, axis=0)
             self.area = np.concatenate(area_parts, axis=0)
+            self.normals = np.concatenate(normal_parts, axis=0)
             self.force_per_area = np.concatenate(force_parts, axis=1)  # (n_frames, n_points, 3)
 
     def _span_chord(self):
