@@ -248,6 +248,65 @@ class SurfaceVariable:
         p_stat = self.variable(pressure_variable, surface=surface, frame=None, stat=stat)
         return p_stat / q_ref
 
+    def variable_time_series(self, name: str, surface: str = 'Upper') -> np.ndarray:
+
+        '''
+        Raw per-surfel values of Data/<surface>/<name> at EVERY frame,
+        unreduced - shape (n_frames, n_points). Unlike variable(frame=None),
+        which always reduces across frames via `stat`, this keeps the full
+        per-frame series - the SurfaceVariable equivalent of
+        FrictionLines.cf_time_series(), needed for anything that tracks
+        how a variable actually evolves frame to frame rather than a
+        single reduced snapshot (e.g. feeding bladeprocessor/convergence.py's
+        cumulative_mean()/cumulative_stats()/cumulative_moments()/
+        standard_error()/cycle_correlation() with an instantaneous
+        pressure file - see README.md's "Convergence checking" section).
+        Collapse to one scalar per frame yourself first (e.g.
+        `.mean(axis=1)` for the spatial mean, optionally column-masked to
+        one span/chord band first - same pattern as
+        plot_cf_phase_portrait()'s use of cf_time_series()), since every
+        convergence.py function takes a plain 1D series, not a spatial
+        field.
+
+        Returns
+        -------
+        np.ndarray, shape (n_frames, n_points)
+        '''
+
+        with h5py.File(self.filename, 'r') as f:
+            key = f'Data/{surface}/{name}'
+            if key not in f:
+                raise KeyError(
+                    f"'{name}' not found under Data/{surface} of '{self.filename}' - "
+                    f"available: {self.available_variables[surface]}"
+                )
+            return f[key][:]
+
+    def cp_time_series(self, surface: str = 'Upper', pressure_variable: str = 'static_pressure') -> np.ndarray:
+
+        '''
+        Cp = (p - pref) / q_ref at EVERY frame, unreduced - shape
+        (n_frames, n_points) - the cp() equivalent of variable_time_series(),
+        built on top of it the same way cp() is built on variable(). See
+        variable_time_series()'s docstring for why this exists (feeding
+        bladeprocessor/convergence.py's running-statistics tools with an
+        instantaneous pressure file).
+
+        Returns
+        -------
+        np.ndarray, shape (n_frames, n_points)
+        '''
+
+        if self.rho_ref is None or self.rpm is None:
+            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cp.")
+        if self.pref is None:
+            raise ValueError("pref must be set (in __init__) to compute Cp.")
+
+        q_ref = self._q_ref(surface)
+        p = self.variable_time_series(pressure_variable, surface=surface)
+
+        return (p - self.pref) / q_ref[None, :]
+
     def at_radii(self, radii, get_values, surface=('Upper', 'Lower'), tol: float = 0.0015,
                  n_chord_bins: int = 75, span_min: float = None, span_max: float = None,
                  chord_percentile: float = 0.1, edge_crop: float = 0.0, reverse_chord: bool = False):

@@ -1043,6 +1043,43 @@ a single one), `frame=None` (default) reduces across every frame via
 
 As for `FrictionLines.friction_lines()`, this tool also allows for the definition of `span_min`/`span_max` to isolate the effect of a single blade. Similarly, the `reverse_chord=True` is also available for a meaningfull plot.
 
+### Convergence checking on pressure: `variable_time_series()` / `cp_time_series()`
+
+Every function in `bladeprocessor/convergence.py` (`cumulative_mean()`,
+`cumulative_stats()`, `cumulative_moments()`, `autocorrelation()`,
+`integral_timescale()`, `standard_error()`, `required_averaging_time()`,
+`cycle_correlation()`, and their `plot_*()` wrappers) takes a plain 1D
+per-frame scalar array - they were never tied to forces specifically.
+The only missing piece for pressure was a way to get that raw per-frame
+array out of `SurfaceVariable` at all: `variable()`/`cp()` always
+REDUCE across frames via `stat` when `frame=None`, so there was no way
+to get the unreduced (n_frames, n_points) series the way
+`FrictionLines.cf_time_series()` already does for skin friction.
+`variable_time_series()`/`cp_time_series()` fill that gap, mirroring
+`cf_time_series()` exactly:
+
+```python
+from bladeprocessor.convergence import plot_cumulative_stats, plot_integral_timescale
+
+sv = SurfaceVariable(pressure_file, r_tip=0.125, rho_ref=1.22523, rpm=6000, pref=101325)
+
+# Spatial mean per frame - same reduction plot_cf_phase_portrait() uses
+# on cf_time_series() - optionally column-masked to one span/chord band
+# first (see cf_time_series()'s own multi-blade-mixing caveat):
+p_series = sv.variable_time_series('static_pressure', surface='Upper').mean(axis=1)
+# or: cp_series = sv.cp_time_series(surface='Upper').mean(axis=1)
+
+plot_cumulative_stats(p_series, dt=0.000056, rpm=6000, sync='none', ylabel='Pressure [Pa]',
+                       savepath='pressure_cumulative_stats.png')
+plot_integral_timescale(p_series, dt=0.000056, rpm=6000, sync='none',
+                         savepath='pressure_integral_timescale.png')
+```
+
+This needs an INSTANTANEOUS (multi-frame) pressure file - the same
+"never a PowerFLOW-pre-averaged file" requirement as everywhere else in
+this project (see "Input: every raw frame, never a PowerFLOW-pre-
+averaged `.snc`" above).
+
 ### Whole-blade surface plot: `plot_variable_surface()`
 
 Generalizes `FrictionLines.friction_lines()` beyond Cf to any scalar

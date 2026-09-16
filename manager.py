@@ -349,6 +349,38 @@ sv_forces = SurfaceVariable(
 #cp_frame0 = sv.cp(surface='Upper', frame=0)
 #cp_rms = sv.cp(surface='Upper', frame=None, stat='rms')
 
+# ------------- Convergence checking on pressure (see README.md, ------------- #
+# "Convergence checking on pressure") - needs an INSTANTANEOUS (multi-
+# frame) pressure file, never a PowerFLOW-pre-averaged one, same
+# requirement as everywhere else in this project:
+#print(40*'-')
+#print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_file))
+#sv_pressure_inst = SurfaceVariable(
+#   os.path.join(master_path, inst_pressure_file),
+#   r_tip=0.1, rho_ref=1.22523, rpm=8000, pref=101325,
+#   chord_axis=1, thickness_axis=2,
+#)
+
+# Spatial mean pressure/Cp per frame - same reduction
+# plot_cf_phase_portrait() uses on cf_time_series() - every convergence.py
+# function takes this plain 1D per-frame series, exactly like thrust/torque:
+#p_series = sv_pressure_inst.variable_time_series('static_pressure', surface='Upper').mean(axis=1)
+#cp_series = sv_pressure_inst.cp_time_series(surface='Upper').mean(axis=1)
+
+#print(40*'-')
+#print('Plotting cumulative mean+variance of pressure')
+#plot_cumulative_stats(
+#   p_series, dt=0.000056, rpm=8000, sync='none', ylabel='Pressure [Pa]',
+#   savepath=os.path.join(master_path, 'images/cp/pressure_cumulative_stats.png'),
+#)
+
+#print(40*'-')
+#print('Plotting integral timescale / required averaging time for pressure')
+#plot_integral_timescale(
+#   p_series, dt=0.000056, rpm=8000, sync='none', target_relative_sem=0.01,
+#   savepath=os.path.join(master_path, 'images/cp/pressure_integral_timescale.png'),
+#)
+
 # Cp vs local x/c at several radii, BOTH surfaces in one plot - span_min
 # isolates one blade half (see friction_lines() above for why), and
 # reverse_chord fixes which end is the leading vs. trailing edge (no
