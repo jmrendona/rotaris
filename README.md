@@ -521,36 +521,62 @@ that hit this only got through 37 frames in a 10h limit before being
 killed).
 
 `submit_pressure_chunks.sh` splits one long `--first`/`--last` range
-into fixed-size chunks and submits one `run_conversion.sh pressure` job
-PER CHUNK, all at once with no dependency between them (parallel, not
-chained) - the whole range then finishes in roughly the time of ONE
-chunk instead of the sum of all of them, PROVIDED the license/queue can
-actually run that many concurrently (check your account's relevant
-license seat count, e.g. `exasignalprocessingjob` for `pf2ens`, before
-picking a chunk count - if it's tight, chain them instead with
-`sbatch --dependency=afterany:<jobid>` between chunks, not `afterok` -
-`afterany` means a later chunk still runs even if an earlier one failed,
-e.g. hit its own time limit, instead of the whole chain stalling
-forever on a dependency that can never succeed).
+into fixed-size chunks and submits them as ONE SLURM JOB ARRAY - one
+array TASK per chunk (`run_pressure_chunk_array.sh`, which each task
+actually runs) - throttled to `<max_concurrent>` chunks running AT THE
+SAME TIME (`--array=0-N%<max_concurrent>`). SLURM itself enforces the
+throttle: it queues the rest and starts the next chunk the instant a
+running slot frees up, whether that chunk finished or died, no manual
+batch-tracking or resubmitting needed.
+
+**Why the throttle, not "submit everything at once"**: each `pf2ens`
+call needs one seat from this account's shared, LIMITED PowerFLOW
+license pool (e.g. `exasignalprocessingjob` - check current usage with
+whatever your PowerFLOW env provides for license status). An earlier,
+unthrottled version of this (every chunk as an independent job, no
+concurrency limit) was confirmed on a real 26-chunk run to kill several
+chunks individually ~2 minutes after their own start, each by an
+automated system process (`CANCELLED by 0` in `sacct`) - consistent with
+too many concurrent `pf2ens` processes exceeding available license seats
+at that instant and getting reaped after a grace period. `max_concurrent`
+is a real tuning knob, not a formality - start conservative (e.g. `5`)
+and only raise it after confirming chunks aren't dying this way at that
+level.
 
 ```bash
 cd /path/to/case  # so relative snc_path/output paths resolve where you want
-~/rotaris/submit_pressure_chunks.sh <snc_path> <output_dir> <first_frame> <last_frame> <chunk_size> <time_per_chunk> [extra convert.py args...]
+~/rotaris/submit_pressure_chunks.sh <snc_path> <output_dir> \
+    --first N --last M --chunk-size S --time-per-chunk HH:MM:SS --max-concurrent K \
+    [extra convert.py args...]
 
-# e.g. 773 frames, 30/chunk, 12h/chunk budget against an expected ~8.1h/chunk:
-~/rotaris/submit_pressure_chunks.sh SMF_fwh_rotor.snc . 0 772 30 12:00:00 --surface-split
+# e.g. 773 frames, 30/chunk -> 26 chunks, 12h/chunk budget against an
+# expected ~8.1h/chunk, throttled to 5 running at once:
+~/rotaris/submit_pressure_chunks.sh SMF_fwh_rotor.snc . \
+    --first 0 --last 772 --chunk-size 30 --time-per-chunk 12:00:00 --max-concurrent 5 \
+    --surface-split
 ```
 
+`<snc_path>`/`<output_dir>` are positional (always required, matching
+`convert.py`'s own `snc_path`/`output`); `--first`/`--last`/
+`--chunk-size`/`--time-per-chunk`/`--max-concurrent` are named flags
+(order doesn't matter), matching this project's own `convert.py`
+convention rather than a fixed positional order to memorize - all five
+are REQUIRED, no defaults, since the right chunk size/time budget/
+concurrency is genuinely case-specific. Anything else not recognized
+above (e.g. `--surface-split`, `--face-names ...`) is forwarded as-is to
+each chunk's own `run_conversion.sh pressure` call.
+
 **Run this directly on the login node, do NOT `sbatch` it** - unlike
-`run_conversion.sh`, it has no `#SBATCH` directives of its own; it's a
-lightweight loop that finishes in seconds and calls `sbatch` itself,
-once per chunk (wrapping it in `sbatch` would queue an entire compute-
-node allocation just to run that loop, for no benefit). Writes ONE
-output `.h5` PER CHUNK (`<output_dir>/pressure_frames_<first>_<last>.h5`)
-- `convert_snc_to_h5()` always creates a fresh file, it can't append to
+`run_conversion.sh`/`run_pressure_chunk_array.sh`, it has no `#SBATCH`
+directives of its own; it finishes in well under a second (one `sbatch
+--array=...` call) and needs no compute-node allocation of its own.
+Writes ONE output `.h5` PER CHUNK
+(`<output_dir>/pressure_frames_<first>_<last>.h5`) -
+`convert_snc_to_h5()` always creates a fresh file, it can't append to
 an existing one, so a single shared output file across chunks was never
 an option; merging the chunk files into one afterward is a separate,
-not-yet-built step.
+not-yet-built step. Per-task logs land in the same output directory as
+`pchunk_<array_job_id>_<task_index>_out.txt`/`_err.txt`.
 
 ## Splitting into upper/lower surface
 
