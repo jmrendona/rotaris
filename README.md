@@ -1563,6 +1563,223 @@ Passing both `dt` and `rpm` adds a second x-axis (top) in revolutions
 included, so "how many cycles until this flattens out" is readable
 directly rather than converting frame counts by hand.
 
+### Convergence checking: mean AND variance together, with three sync modes
+
+`plot_cumulative_stats()` extends the above with a second panel: the
+running (population) variance alongside the running mean - mirrors
+Pope, S.B., "Turbulent Flows", Cambridge University Press, 2000's own
+illustration of `<U>` and `<u'^2>` both approaching an asymptote for a
+statistically stationary process (no specific page cited here - verify
+against the book's own index before citing a page number).
+
+A plain per-frame running mean/variance of a signal with a real
+periodic component does NOT cleanly asymptote even once the run has
+genuinely converged - it shows a persistent, phase-dependent ripple,
+since stopping partway through a cycle includes an unequal, arbitrary
+slice of it each time. `sync` picks which frames count as one
+comparable sample, to remove that ripple:
+
+- `sync='none'` (default): every frame - appropriate when there's no
+  dominant periodicity to remove first, e.g. an isolated rotor in
+  hover, where frame-to-frame turbulent decorrelation is the main
+  effect.
+- `sync='revolution'` (needs `dt` and `rpm`): only frames closest to a
+  whole number of revolutions.
+- `sync='periodicity'` (needs `dt`, `rpm`, and `period_deg`): only
+  frames closest to a whole number of `period_deg`-sized steps - for a
+  case whose real periodicity is SHORTER than one revolution, e.g. a
+  4-blade rotor / 4-vane stator interaction repeating every 360/4 = 90
+  degrees, not needing a full turn to reach a comparable phase
+  (`period_deg=360` is identical to `sync='revolution'`).
+
+```python
+from bladeprocessor.convergence import plot_cumulative_stats
+
+# Isolated rotor in hover - no periodicity to sync to:
+plot_cumulative_stats(loads['thrust'], dt=0.000056, rpm=6000, sync='none',
+                       ylabel='Thrust [N]', savepath='thrust_cumulative_stats.png')
+
+# A rotor-stator case (4 blades, 4 vanes) - sync every 90 degrees instead:
+plot_cumulative_stats(loads['thrust'], dt=0.000056, rpm=6000,
+                       sync='periodicity', period_deg=90.0,
+                       ylabel='Thrust [N]', savepath='thrust_cumulative_stats_90deg.png')
+```
+
+If you DON'T see an asymptote even with the correct `sync` mode on,
+that's now much more likely a genuine "not converged yet" finding than
+a plotting artifact - though see the next two sections for checks that
+are more decisive than eyeballing a plateau, and note that a cumulative
+statistic computed from frame 0 dilutes an early transient only as
+~1/t, not exponentially - a curve still visibly drifting late in a run
+can be that slow dilution finishing, not necessarily the flow itself
+still being transient right then. Slicing out an initial warm-up window
+before calling any function in this module (e.g.
+`loads['thrust'][frames_per_rev:]`) isolates the two.
+
+### Convergence checking: autocorrelation
+
+`autocorrelation()` computes the sample autocorrelation `rho(s)` of a
+scalar time series. Pope notes that for a stationary process, the
+(ensemble) autocovariance/autocorrelation are even functions of the lag
+- but the single-window sample estimator computed here is ALWAYS
+exactly even by construction, for any finite sequence at all, whether
+or not the real data is actually stationary (a pure re-indexing
+identity: the "negative lag" values are, term for term, the same
+computation as the positive-lag ones read from the other end of the
+window). So checking whether one window's own `rho(s)` "looks even" has
+no diagnostic power. What IS meaningful is whether independent windows
+of the same run AGREE with each other:
+
+```python
+from bladeprocessor.convergence import plot_autocorrelation_windows
+
+plot_autocorrelation_windows(loads['thrust'], n_windows=2, dt=0.000056,
+                              labels=['First half', 'Second half'],
+                              savepath='thrust_autocorrelation_windows.png')
+```
+
+If the run has genuinely reached a statistically stationary state,
+independent windows' correlation structure should closely agree. If the
+process is still evolving, they won't. A signal's fluctuations
+decorrelating to a noisy near-zero band after only one or two lags is
+not itself a bad sign - it just means those fluctuations are close to
+white-noise-like (short correlation time) rather than being dominated
+by a slow coherent drift; the expected scatter of that noisy band, even
+for a genuinely uncorrelated process, is of order `1/sqrt(N)` (`N` =
+samples per window) - the classical white-noise confidence bound from
+time-series analysis, not something to try to explain physically.
+
+### Convergence checking: higher-order moments (skewness/flatness)
+
+`cumulative_moments()` / `plot_cumulative_moments()` extend
+`cumulative_stats()` one order further: the running THIRD and FOURTH
+standardized moments (skewness and flatness/kurtosis), not just the
+mean (1st) and variance (2nd). Higher moments are disproportionately
+sensitive to rare, large-amplitude events in a distribution's tail (a
+single big excursion barely moves the mean, moves the variance a bit,
+and can swing skewness/flatness a lot), so they are well known to need
+substantially more samples to converge than the mean or variance do -
+Pope, and Tennekes & Lumley, "A First Course in Turbulence", both
+discuss skewness/flatness as standard turbulence statistics (no
+specific page cited for either - verify against each book's own index).
+Same three `sync`/`period_deg` modes as `cumulative_stats()`:
+
+```python
+from bladeprocessor.convergence import plot_cumulative_moments
+
+plot_cumulative_moments(loads['thrust'], dt=0.000056, rpm=6000, sync='none',
+                         label='Thrust', savepath='thrust_cumulative_moments.png')
+```
+
+`running_skewness[-1]`/`running_flatness[-1]` match
+`scipy.stats.skew(..., bias=True)`/`scipy.stats.kurtosis(..., fisher=False,
+bias=True)` exactly (validated) - skewness is 0 for a symmetric
+distribution, flatness is 3 for a Gaussian.
+
+### Convergence checking: statistical uncertainty of the mean
+
+`standard_error()` turns the autocorrelation above into an actual error
+bar on a reported mean (thrust, torque, ...), instead of a plot to
+eyeball. For a stationary process, the variance of a finite-time average
+is:
+
+    Var[time-average] ~= 2 * sigma^2 * T_int / T      (valid for T >> T_int)
+    SEM = sigma * sqrt(2 * T_int / T) = sigma / sqrt(N_eff)
+
+where `T_int` is the integral timescale (the area under `rho(s)` out to
+its first zero-crossing - `integral_timescale()` - the standard
+practical truncation, since integrating the noisy remainder beyond that
+just biases `T_int` upward), `T` is the total physical time actually
+simulated, and `N_eff = T / (2*T_int)` is the EFFECTIVE number of
+independent samples the run actually contains - which can be far fewer
+than the raw frame count if consecutive frames are strongly correlated.
+This general technique (using a correlation/block time to put honest
+error bars on the mean of an autocorrelated simulation trace) is
+established practice, e.g. Flyvbjerg, H., & Petersen, H. G., "Error
+estimates on averages of correlated data", Journal of Chemical Physics,
+91(1), 461-466, 1989 (from molecular dynamics originally - the
+statistics are identical regardless of field).
+
+```python
+from bladeprocessor.convergence import standard_error, required_averaging_time
+
+stats = standard_error(loads['thrust'], dt=0.000056, rpm=6000, sync='none')
+# stats: {'mean', 'sigma', 'T_int', 'T', 'n_eff', 'sem', 'relative_sem'}
+
+req = required_averaging_time(loads['thrust'], dt=0.000056, rpm=6000, sync='none',
+                               target_relative_sem=0.001)  # 0.1% of the mean
+# req: {'T_required', 'T_current', 'additional_T',
+#       'revolutions_required', 'revolutions_current', 'additional_revolutions', 'stats'}
+```
+
+`plot_integral_timescale()` plots the same `rho(s)` curve underneath,
+with the actually-integrated region (s=0 up to the first zero-crossing)
+shaded and `T_int`/`SEM`/`n_eff` reported as an upper-left inset (same
+style as `StripForces.plot_bar_forces()`'s `show_totals`) instead of a
+bare curve to eyeball. If `dt` is given, the inset ALSO includes
+`required_averaging_time()`'s own `revolutions_required`/
+`additional_revolutions` for a target precision (`target_relative_sem`
+defaults to 0.01 = 1% of the mean, so this shows up out of the box; pass
+`target_sem` instead for an absolute target) - the actual "how many more
+revolutions do I need" answer, not just the correlation curve it comes
+from:
+
+```python
+from bladeprocessor.convergence import plot_integral_timescale
+
+plot_integral_timescale(loads['thrust'], dt=0.000056, rpm=6000, sync='none',
+                         target_relative_sem=0.01, savepath='thrust_integral_timescale.png')
+```
+
+`required_averaging_time()` inverts the SEM formula
+(`T_required = 2*sigma^2*T_int / target_sem^2`) to answer "how many MORE
+revolutions until this hits a target precision" with an actual number,
+using the run's own `sigma`/`T_int` as the estimate. Only valid for
+`T >> T_int` and once the signal is past its initial transient - both
+`sigma` and `T_int` estimated across a transient are meaningless for
+this formula, which assumes stationarity; slice out a warm-up window
+first (see above) if the run has a visible startup transient. Use
+`sync='revolution'`/`'periodicity'` (not `'none'`) if the signal has a
+real periodic component - the raw per-frame autocorrelation of a
+periodic signal never decays to zero, which would corrupt the
+integral-timescale estimate.
+
+### Convergence checking: cycle-to-cycle correlation
+
+`cycle_correlation()` / `plot_cycle_correlation()` check a DIFFERENT
+thing than every check above: not whether a running STATISTIC has
+flattened, but whether the per-revolution WAVEFORM SHAPE has stopped
+changing from one cycle to the next. This is the assumption
+`StripForces.phase_lock()`/`harmonics()` and
+`TipVortexPhaseAverage`'s phase-locked averaging already depend on (that
+the per-revolution waveform is repeatable) - a signal's overall mean and
+variance can look converged while the waveform is still shifting shape
+or phase cycle to cycle, which would quietly corrupt a phase-locked
+average or Hanson's-method harmonics built on top of it. Standard
+practice in time-accurate rotor CFD (checking cycle-to-cycle
+periodicity before trusting a phase-locked average or extracting
+acoustic/performance data from it) - no single specific paper+page is
+cited here.
+
+```python
+from bladeprocessor.convergence import plot_cycle_correlation
+
+# One full revolution per cycle:
+plot_cycle_correlation(loads['thrust'], dt=0.000056, rpm=6000, period_deg=360.0,
+                        savepath='thrust_cycle_correlation.png')
+
+# A rotor-stator case instead: correlate every 90-degree interaction period:
+plot_cycle_correlation(loads['thrust'], dt=0.000056, rpm=6000, period_deg=90.0,
+                        savepath='thrust_cycle_correlation_90deg.png')
+```
+
+Each cycle is resampled (linear interpolation) onto a common phase grid
+before correlating, since a cycle's frame count is rarely a whole
+number. The correlation coefficient between consecutive cycles
+approaches 1 as the waveform stops changing; there's no `sync='none'`
+equivalent here since there's no notion of a "cycle" to correlate
+without a real period (`dt` and `rpm` are always required).
+
 ## What's still open
 
 - Iso-radius / (r/R, x/c) resampling directly from raw `.snc` surfel

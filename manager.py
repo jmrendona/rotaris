@@ -11,6 +11,11 @@ from bladeprocessor.tip_vortex_tracking import TipVortexPhaseAverage
 from bladeprocessor.convergence import plot_cumulative_stats
 from bladeprocessor.convergence import plot_cumulative_mean
 from bladeprocessor.convergence import plot_autocorrelation_windows
+from bladeprocessor.convergence import plot_cumulative_moments
+from bladeprocessor.convergence import standard_error
+from bladeprocessor.convergence import plot_integral_timescale
+from bladeprocessor.convergence import required_averaging_time
+from bladeprocessor.convergence import plot_cycle_correlation
 
 # ------------- Post processing ------------- #
 
@@ -752,23 +757,51 @@ sf_avg.plot_bar_forces(
 #    savepath=os.path.join(master_path, f'images/forces/torque_cumulative_mean_{case}.png'),
 # )
 
-# # Mean AND variance together (Pope's <U>/<u'^2> pair), synced to
-# # revolution boundaries - REQUIRED to see a clean asymptote on a signal
-# # with a real periodic component (see README.md, "Mean AND variance
-# # together, synced to revolution boundaries" - a plain per-frame running
-# # mean of such a signal shows a persistent ripple that this removes):
+# # Mean AND variance together (Pope's <U>/<u'^2> pair). sync='none'
+# # (every frame - fine for an isolated rotor in hover, where each frame
+# # is already a reasonably independent-ish realization); use
+# # sync='revolution' (needs dt+rpm) INSTEAD if the signal has a real
+# # once-per-revolution component - REQUIRED then to see a clean
+# # asymptote (see README.md, "Mean AND variance together, synced to
+# # revolution boundaries" - a plain per-frame running mean of such a
+# # signal shows a persistent ripple that this removes); or
+# # sync='periodicity' (needs dt+rpm+period_deg) for a case whose real
+# # periodicity is SHORTER than one revolution (e.g. a 4-blade rotor /
+# # 4-vane stator interaction repeating every 360/4=90 degrees):
 # print(40*'-')
 # print('Plotting cumulative mean+variance of thrust, synced to revolution boundaries')
 # plot_cumulative_stats(
-#    totals_inst['thrust'], dt=0.000056, rpm=6000, sync_to_revolution=False, ylabel='Thrust [N]',
+#    totals_inst['thrust'], dt=0.000056, rpm=6000, sync='none', ylabel='Thrust [N]',
 #    savepath=os.path.join(master_path, f'images/forces/thrust_cumulative_stats_{case}.png'),
 # )
 
 # print(40*'-')
 # print('Plotting cumulative mean+variance of thrust, synced to revolution boundaries')
 # plot_cumulative_stats(
-#    totals_inst['torque'], dt=0.000056, rpm=6000, sync_to_revolution=False, ylabel='Torque [Nm]',
+#    totals_inst['torque'], dt=0.000056, rpm=6000, sync='none', ylabel='Torque [Nm]',
 #    savepath=os.path.join(master_path, f'images/forces/torque_cumulative_stats_{case}.png'),
+# )
+
+# # Example for a rotor-stator case instead (NOT this project's isolated
+# # rotor - shown for reference): 4 blades / 4 vanes repeat every
+# # 360/4=90 degrees, so sync every 90 degrees rather than every full
+# # revolution to get 4x the comparable-phase samples per run:
+# #plot_cumulative_stats(
+# #   totals_inst['thrust'], dt=0.000056, rpm=6000, sync='periodicity', period_deg=90.0,
+# #   ylabel='Thrust [N]',
+# #   savepath=os.path.join(master_path, f'images/forces/thrust_cumulative_stats_periodicity_{case}.png'),
+# #)
+
+# # Convergence checking: 3rd/4th-order statistics (running skewness and
+# # flatness - see README.md, "Convergence checking: higher-order
+# # moments (skewness/flatness)"). Needs substantially more revolutions
+# # to converge than the mean/variance above - don't expect it to flatten
+# # as quickly:
+# print(40*'-')
+# print('Plotting cumulative skewness+flatness of thrust')
+# plot_cumulative_moments(
+#    totals_inst['thrust'], dt=0.000056, rpm=6000, sync='none', label='Thrust',
+#    savepath=os.path.join(master_path, f'images/forces/thrust_cumulative_moments_{case}.png'),
 # )
 
 # # Convergence checking: autocorrelation comparison between independent
@@ -790,6 +823,63 @@ sf_avg.plot_bar_forces(
 #    totals_inst['torque'], n_windows=2, dt=0.000056, labels=['First half', 'Second half'],
 #    savepath=os.path.join(master_path, f'images/forces/torque_autocorrelation_windows_{case}.png'),
 # )
+
+# # Convergence checking: statistical uncertainty of the mean (SEM), from
+# # the signal's own integral timescale (see README.md, "Convergence
+# # checking: statistical uncertainty of the mean") - reuses the same
+# # autocorrelation machinery above, but turns it into an actual error
+# # bar on thrust/torque instead of just an eyeballed plot. sync='none'
+# # here for the same reason as cumulative_stats above (isolated rotor in
+# # hover); switch to 'revolution'/'periodicity' for a case with a real
+# # periodic component - see standard_error()'s docstring for why (the
+# # raw per-frame autocorrelation of a periodic signal never decays to
+# # zero, which corrupts the integral-timescale estimate).
+# print(40*'-')
+# print('Estimating standard error of the mean thrust')
+# stats = standard_error(totals_inst['thrust'], dt=0.000056, rpm=6000, sync='none')
+# print(f"mean={stats['mean']:.4g} N, sigma={stats['sigma']:.4g} N, T_int={stats['T_int']:.4g} s, "
+#       f"n_eff={stats['n_eff']:.1f}, SEM={stats['sem']:.4g} N ({stats['relative_sem']*100:.3f}% of mean)")
+
+# # Same thing, plotted - the rho(s) curve with the actually-integrated
+# # region shaded and T_int/SEM/n_eff/revolutions_required as an inset
+# # (same style as plot_bar_forces()'s show_totals) - target_relative_sem
+# # defaults to 0.01 (1% of the mean), override for a stricter/looser target:
+# plot_integral_timescale(
+#    totals_inst['thrust'], dt=0.000056, rpm=6000, sync='none', target_relative_sem=0.01,
+#    savepath=os.path.join(master_path, f'images/forces/thrust_integral_timescale_{case}.png'),
+# )
+
+# # How many MORE revolutions to reach a target precision (e.g. 0.1%
+# # relative SEM on thrust) - answers "how much longer do I need to run
+# # this" with an actual number instead of a guess:
+# req = required_averaging_time(
+#    totals_inst['thrust'], dt=0.000056, rpm=6000, sync='none', target_relative_sem=0.001,
+# )
+# print(f"Need {req['revolutions_required']:.1f} total revolutions for 0.1% relative SEM "
+#       f"({req['revolutions_current']:.1f} already run, "
+#       f"{req['additional_revolutions']:.1f} more needed)")
+
+# # Convergence checking: cycle-to-cycle waveform correlation (see
+# # README.md, "Convergence checking: cycle-to-cycle correlation") -
+# # checks a DIFFERENT thing than everything above: not whether a running
+# # STATISTIC has flattened, but whether the per-revolution WAVEFORM
+# # SHAPE has stopped changing - the actual assumption phase_lock()/
+# # harmonics() below and TipVortexPhaseAverage depend on. period_deg=360
+# # (default) = one full revolution:
+# print(40*'-')
+# print('Plotting cycle-to-cycle correlation of thrust')
+# plot_cycle_correlation(
+#    totals_inst['thrust'], dt=0.000056, rpm=6000, period_deg=360.0,
+#    savepath=os.path.join(master_path, f'images/forces/thrust_cycle_correlation_{case}.png'),
+# )
+
+# # Rotor-stator example instead (NOT this project's isolated rotor -
+# # shown for reference): correlate every 90-degree interaction period
+# # rather than every full revolution:
+# #plot_cycle_correlation(
+# #   totals_inst['thrust'], dt=0.000056, rpm=6000, period_deg=90.0,
+# #   savepath=os.path.join(master_path, f'images/forces/thrust_cycle_correlation_90deg_{case}.png'),
+# #)
 
 # ------------- Tip-vortex tracking: phase-locked plane averaging (see README.md) ------------- #
 #
