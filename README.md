@@ -578,6 +578,15 @@ an option; merging the chunk files into one afterward is a separate,
 not-yet-built step. Per-task logs land in the same output directory as
 `pchunk_<array_job_id>_<task_index>_out.txt`/`_err.txt`.
 
+**Email**: `run_pressure_chunk_array.sh` sends `BEGIN,END,FAIL` mail
+PER CHUNK (`ARRAY_TASKS` in its `--mail-type`), not one summary email
+for the whole array - up to ~3x the chunk count in emails for a run this
+size, deliberate (so a failed chunk is obvious immediately, not just
+discoverable by checking logs by hand) - drop `ARRAY_TASKS` from that
+line if that's too noisy for a given run. `--mail-user` there defaults
+to the same address as `run_conversion.sh` - adjust both if that's not
+who should actually be notified.
+
 ## Splitting into upper/lower surface
 
 Manage the division between suction and pressure side of the interest geometry.

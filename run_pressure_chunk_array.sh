@@ -7,6 +7,13 @@
 #SBATCH --job-name=pchunk
 #SBATCH --output=pchunk_%A_%a_out.txt
 #SBATCH --error=pchunk_%A_%a_err.txt
+#SBATCH --mail-user=renj3003@usherbrooke.ca   # ADJUST ME if needed - same as run_conversion.sh
+#SBATCH --mail-type=BEGIN,END,FAIL,ARRAY_TASKS   # ARRAY_TASKS: one email PER CHUNK, not one
+                                                   # summary email for the whole array - see
+                                                   # submit_pressure_chunks.sh's own header for why
+                                                   # (up to ~3x n_chunks emails for a run this size -
+                                                   # deliberate, not a mistake, if that's too noisy
+                                                   # drop ARRAY_TASKS for one summary email instead)
 
 # One SLURM array TASK per frame chunk - always submitted via
 # submit_pressure_chunks.sh (which sets --array=0-N%K), never by hand.
