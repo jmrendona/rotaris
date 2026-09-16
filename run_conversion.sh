@@ -39,9 +39,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --time=04:00:00               # ADJUST ME - depends on file size / frame count
+#SBATCH --time=10:00:00               # ADJUST ME - depends on file size / frame count
 #SBATCH --account=rrg-moreaust-ac
-#SBATCH --job-name=Tayyab_avg-pressure
+#SBATCH --job-name=2025HF-RA_inst-pressure
 #SBATCH --output=%x_%j_out.txt
 #SBATCH --error=%x_%j_err.txt
 #SBATCH --mail-user=renj3003@usherbrooke.ca   # ADJUST ME if needed

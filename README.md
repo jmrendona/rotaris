@@ -587,6 +587,37 @@ line if that's too noisy for a given run. `--mail-user` there defaults
 to the same address as `run_conversion.sh` - adjust both if that's not
 who should actually be notified.
 
+### Merging the chunks back into one file: `convert.py merge-chunks`
+
+Once every chunk has finished, `converters/merge_h5_chunks.py` combines
+them into ONE `.h5` in the SAME schema an unchunked conversion would
+have produced - every downstream consumer (`FrictionLines`,
+`SurfaceVariable`, `StripForces`) needs zero changes to read it. It's a
+`convert.py` subcommand, so it runs through the existing
+`run_conversion.sh` - no separate script:
+
+```bash
+cd /path/to/case
+sbatch --time=06:00:00 run_conversion.sh merge-chunks <output.h5> --chunks-glob "<prefix>_frames_*.h5"
+```
+
+Quote `--chunks-glob` so the shell doesn't expand it - the merge orders
+chunks by the frame range PARSED FROM EACH FILENAME, not by whatever
+order `glob()`/the filesystem happens to return, and does several
+checks before writing anything: frame coverage across the sorted
+chunks must be exactly contiguous (no gap/overlap/duplicate); each
+chunk's own `Metadata/frame_index` must actually match what its
+filename claims (catches a stale file left over from a re-run with
+different `--first`/`--last`); and the frame-independent `Geometry`
+(taken from the first chunk) must be byte-identical in every other
+chunk before being trusted for all of them. Any violation raises a
+clear error naming the mismatch, rather than silently merging bad data.
+Streams one variable's slice at a time straight into the output file's
+row range (never holds more than one chunk's one variable in memory at
+once) - bump `--time` for a large combined dataset (this moves `2x`
+total data volume - read + write - so budget accordingly; memory stays
+low regardless of dataset size).
+
 ## Splitting into upper/lower surface
 
 Manage the division between suction and pressure side of the interest geometry.

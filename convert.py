@@ -5,6 +5,7 @@ import numpy as np
 
 from converters.snc_reader import SNCReader
 from converters.ensight_to_h5 import convert_snc_to_h5
+from converters.merge_h5_chunks import merge_h5_chunks
 from converters import fnc_plane
 
 '''
@@ -231,6 +232,14 @@ def run_fnc_freeze_mask(args):
     fnc_plane.add_frozen_mask(args.h5_path, args.variable, rel_threshold=args.rel_threshold)
 
 
+def run_merge_chunks(args):
+    import glob
+    chunk_paths = sorted(glob.glob(args.chunks_glob))
+    if not chunk_paths:
+        raise ValueError(f"No files matched --chunks-glob '{args.chunks_glob}'.")
+    merge_h5_chunks(chunk_paths, args.output)
+
+
 def build_parser():
 
     parser = argparse.ArgumentParser(
@@ -452,6 +461,20 @@ def build_parser():
     fnc_plot.add_argument('--frame', type=int, default=0,
                            help='Which frame_index to plot (default: 0, i.e. the first frame stored)')
     fnc_plot.set_defaults(func=run_fnc_plot)
+
+    merge_chunks = subparsers.add_parser(
+        'merge-chunks',
+        help='Merge <prefix>_frames_<first>_<last>.h5 chunk files (see submit_pressure_chunks.sh) '
+             'into one combined .h5, same schema as an unchunked conversion - '
+             'converters.merge_h5_chunks.merge_h5_chunks.',
+    )
+    merge_chunks.add_argument('output', help='Path to the combined HDF5 file to create.')
+    merge_chunks.add_argument('--chunks-glob', required=True,
+                               help='Shell-quoted glob pattern matching the chunk files, e.g. '
+                                    '"/path/to/pressure_frames_*.h5" (quote it so the shell does '
+                                    'not expand it first - order is determined by frame range '
+                                    'parsed from each filename, not by glob order).')
+    merge_chunks.set_defaults(func=run_merge_chunks)
 
     return parser
 
