@@ -374,6 +374,25 @@ second time internally to borrow its
   written per frame (default: an auto-cleaned temp directory).
 - `--reference-frame`: optional, which frame's geometry gets stored
   (default: `--first`).
+- `--face-names NAME1,NAME2,...` (or `face_names=[...]` in Python):
+  optional, restrict which faces get converted. Default (omitted): every
+  face that actually has surfel data in this `.snc` (auto-detected from
+  the raw per-surfel `face` tag, not just the full geometry catalog,
+  which can list faces - e.g. wind-tunnel walls - with no measurement
+  data in this particular file) - printed at run time either way, so
+  you can see what was included. **Confirmed necessary, not just a
+  convenience**, on a real multi-blade-face mesh (`/rotor::blade1` and
+  `/rotor::blade2` as SEPARATE named faces, unlike this project's
+  original isolated-rotor case, which lumps both blades into one shared
+  face): `pf2ens`'s own default (no `-i`/`--include_faces` at all)
+  silently exported only ONE of the two blades, with no error, while
+  `SNCReader.to_h5()` (which reads the raw per-surfel `face` tag
+  directly, with no such default) correctly captured both - so this is
+  now always passed explicitly rather than left to `pf2ens`. Relatedly,
+  `EnsightFrame.mesh()` merges every block of the resulting EnSight
+  multiblock output (one block per included face) - it used to keep
+  only the first block, which is what was ACTUALLY still dropping data
+  even after the face selection itself was fixed.
 
 For inspecting a single already-extracted frame by hand (e.g. while
 debugging), you can still call `pf2ens` directly and read the result:
@@ -413,10 +432,18 @@ don't mix per-point data across the two.
 
 ```bash
 python convert.py forces <snc_path> <output.h5> [--face-name NAME] [--surface-split]
-python convert.py pressure <snc_path> <output.h5> --first N --last M [--surface-split] [--nc-stats FILE] [--reference-frame N] [--work-dir DIR]
+python convert.py pressure <snc_path> <output.h5> --first N --last M [--surface-split] [--nc-stats FILE] [--reference-frame N] [--work-dir DIR] [--face-names NAME1,NAME2,...]
 python convert.py fnc-meridional <fnc_path> <output.h5> --angle DEG --variables v1,v2 --first N --last M [--freeze-mask-variable vmag]
 python convert.py fnc-iso-radius <fnc_path> <output.h5> --radius M --variables v1,v2 --first N --last M [--freeze-mask-variable vmag]
 ```
+
+Note `forces`'s `--face-name` (singular) and `pressure`'s `--face-names`
+(plural) mean different things despite the similar name: `--face-name`
+is a single SUBSTRING match against every face name (e.g. `blade`
+matches both `/rotor::blade1` and `/rotor::blade2`, not `/rotor::hub`);
+`--face-names` is an exact, comma-separated LIST of full face names
+(default when omitted: every face present, not just one - see
+"Static Pressure" above).
 
 `run_conversion.sh` submits either subcommand as a single-node SLURM batch
 job. Nothing here is parallelized, so it only ever requests one node/one
@@ -480,6 +507,50 @@ fails with a read-only-filesystem error.
 
 `--time`/`--mem`/`--cpus-per-task` at the top of `run_conversion.sh` are
 placeholder that need to be adjusted before running depending on the case.
+
+### A long `pressure` frame range: `submit_pressure_chunks.sh`
+
+`convert_snc_to_h5()` calls `pf2ens` once per frame, and each call is a
+fresh, independent read of the WHOLE source `.snc` - confirmed at
+~16.2 min/frame on a real case
+(`6e-5_6000rpm_HF/SMF_fwh_rotor.snc`, ~858 MB/frame, 773 frames
+requested): a single job covering that many frames runs well past any
+partition's time-limit ceiling (this cluster's `compute` partition caps
+at 24h - `sinfo -p <partition>` to check any given one - and the job
+that hit this only got through 37 frames in a 10h limit before being
+killed).
+
+`submit_pressure_chunks.sh` splits one long `--first`/`--last` range
+into fixed-size chunks and submits one `run_conversion.sh pressure` job
+PER CHUNK, all at once with no dependency between them (parallel, not
+chained) - the whole range then finishes in roughly the time of ONE
+chunk instead of the sum of all of them, PROVIDED the license/queue can
+actually run that many concurrently (check your account's relevant
+license seat count, e.g. `exasignalprocessingjob` for `pf2ens`, before
+picking a chunk count - if it's tight, chain them instead with
+`sbatch --dependency=afterany:<jobid>` between chunks, not `afterok` -
+`afterany` means a later chunk still runs even if an earlier one failed,
+e.g. hit its own time limit, instead of the whole chain stalling
+forever on a dependency that can never succeed).
+
+```bash
+cd /path/to/case  # so relative snc_path/output paths resolve where you want
+~/rotaris/submit_pressure_chunks.sh <snc_path> <output_dir> <first_frame> <last_frame> <chunk_size> <time_per_chunk> [extra convert.py args...]
+
+# e.g. 773 frames, 30/chunk, 12h/chunk budget against an expected ~8.1h/chunk:
+~/rotaris/submit_pressure_chunks.sh SMF_fwh_rotor.snc . 0 772 30 12:00:00 --surface-split
+```
+
+**Run this directly on the login node, do NOT `sbatch` it** - unlike
+`run_conversion.sh`, it has no `#SBATCH` directives of its own; it's a
+lightweight loop that finishes in seconds and calls `sbatch` itself,
+once per chunk (wrapping it in `sbatch` would queue an entire compute-
+node allocation just to run that loop, for no benefit). Writes ONE
+output `.h5` PER CHUNK (`<output_dir>/pressure_frames_<first>_<last>.h5`)
+- `convert_snc_to_h5()` always creates a fresh file, it can't append to
+an existing one, so a single shared output file across chunks was never
+an option; merging the chunk files into one afterward is a separate,
+not-yet-built step.
 
 ## Splitting into upper/lower surface
 
@@ -613,6 +684,41 @@ points - confirmed to fix a real out-of-memory kill on an HPC job
 converting/post-processing a ~660 GB whole-rotor case. If you don't set
 it, behavior and performance are identical to before this parameter
 existed.
+
+### Axis convention: `span_axis`/`chord_axis`/`thickness_axis`, and `validate_axes`
+
+`FrictionLines`/`StripForces`/`SurfaceVariable` all take `span_axis`,
+`chord_axis`, `thickness_axis` (which raw position column, 0=X/1=Y/2=Z,
+is which) - defaults `(0, 2, 1)` match the original isolated-rotor case
+only. **Confirmed to matter on a real case**: a blade mounted at a
+different orientation (a real collective pitch angle, not this
+project's original case's convention) had `chord_axis`/`thickness_axis`
+effectively swapped relative to the defaults, which silently squashed
+every chord-based plot (`plot_cf_radii()`, `friction_lines()`, ...) down
+to a thin sliver instead of raising any error.
+
+How to determine the right axes for a new case, without guessing:
+- **`thickness_axis`**: whichever raw axis the blade's local surface
+  normal is actually closest to - physically always true for a lifting
+  blade (thrust comes from a pressure differential across its normal),
+  regardless of pitch/twist/sweep. Check directly against the file's own
+  `Normal_X/Y/Z` (mean `|normal component|` per axis - the one near 1 is
+  `thickness_axis`).
+- **`span_axis`/`chord_axis`**: the remaining two axes, told apart by
+  matching each one's raw range against the known physical span/chord
+  length. NOT derivable from the rotation axis alone - see this file's
+  class docstring: an earlier rotation-axis-derived chord was tried and
+  abandoned because it broke under real blade pitch/twist.
+
+`validate_axes=True` (default, on both `FrictionLines` and
+`StripForces`) checks the configured axes against the file's own normals
+right after loading and raises a clear `ValueError` (naming which axis
+looks wrong and what the data actually suggests) instead of silently
+producing a wrong result - this is what would have caught the squashed-
+plot case above immediately, instead of needing a manual image
+inspection to notice. Set `validate_axes=False` only if you're confident
+it doesn't apply to a given file (see
+`bladeprocessor/_axis_validation.py`).
 
 ### Input: every raw frame, never a PowerFLOW-pre-averaged `.snc`
 
