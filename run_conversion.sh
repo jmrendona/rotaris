@@ -7,7 +7,7 @@
 # parallelizing convert.py itself.
 #
 # Usage:
-#   sbatch run_conversion.sh forces               <snc_path> <output.h5> [--surface-split] [--face-name NAME]
+#   sbatch run_conversion.sh forces               <snc_path> <output.h5> [--surface-split] [--face-name NAME] [--nc-stats FILE] [--blade-lrf-offset-deg DEG]
 #   sbatch run_conversion.sh pressure             <snc_path> <output.h5> --first N --last M [--surface-split] [--nc-stats FILE] [--reference-frame N] [--work-dir DIR] [--face-names NAME1,NAME2,...]
 #   sbatch run_conversion.sh fnc-meridional       <fnc_path> <output.h5>  --angle DEG --variables v1,v2 --first N --last M [--freeze-mask-variable v1] [--plot out.png --plot-variable v1]
 #   sbatch run_conversion.sh fnc-meridional-sweep <fnc_path> <output_dir> --angle-start A0 --angle-end A1 --angle-step DA --variables v1,v2 --first N --last M [--freeze-mask-variable v1]
@@ -41,7 +41,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --time=10:00:00               # ADJUST ME - depends on file size / frame count
 #SBATCH --account=rrg-moreaust-ac
-#SBATCH --job-name=2025HF-RA_inst-pressure
+#SBATCH --job-name=Tayyab_inst-forces
 #SBATCH --output=%x_%j_out.txt
 #SBATCH --error=%x_%j_err.txt
 #SBATCH --mail-user=renj3003@usherbrooke.ca   # ADJUST ME if needed

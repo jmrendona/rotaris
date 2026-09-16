@@ -67,7 +67,8 @@ docstring for the working module-load recipe).
 
 def run_forces(args):
     reader = SNCReader(args.snc_path)
-    reader.to_h5(args.output, face_name=args.face_name, surface_split=args.surface_split)
+    reader.to_h5(args.output, face_name=args.face_name, surface_split=args.surface_split,
+                 nc_stats_path=args.nc_stats, blade_lrf_offset_deg=args.blade_lrf_offset_deg)
     reader.close()
     print(f'wrote {args.output}')
 
@@ -257,6 +258,21 @@ def build_parser():
                          help='Restrict to surfels matching this face (e.g. one rotor blade)')
     forces.add_argument('--surface-split', action='store_true',
                          help='Split into Upper/Lower surface groups (see SNCReader.surface_split)')
+    forces.add_argument('--nc-stats', default=None,
+                         help='Path to saved `exaritool nc-stats.ri <snc_path> -detail` output - '
+                              'PREFERRED, authoritative per-frame rotation angle for the '
+                              'Surface_X/Y/Z-Force LRF correction (see SNCReader class docstring, '
+                              '"NOTE on reference frames"). Omitted: falls back to the self-derived '
+                              'formula from this file\'s own start_time/lrf_constant_angular_vel_mag.')
+    forces.add_argument('--blade-lrf-offset-deg', type=float, default=0.0,
+                         help='Extra CONSTANT rotation [deg] added to every frame before rotating '
+                              'Surface_X/Y/Z-Force into the LRF - corrects a fixed LRF-vs-blade '
+                              'mounting misalignment neither rotation-angle source can know about on '
+                              'its own (see SNCReader.to_h5()\'s blade_lrf_offset_deg docstring). '
+                              '0 (no offset) by default - set this only if you\'ve independently '
+                              'determined this specific case has one (e.g. by comparing a known '
+                              'physical feature\'s expected vs. observed azimuthal position after '
+                              'conversion).')
     forces.set_defaults(func=run_forces)
 
     pressure = subparsers.add_parser(

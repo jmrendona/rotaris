@@ -241,6 +241,16 @@ zero-orientation and the blade's actual geometry, which neither source
 above can derive on its own (a setup detail). Only set this if
 independently confirmed for a given case.
 
+Via `convert.py`/`run_conversion.sh` (both parameters are keyword-only
+on `SNCReader.to_h5()`, so they only apply to the `forces` subcommand -
+`pressure`'s own `--nc-stats` is unrelated, that one feeds
+`convert_snc_to_h5()` instead):
+
+```bash
+sbatch run_conversion.sh forces <snc_path> <output.h5> --surface-split \
+    --nc-stats nc_stats.txt --blade-lrf-offset-deg 3.5
+```
+
 ### Very large (DNS-resolution) meshes: a 32-bit format limit, fixed
 
 `SNCReader` opens the file via `_LargeRecordNetcdfFile` (a small
@@ -431,7 +441,7 @@ don't mix per-point data across the two.
 `convert.py` is a CLI wrapping both branches above, one subcommand each:
 
 ```bash
-python convert.py forces <snc_path> <output.h5> [--face-name NAME] [--surface-split]
+python convert.py forces <snc_path> <output.h5> [--face-name NAME] [--surface-split] [--nc-stats FILE] [--blade-lrf-offset-deg DEG]
 python convert.py pressure <snc_path> <output.h5> --first N --last M [--surface-split] [--nc-stats FILE] [--reference-frame N] [--work-dir DIR] [--face-names NAME1,NAME2,...]
 python convert.py fnc-meridional <fnc_path> <output.h5> --angle DEG --variables v1,v2 --first N --last M [--freeze-mask-variable vmag]
 python convert.py fnc-iso-radius <fnc_path> <output.h5> --radius M --variables v1,v2 --first N --last M [--freeze-mask-variable vmag]
