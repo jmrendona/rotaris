@@ -1,5 +1,6 @@
 import os
 import glob
+import argparse
 import numpy as np
 import yaml
 from converters.span_2_radius import SpanConverter
@@ -65,19 +66,29 @@ from bladeprocessor.convergence import plot_cycle_correlation
 # ------------- Case config (see cases/*.yaml) ------------- #
 #
 # Switching to a different simulation = pointing this at a different
-# cases/*.yaml, not hunting through the rest of this file for every
-# hardcoded r_tip/rho_ref/rpm/span_min/etc. NOT every single call below
-# uses these - a handful deliberately pass a different span_min/radii/
-# etc. for that one specific plot (a tighter/looser crop, an alternate
-# radii list) - those stay as literals at their own call site on
-# purpose, only the values that are genuinely the same everywhere are
-# pulled from here. See cases/6e-5_6000rpm_HF.yaml's own header comment.
+# cases/*.yaml (via --case, or just leave it to the default below), not
+# hunting through the rest of this file for every hardcoded r_tip/
+# rho_ref/rpm/span_min/etc. NOT every single call below uses these - a
+# handful deliberately pass a different span_min/radii/etc. for that one
+# specific plot (a tighter/looser crop, an alternate radii list) - those
+# stay as literals at their own call site on purpose, only the values
+# that are genuinely the same everywhere are pulled from here. See
+# cases/6e-5_6000rpm_HF.yaml's own header comment.
+#
+# Relative paths are resolved against THIS file's own directory, not
+# whatever the current working directory happens to be when manager.py
+# is run - so an existing submit script that just runs
+# `python3 ~/rotaris/manager.py` with no --case at all keeps using the
+# DEFAULT below unchanged; add --case only where you want to override it.
+_parser = argparse.ArgumentParser()
+_parser.add_argument('--case', default='cases/6e-5_6000rpm_HF.yaml',
+                      help='Path to the case config YAML (see cases/*.yaml) - relative to '
+                           'this file\'s own directory unless given as an absolute path.')
+_args = _parser.parse_args()
 
-# Relative to THIS file's own directory, not whatever the current working
-# directory happens to be when manager.py is run - so switching case only
-# ever means editing the filename below, never depends on where you `cd`
-# from first.
-CASE_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cases/6e-5_6000rpm_HF.yaml')
+CASE_CONFIG_PATH = _args.case
+if not os.path.isabs(CASE_CONFIG_PATH):
+	CASE_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), CASE_CONFIG_PATH)
 
 with open(CASE_CONFIG_PATH) as _f:
 	_cfg = yaml.safe_load(_f)

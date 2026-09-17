@@ -21,7 +21,7 @@ files:
   avg_pressure: RA-beam_avg_pressure_rotor.h5
 
 rotor:
-  r_tip: 0.25
+  r_tip: 0.125
   rho_ref: 1.22523
   rpm: 6000
   pref: 101325
@@ -31,7 +31,7 @@ crop:
 
 friction:
   reverse_chord: true
-  radii: [0.03, 0.055, 0.072, 0.08, 0.095]
+  radii: [0.045, 0.072, 0.100, 0.117, 0.122]
 
 convergence:
   dt: 0.000056
