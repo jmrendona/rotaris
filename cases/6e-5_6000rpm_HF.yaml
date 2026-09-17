@@ -1,0 +1,39 @@
+# Case config for manager.py - the common parameters that are the SAME
+# across most calls in manager.py for this case (see manager.py's own
+# top-of-file loader block). Switching to a different simulation means
+# pointing manager.py at a different one of these files, not hunting
+# through manager.py's ~1000 lines for every hardcoded number.
+#
+# NOTE: not every single call in manager.py uses these values as-is - a
+# handful of specific calls deliberately use a different span_min/radii/
+# etc. for that one plot (e.g. a tighter/looser crop for one diagnostic).
+# Those deliberate one-offs stay as literals at their own call site, NOT
+# routed through this file - only the values that are genuinely the same
+# everywhere they appear are pulled out here.
+
+master_path: /scratch/jmrendon/Rotor-alone/6e-5_6000rpm_HF
+case: 2025HF
+
+files:
+  inst_force: RA-beam_forces_rotor.h5
+  avg_force: RA-beam-no-interaction_avg_forces_rotor.h5
+  inst_pressure: 2025HF_pressure_rotor.h5
+  avg_pressure: RA-beam_avg_pressure_rotor.h5
+
+rotor:
+  r_tip: 0.25
+  rho_ref: 1.22523
+  rpm: 6000
+  pref: 101325
+
+crop:
+  span_min: 0.02
+
+friction:
+  reverse_chord: true
+  radii: [0.03, 0.055, 0.072, 0.08, 0.095]
+
+convergence:
+  dt: 0.000056
+
+frame_loop_step: 15
