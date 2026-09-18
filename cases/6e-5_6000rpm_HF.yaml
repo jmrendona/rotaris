@@ -26,6 +26,14 @@ rotor:
   rpm: 6000
   pref: 101325
 
+# Raw Cartesian axis (0=X, 1=Y, 2=Z) for each blade direction (this
+# project's original isolated-rotor convention).
+axes:
+  span: 0
+  chord: 2
+  thickness: 1
+  skip_validation: false # set True if you have a highly swept blade
+
 crop:
   span_min: 0.02
 

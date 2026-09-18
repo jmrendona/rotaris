@@ -106,6 +106,11 @@ rho_ref = _cfg['rotor']['rho_ref']
 rpm = _cfg['rotor']['rpm']
 pref = _cfg['rotor']['pref']
 
+span_axis = _cfg['axes']['span']
+chord_axis = _cfg['axes']['chord']
+thickness_axis = _cfg['axes']['thickness']
+validate_axes = not _cfg['axes']['skip_validation']
+
 span_min = _cfg['crop']['span_min']
 
 reverse_chord = _cfg['friction']['reverse_chord']
@@ -139,7 +144,8 @@ fl = FrictionLines(
    r_tip=r_tip,
    rho_ref=rho_ref,
    rpm=rpm,
-   span_min=span_min
+   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
+   span_min=span_min, validate_axes=validate_axes
 )
 
 # # Dimensional wall shear vector (tau = F - (F.n)n), no rho_ref/rpm needed:
@@ -379,7 +385,8 @@ sv_pressure = SurfaceVariable(
    r_tip=r_tip,
    rho_ref=rho_ref,
    rpm=rpm,
-   pref=pref
+   pref=pref,
+   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
 )
 
 print(40*'-')
@@ -389,7 +396,8 @@ sv_forces = SurfaceVariable(
    r_tip=r_tip,
    rho_ref=rho_ref,
    rpm=rpm,
-   pref=pref
+   pref=pref,
+   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
 )
 
 # # Raw access to any stored variable - instantaneous, mean, or rms/raw_rms:
@@ -411,7 +419,8 @@ sv_forces = SurfaceVariable(
 # print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_file))
 # sv_pressure_inst = SurfaceVariable(
 #   os.path.join(master_path, inst_pressure_file),
-#   r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref
+#   r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref,
+#   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
 # )
 
 # # Spatial mean pressure/Cp per frame - same reduction
@@ -645,7 +654,8 @@ sf_avg = StripForces(
    os.path.join(master_path, avg_force_file),
    r_tip=r_tip,
    span_min=span_min,
-   chord_axis=1, thickness_axis=2,
+   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
+   validate_axes=validate_axes,
 )
 
 print(40*'-')
@@ -706,7 +716,8 @@ sf_inst = StripForces(
    os.path.join(master_path, inst_force_file),
    r_tip=r_tip, rpm=rpm,
    span_min=span_min,
-   chord_axis=1, thickness_axis=2,
+   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
+   validate_axes=validate_axes,
 )
 
 print(40*'-')

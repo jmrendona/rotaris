@@ -26,8 +26,17 @@ rotor:
   rpm: 3555
   pref: 101325
 
+# Raw Cartesian axis (0=X, 1=Y, 2=Z) for each blade direction. Rotation axis
+# is X here, radius correlates -0.98 with Z, and X has the highest mean
+# |normal component| (0.754) - so X = thickness, Z = span, Y = chord.
+axes:
+  span: 2
+  chord: 1
+  thickness: 0
+  skip_validation: true # set True if you have a highly swept blade
+
 crop:
-  span_min: 0.039
+  span_min: 0
 
 friction:
   reverse_chord: true
