@@ -1,0 +1,39 @@
+# Case config for manager.py - the common parameters that are the SAME
+# across most calls in manager.py for this case (see manager.py's own
+# top-of-file loader block). Switching to a different simulation means
+# pointing manager.py at a different one of these files, not hunting
+# through manager.py's ~1000 lines for every hardcoded number.
+#
+# NOTE: not every single call in manager.py uses these values as-is - a
+# handful of specific calls deliberately use a different span_min/radii/
+# etc. for that one plot (e.g. a tighter/looser crop for one diagnostic).
+# Those deliberate one-offs stay as literals at their own call site, NOT
+# routed through this file - only the values that are genuinely the same
+# everywhere they appear are pulled out here.
+
+master_path: /scratch/jmrendon/tayyab
+case: 5b_fan_shroud
+
+files:
+  inst_force: 2025HF_forces_blade5.h5
+  avg_force: 2025HF_avg_forces_blade5.h5
+  inst_pressure: 2025HF_pressure_rotor.h5
+  avg_pressure: 2025HF_avg_pressure_blade5.h5
+
+rotor:
+  r_tip: 0.178
+  rho_ref: 1.22523
+  rpm: 3555
+  pref: 101325
+
+crop:
+  span_min: 0.039
+
+friction:
+  reverse_chord: true
+  radii: [0.085, 0.1, 0.125, 0.150, 0.17]
+
+convergence:
+  dt: 0.000000419
+
+frame_loop_step: 15
