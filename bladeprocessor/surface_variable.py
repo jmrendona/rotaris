@@ -1040,7 +1040,8 @@ class SurfaceVariable:
     def plot_timetrace(self, name: str, span_pct: float, chord_pct: float, surface: str = 'Upper',
                         tol: float = 0.0015, chord_percentile: float = 0.1, reverse_chord: bool = False,
                         span_min: float = None, span_max: float = None, dt: float = None,
-                        ylabel: str = None, ax=None, savepath: str = None, dpi: int = 600):
+                        ylabel: str = None, ylim: tuple = None, ax=None, savepath: str = None,
+                        dpi: int = 600):
 
         '''
         Plot timetrace() as a connected line vs time (or frame index if
@@ -1051,6 +1052,16 @@ class SurfaceVariable:
         IS the signal, not an interpolation artifact papering over a
         cropped/percentile-cut end (see plot_at_radii()'s docstring for
         why THAT case is different).
+
+        ylim : tuple, optional
+            Explicit (ymin, ymax) - overrides the default below.
+        With ylim=None (default), the y-axis is zoomed to the 1st-99th
+        percentile of `values` (+10% padding) instead of matplotlib's
+        plain min/max autoscale - a single corrupted/transient frame (a
+        bad last frame, a startup transient, ...) otherwise stretches the
+        axis so far that the real, physically-meaningful signal is
+        squashed into a flat-looking line. Pass ylim explicitly to see
+        the full range including such an outlier.
 
         Returns
         -------
@@ -1071,6 +1082,12 @@ class SurfaceVariable:
         ax.plot(t, values, color='k', linewidth=1)
         ax.set_xlabel('Time [s]' if has_time else 'Frame index')
         ax.set_ylabel(ylabel or name)
+        if ylim is not None:
+            ax.set_ylim(ylim)
+        else:
+            lo, hi = np.percentile(values, [1, 99])
+            pad = 0.1 * (hi - lo)
+            ax.set_ylim(lo - pad, hi + pad)
         ax.set_title(f"{point_info['surface']}, $r/R={point_info['r'] / self.r_tip:.3f}$, "
                      f"$x/c={point_info['xc']:.3f}$")
         ax.grid(True)
@@ -1082,7 +1099,8 @@ class SurfaceVariable:
         return fig, ax
 
     def periodogram(self, name: str, span_pct: float, chord_pct: float, surface: str = 'Upper',
-                     fs: float = None, dt: float = None, nperseg: int = None, detrend='constant',
+                     fs: float = None, dt: float = None, n_chunk: int = 4, nperseg: int = None,
+                     nfft: int = None, detrend='constant',
                      tol: float = 0.0015, chord_percentile: float = 0.1, reverse_chord: bool = False,
                      span_min: float = None, span_max: float = None, **welch_kwargs):
 
@@ -1101,14 +1119,15 @@ class SurfaceVariable:
             timetrace(), which tolerates a frame-index-only time axis
             for just inspecting a trace's shape, a periodogram's
             frequency axis is meaningless without a real sampling rate.
-        nperseg : int, optional
-            Passed to scipy.signal.welch - length of each Welch segment.
-            Defaults to min(256, n_frames) rather than scipy's own
-            default (a bare 256): scipy would silently clip nperseg down
-            to n_frames anyway if it's larger, but doing that explicitly
-            here avoids a confusing implicit default when n_frames is
-            still short (a likely case while more frames are still being
-            generated - see this method's motivating use case).
+        n_chunk : int
+            Baseline Welch segmentation, used whenever nperseg/nfft
+            aren't given explicitly: nperseg = len(values) // n_chunk
+            (4 segments by default), nfft = the next power of 2 >=
+            nperseg (zero-padded FFT). Pass nperseg/nfft directly to
+            bypass this and use scipy's own values instead.
+        nperseg, nfft : int, optional
+            Passed to scipy.signal.welch as-is if given - overrides the
+            n_chunk-based baseline above for that one call.
         detrend : str or False
             Passed to scipy.signal.welch - 'constant' (default) removes
             each segment's mean before its FFT, appropriate for a raw
@@ -1145,23 +1164,26 @@ class SurfaceVariable:
                 )
 
         if nperseg is None:
-            nperseg = min(256, len(values))
+            nperseg = len(values) // n_chunk
+        if nfft is None:
+            nfft = 1 << (nperseg - 1).bit_length()  # next power of 2 >= nperseg
 
-        freq, psd = welch(values, fs=fs, nperseg=nperseg, detrend=detrend, **welch_kwargs)
+        freq, psd = welch(values, fs=fs, nperseg=nperseg, nfft=nfft, detrend=detrend, **welch_kwargs)
 
         return freq, psd, point_info
 
     def plot_periodogram(self, name: str, span_pct: float, chord_pct: float, surface: str = 'Upper',
-                          fs: float = None, dt: float = None, nperseg: int = None, detrend='constant',
+                          fs: float = None, dt: float = None, n_chunk: int = 4, nperseg: int = None,
+                          nfft: int = None, detrend='constant',
                           tol: float = 0.0015, chord_percentile: float = 0.1, reverse_chord: bool = False,
                           span_min: float = None, span_max: float = None, ylabel: str = None, ax=None,
                           savepath: str = None, dpi: int = 600, **welch_kwargs):
 
         '''
-        Plot periodogram() as log-log PSD vs frequency - the standard way
-        to read a spectrum's decades of magnitude/frequency together; a
-        linear axis flattens everything below the largest peak into an
-        indistinguishable baseline.
+        Plot periodogram() as PSD vs frequency, log x-axis (frequency
+        decades) / linear y-axis in plain (non-scientific) notation -
+        see periodogram()'s n_chunk/nperseg/nfft for the Welch
+        segmentation used.
 
         Returns
         -------
@@ -1169,9 +1191,9 @@ class SurfaceVariable:
         '''
 
         freq, psd, point_info = self.periodogram(
-            name, span_pct, chord_pct, surface=surface, fs=fs, dt=dt, nperseg=nperseg, detrend=detrend,
-            tol=tol, chord_percentile=chord_percentile, reverse_chord=reverse_chord, span_min=span_min,
-            span_max=span_max, **welch_kwargs)
+            name, span_pct, chord_pct, surface=surface, fs=fs, dt=dt, n_chunk=n_chunk, nperseg=nperseg,
+            nfft=nfft, detrend=detrend, tol=tol, chord_percentile=chord_percentile,
+            reverse_chord=reverse_chord, span_min=span_min, span_max=span_max, **welch_kwargs)
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(8, 5))
@@ -1182,9 +1204,10 @@ class SurfaceVariable:
         # component anyway (that's what detrend='constant' already removes).
         start = 1 if freq[0] == 0 else 0
 
-        ax.loglog(freq[start:], psd[start:], color='k', linewidth=1.2)
+        ax.semilogx(freq[start:], psd[start:], color='k', linewidth=1.2)
         ax.set_xlabel('Frequency [Hz]')
         ax.set_ylabel(ylabel or 'PSD')
+        ax.ticklabel_format(style='plain', axis='y')
         ax.set_title(f"{point_info['surface']}, $r/R={point_info['r'] / self.r_tip:.3f}$, "
                      f"$x/c={point_info['xc']:.3f}$")
         ax.grid(True, which='both', alpha=0.3)

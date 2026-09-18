@@ -115,6 +115,8 @@ dt = _cfg['convergence']['dt']
 
 frame_loop_step = _cfg['frame_loop_step']
 
+
+# # ------------- Friction related post-processing ------------- #
 # print(40*'-')
 # print('Opening FrictionLines file: ', os.path.join(master_path, inst_force_file))
 # # span_min=span_min here (not just on every call below) - for a whole-rotor
@@ -408,55 +410,50 @@ sv_pressure_inst = SurfaceVariable(
 # Spatial mean pressure/Cp per frame - same reduction
 # plot_cf_phase_portrait() uses on cf_time_series() - every convergence.py
 # function takes this plain 1D per-frame series, exactly like thrust/torque:
-p_series = sv_pressure_inst.variable_time_series('static_pressure', surface='Upper').mean(axis=1)
-cp_series = sv_pressure_inst.cp_time_series(surface='Upper').mean(axis=1)
+# p_series = sv_pressure_inst.variable_time_series('static_pressure', surface='Upper').mean(axis=1)
+# cp_series = sv_pressure_inst.cp_time_series(surface='Upper').mean(axis=1)
 
-print(40*'-')
-print('Plotting cumulative mean+variance of pressure')
-plot_cumulative_stats(
-  p_series, dt=dt, rpm=rpm, sync='none', ylabel='Pressure [Pa]',
-  savepath=os.path.join(master_path, 'images/cp/convergence/pressure_cumulative_stats.png'),
-)
+# print(40*'-')
+# print('Plotting cumulative mean+variance of pressure')
+# plot_cumulative_stats(
+#   p_series, dt=dt, rpm=rpm, sync='none', ylabel='Pressure [Pa]',
+#   savepath=os.path.join(master_path, 'images/cp/convergence/pressure_cumulative_stats.png'),
+# )
 
-print(40*'-')
-print('Plotting integral timescale / required averaging time for pressure')
-plot_integral_timescale(
-  p_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-  savepath=os.path.join(master_path, 'images/cp/convergence/pressure_integral_timescale.png'),
-)
+# print(40*'-')
+# print('Plotting integral timescale / required averaging time for pressure')
+# plot_integral_timescale(
+#   p_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+#   savepath=os.path.join(master_path, 'images/cp/convergence/pressure_integral_timescale.png'),
+# )
 
-# The rest of the convergence toolkit (see README.md's "Convergence
-# checking" sections) - all take the SAME plain 1D p_series, not tied to
-# StripForces/FrictionLines specifically, exactly like plot_cumulative_stats/
-# plot_integral_timescale above:
+# print(40*'-')
+# print('Plotting cumulative mean of pressure vs revolutions included')
+# plot_cumulative_mean(
+#   p_series, dt=dt, rpm=rpm, ylabel='Pressure [Pa]',
+#   savepath=os.path.join(master_path, 'images/cp/convergence/pressure_cumulative_mean.png'),
+# )
 
-print(40*'-')
-print('Plotting cumulative mean of pressure vs revolutions included')
-plot_cumulative_mean(
-  p_series, dt=dt, rpm=rpm, ylabel='Pressure [Pa]',
-  savepath=os.path.join(master_path, 'images/cp/convergence/pressure_cumulative_mean.png'),
-)
+# print(40*'-')
+# print('Plotting cumulative skewness+flatness of pressure')
+# plot_cumulative_moments(
+#   p_series, dt=dt, rpm=rpm, sync='none', label='Pressure',
+#   savepath=os.path.join(master_path, 'images/cp/convergence/pressure_cumulative_moments.png'),
+# )
 
-print(40*'-')
-print('Plotting cumulative skewness+flatness of pressure')
-plot_cumulative_moments(
-  p_series, dt=dt, rpm=rpm, sync='none', label='Pressure',
-  savepath=os.path.join(master_path, 'images/cp/convergence/pressure_cumulative_moments.png'),
-)
+# print(40*'-')
+# print('Plotting pressure autocorrelation, first half vs second half of the run')
+# plot_autocorrelation_windows(
+#   p_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+#   savepath=os.path.join(master_path, 'images/cp/convergence/pressure_autocorrelation_windows.png'),
+# )
 
-print(40*'-')
-print('Plotting pressure autocorrelation, first half vs second half of the run')
-plot_autocorrelation_windows(
-  p_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
-  savepath=os.path.join(master_path, 'images/cp/convergence/pressure_autocorrelation_windows.png'),
-)
-
-print(40*'-')
-print('Plotting cycle-to-cycle correlation of pressure')
-plot_cycle_correlation(
-  p_series, dt=dt, rpm=rpm, period_deg=360.0,
-  savepath=os.path.join(master_path, 'images/cp/convergence/pressure_cycle_correlation.png'),
-)
+# print(40*'-')
+# print('Plotting cycle-to-cycle correlation of pressure')
+# plot_cycle_correlation(
+#   p_series, dt=dt, rpm=rpm, period_deg=360.0,
+#   savepath=os.path.join(master_path, 'images/cp/convergence/pressure_cycle_correlation.png'),
+# )
 
 
 # # ------------- Radii cuts profiles for surface variables ------------- #
@@ -472,10 +469,22 @@ plot_cycle_correlation(
 #    frame=None, stat='mean', span_min=span_min, reverse_chord=reverse_chord,
 #    savepath=os.path.join(master_path, f'images/cp/cp_radii_avg_{case}.png'),
 # )
-# sv_pressure.plot_cp_radii(
+
+# for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
+#   print(40*'-')
+#   print('Plotting Cp vs x/c at several radii, instatenous frame ', frame)
+#   sv_pressure_inst.plot_cp_radii(
+#     radii=radii,
+#     frame=frame, span_min=span_min, reverse_chord=reverse_chord,
+#     savepath=os.path.join(master_path, f'images/cp/inst/cp_radii_frame{frame}_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting Cp rms vs x/c at several radii, instatenous files')
+# sv_pressure_inst.plot_cp_radii(
 #    radii=radii,
-#    frame=0, span_min=span_min, reverse_chord=reverse_chord,
-#    savepath=os.path.join(master_path, f'images/cp/cp_radii_frame0_{case}.png'),
+#    frame=None, stat='rms', span_min=span_min, reverse_chord=reverse_chord,
+#    savepath=os.path.join(master_path, f'images/cp/rms/cp_radii_rms_{case}.png'),
 # )
 
 # ------------- Any surface variable over the whole blade ------------- #
@@ -486,13 +495,22 @@ plot_cycle_correlation(
 # see README.md, "Whole-blade surface plot" / "Cross-case comparison".
 
 # Whole-blade -Cp scatter, both surfaces:
-print(40*'-')
-print('Plotting -Cp surface scatter, average over all frames')
-sv_pressure.plot_variable_surface(
-   lambda s: -sv_pressure.cp(surface=s, stat='mean'),
-   cbar_label='-Cp', span_min=span_min, surface='Upper',
-   savepath=os.path.join(master_path, f'images/cp/cp_surface_avg_upper_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting -Cp surface scatter, average over all frames')
+# sv_pressure.plot_variable_surface(
+#    lambda s: -sv_pressure.cp(surface=s, stat='mean'),
+#    cbar_label='-Cp', span_min=span_min, surface='Upper',
+#    savepath=os.path.join(master_path, f'images/cp/cp_surface_avg_upper_{case}.png'),
+# )
+
+# for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
+#   print(40*'-')
+#   print('Plotting -Cp surface scatter, instantaneous frame ', frame)
+#   sv_pressure_inst.plot_variable_surface(
+#     lambda s: -sv_pressure_inst.cp(surface=s, frame=frame),
+#     cbar_label='-Cp', span_min=span_min, surface='Upper',
+#     savepath=os.path.join(master_path, f'images/cp/inst/cp_surface_upper_frame{frame}_{case}.png'),
+#   )
 
 # print(40*'-')
 # print('Plotting Skin Friction surface scatter, average over all frames')
@@ -554,38 +572,52 @@ sv_pressure.plot_variable_surface(
 #comparator_sv.plot_cases(cbar_label='Cp', savepath=os.path.join(master_path, 'images/cp/cp_comparison.png'))
 #comparator_sv.plot_delta('2025', '2026', cbar_label='Cp delta', savepath=os.path.join(master_path, 'images/cp/cp_delta.png'))
 
-# # ------------- Computation with instatenous files containing pressure ------------- #
-# #
-# # Pressure fluctuation p'(frame) = p(frame) - p_mean, one blade contour
-# # per frame - needs a multi-frame file to show a real signal (a
-# # single-frame file gives exactly 0 everywhere, since p(frame) == p_mean):
-#for frame in range(sv_pressure.n_frames):
-#    sv_pressure.plot_pressure_fluctuation(
-#        frame, span_min=span_min,
-#        savepath=os.path.join(master_path, f'images/pfluct/p_fluct_frame{frame:03d}.png'),
-#    )
+# ------------- Computation with instatenous files containing pressure ------------- #
+# 
+# Pressure fluctuation p'(frame) = p(frame) - p_mean, one blade contour
+# per frame - needs a multi-frame file to show a real signal (a
+# single-frame file gives exactly 0 everywhere, since p(frame) == p_mean):
+for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
+  print(40*'-')
+  print('Plotting pressure fluctuation, instantaneous frame ', frame)
+  sv_pressure_inst.plot_pressure_fluctuation(
+      frame, span_min=span_min, surface='Upper',
+      savepath=os.path.join(master_path, f'images/pfluct/p_fluct_upper_frame{frame:03d}_{case}.png'),
+   )
 
-# # Prms needs no new method - it's already variable(stat='rms'):
-#sv_pressure.plot_variable_surface(
-#    lambda s: sv_pressure.variable('static_pressure', surface=s, stat='rms'),
-#    cbar_label='$P_{rms}$ [Pa]', span_min=span_min,
-#    savepath=os.path.join(master_path, 'images/pfluct/p_rms_surface.png'),
-#)
+# Prms needs no new method - it's already variable(stat='rms'):
+print(40*'-')
+print('Plotting pressure RMS surface scatter, average over all frames')
+sv_pressure_inst.plot_variable_surface(
+   lambda s: sv_pressure_inst.variable('static_pressure', surface=s, stat='rms'),
+   cbar_label='$P_{rms}$ [Pa]', span_min=span_min, surface='Upper',
+   savepath=os.path.join(master_path, f'images/pfluct/p_rms_surface_upper_{case}.png'),
+)
 
-# # Point time trace + Welch periodogram (wall pressure fluctuations at one
-# # location, given as % of r/R and x/c - see README.md, "Point time trace").
-# # Needs a real time axis: pass dt explicitly if this file has no usable
-# # Metadata/mid_s (see README.md for when that's populated):
-#sv_pressure.plot_timetrace(
-#    'static_pressure', span_pct=80, chord_pct=90, surface='Upper',
-#    ylabel='Static pressure [Pa]', dt=dt,
-#    savepath=os.path.join(master_path, 'images/spectra/p_timetrace_80_90.png'),
-#)
-#sv_pressure.plot_periodogram(
-#    'static_pressure', span_pct=80, chord_pct=90, surface='Upper',
-#    ylabel='PSD [Pa$^2$/Hz]', dt=dt,
-#    savepath=os.path.join(master_path, 'images/spectra/p_periodogram_80_90.png'),
-#)
+# Point time trace + Welch periodogram (wall pressure fluctuations at one
+# location, given as % of r/R and x/c - see README.md, "Point time trace").
+# Needs a real time axis: pass dt explicitly if this file has no usable
+# Metadata/mid_s (see README.md for when that's populated):
+
+span_pcts = [90, 95]  # % of r/R
+chord_pcts = np.arange(0, 101, 10)  # % of x/c
+
+for span in span_pcts:
+  for chord in chord_pcts:
+    print(40*'-')
+    print(f'Plotting pressure time trace at span {span}% and chord {chord}%')
+    sv_pressure_inst.plot_timetrace(
+      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
+      ylabel='Static pressure [Pa]', dt=dt,
+      savepath=os.path.join(master_path, f'images/pfluct/spectra/p_timetrace_s{span}_c{chord}_{case}.png'),
+    )
+    print(40*'-')
+    print(f'Plotting pressure periodogram at span {span}% and chord {chord}%')
+    sv_pressure_inst.plot_periodogram(
+      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
+      ylabel='PSD [Pa$^2$/Hz]', dt=dt,
+      savepath=os.path.join(master_path, f'images/pfluct/spectra/p_periodogram_s{span}_c{chord}_{case}.png'),
+    )
 
 # # ------------- Strip forces (Hanson's method input) ------------- #
 # #
