@@ -36,7 +36,7 @@ axes:
   skip_validation: true # set True if you have a highly swept blade
 
 crop:
-  span_min: 0
+  span_min: null # null if the full extend will be used
 
 friction:
   reverse_chord: true
