@@ -969,11 +969,11 @@ plot_cumulative_stats(
 # rotor - shown for reference): 4 blades / 4 vanes repeat every
 # 360/4=90 degrees, so sync every 90 degrees rather than every full
 # revolution to get 4x the comparable-phase samples per run:
-plot_cumulative_stats(
-  totals_inst['thrust'], dt=dt, rpm=rpm, sync='periodicity', period_deg=90.0,
-  ylabel='Thrust [N]',
-  savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_stats_periodicity_{case}.png'),
-)
+# plot_cumulative_stats(
+#   totals_inst['thrust'], dt=dt, rpm=rpm, sync='periodicity', period_deg=90.0,
+#   ylabel='Thrust [N]',
+#   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_stats_periodicity_{case}.png'),
+# )
 
 # Convergence checking: 3rd/4th-order statistics (running skewness and
 # flatness - see README.md, "Convergence checking: higher-order
@@ -1049,20 +1049,20 @@ print(f"Need {req['revolutions_required']:.1f} total revolutions for 0.1% relati
 # SHAPE has stopped changing - the actual assumption phase_lock()/
 # harmonics() below and TipVortexPhaseAverage depend on. period_deg=360
 # (default) = one full revolution:
-print(40*'-')
-print('Plotting cycle-to-cycle correlation of thrust')
-plot_cycle_correlation(
-   totals_inst['thrust'], dt=dt, rpm=rpm, period_deg=360.0,
-   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cycle_correlation_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting cycle-to-cycle correlation of thrust')
+# plot_cycle_correlation(
+#    totals_inst['thrust'], dt=dt, rpm=rpm, period_deg=360.0,
+#    savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cycle_correlation_{case}.png'),
+# )
 
-# Rotor-stator example instead (NOT this project's isolated rotor -
-# shown for reference): correlate every 90-degree interaction period
-# rather than every full revolution:
-plot_cycle_correlation(
-  totals_inst['thrust'], dt=dt, rpm=rpm, period_deg=90.0,
-  savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cycle_correlation_90deg_{case}.png'),
-)
+# # Rotor-stator example instead (NOT this project's isolated rotor -
+# # shown for reference): correlate every 90-degree interaction period
+# # rather than every full revolution:
+# plot_cycle_correlation(
+#   totals_inst['thrust'], dt=dt, rpm=rpm,,period_deg=90.0,
+#   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cycle_correlation_90deg_{case}.png'),
+# )
 
 # ------------- Tip-vortex tracking: phase-locked plane averaging (see README.md) ------------- #
 #
