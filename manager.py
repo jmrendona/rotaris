@@ -118,6 +118,8 @@ radii = _cfg['friction']['radii']
 
 dt = _cfg['convergence']['dt']
 
+blade_figsize = tuple(_cfg['blade_figsize']) if _cfg['blade_figsize'] else None
+
 frame_loop_step = _cfg['frame_loop_step']
 
 # Output folders under master_path/images - exist_ok=True leaves any folder
@@ -235,6 +237,7 @@ print(40*'-')
 print('Plotting Cf RMS vs x/c color map')
 fl.friction_lines(
    surface='Upper', frame=None, stat='rms', span_min=span_min,
+   figsize=blade_figsize,
    savepath=os.path.join(master_path, f'images/cf/cf_rms_map_{case}.png'),
 )
 
@@ -246,6 +249,7 @@ print(40*'-')
 print('Plotting Friction Lines, Upper surface, average over all frames')
 fl.friction_lines(
    frame=None, span_min=span_min, surface='Upper',
+   figsize=blade_figsize,
    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_avg_{case}.png'),
 )
 
@@ -254,6 +258,7 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 	print(f'Plotting Friction Lines, Upper surface, for frame {frame:03d}')
 	fl.friction_lines(
 	   frame=frame, span_min=span_min, surface='Upper',
+	   figsize=blade_figsize,
 	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_frame{frame:03d}_{case}.png'),
 	)
 
@@ -270,6 +275,7 @@ print('Plotting Friction Lines with separation/reattachment line, Upper surface,
 fl.friction_lines(
    surface='Upper', frame=None, span_min=span_min, show_separation_line=True,
    separation_line_kwargs={'reverse_chord': reverse_chord},
+   figsize=blade_figsize,
    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_separation_{case}.png'),
 )
 
@@ -279,6 +285,7 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 	fl.friction_lines(
 	   surface='Upper', frame=frame, span_min=span_min, show_separation_line=True,
 	   separation_line_kwargs={'reverse_chord': reverse_chord},
+	   figsize=blade_figsize,
 	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_separation_frame{frame:03d}_{case}.png'),
 	)
 
@@ -295,6 +302,7 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 # #fl.friction_lines(
 # #    surface='Upper', frame=None, span_min=span_min, show_migration_line=True,
 # #    migration_line_kwargs={'reverse_chord': True},
+# #    figsize=blade_figsize,
 # #    savepath=os.path.join(master_path, 'images/cf/friction_lines_migration.png'),
 # #)
 
@@ -312,6 +320,7 @@ print(40*'-')
 print('Plotting Friction Lines with critical points, Upper surface, average over all frames')
 fl.friction_lines(
    surface='Upper', frame=None, span_min=span_min, show_critical_points=True, show_critical_points_index=False,
+   figsize=blade_figsize,
    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_critical_points_{case}.png'),
 )
 
@@ -320,6 +329,7 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 	print(f'Plotting Friction Lines with critical points, Upper surface, for frame {frame:03d}')
 	fl.friction_lines(
 	surface='Upper', frame=frame, span_min=span_min, show_critical_points=True, show_critical_points_index=False,
+	figsize=blade_figsize,
 	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_critical_points_frame{frame:03d}_{case}.png'),
 	)
 
@@ -378,16 +388,16 @@ fl.plot_cf_phase_portrait_by_strip(
 # file for any variable stored there instead (Skin_Friction, y+ if
 # present, etc.) - see README.md, "Any surface variable at radii".
 
-print(40*'-')
-print('Opening SurfaceVariable file: ', os.path.join(master_path, avg_pressure_file))
-sv_pressure = SurfaceVariable(
-   os.path.join(master_path, avg_pressure_file),
-   r_tip=r_tip,
-   rho_ref=rho_ref,
-   rpm=rpm,
-   pref=pref,
-   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
-)
+# print(40*'-')
+# print('Opening SurfaceVariable file: ', os.path.join(master_path, avg_pressure_file))
+# sv_pressure = SurfaceVariable(
+#    os.path.join(master_path, avg_pressure_file),
+#    r_tip=r_tip,
+#    rho_ref=rho_ref,
+#    rpm=rpm,
+#    pref=pref,
+#    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
+# )
 
 print(40*'-')
 print('Opening SurfaceVariable file: ', os.path.join(master_path, avg_force_file))
@@ -410,64 +420,64 @@ sv_forces = SurfaceVariable(
 #cp_frame0 = sv.cp(surface='Upper', frame=0)
 #cp_rms = sv.cp(surface='Upper', frame=None, stat='rms')
 
-# # ------------- Convergence checking on pressure (see README.md) ------------- #
+# ------------- Convergence checking on pressure (see README.md) ------------- #
 
-# # "Convergence checking on pressure") - needs an INSTANTANEOUS (multi-
-# # frame) pressure file, never a PowerFLOW-pre-averaged one, same
-# # requirement as everywhere else in this project:
-# print(40*'-')
-# print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_file))
-# sv_pressure_inst = SurfaceVariable(
-#   os.path.join(master_path, inst_pressure_file),
-#   r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref,
-#   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
-# )
+# "Convergence checking on pressure") - needs an INSTANTANEOUS (multi-
+# frame) pressure file, never a PowerFLOW-pre-averaged one, same
+# requirement as everywhere else in this project:
+print(40*'-')
+print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_file))
+sv_pressure_inst = SurfaceVariable(
+  os.path.join(master_path, inst_pressure_file),
+  r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref,
+  span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
+)
 
-# # Spatial mean pressure/Cp per frame - same reduction
-# # plot_cf_phase_portrait() uses on cf_time_series() - every convergence.py
-# # function takes this plain 1D per-frame series, exactly like thrust/torque:
-# p_series = sv_pressure_inst.variable_time_series('static_pressure', surface='Upper').mean(axis=1)[:-2]  # drop corrupted last frame(s)
-# cp_series = sv_pressure_inst.cp_time_series(surface='Upper').mean(axis=1)[:-2]
+# Spatial mean pressure/Cp per frame - same reduction
+# plot_cf_phase_portrait() uses on cf_time_series() - every convergence.py
+# function takes this plain 1D per-frame series, exactly like thrust/torque:
+p_series = sv_pressure_inst.variable_time_series('static_pressure', surface='Upper').mean(axis=1)[:-2]  # drop corrupted last frame(s)
+cp_series = sv_pressure_inst.cp_time_series(surface='Upper').mean(axis=1)[:-2]
 
-# print(40*'-')
-# print('Plotting cumulative mean+variance of pressure')
-# plot_cumulative_stats(
-#   p_series, dt=dt, rpm=rpm, sync='none', ylabel='Pressure [Pa]',
-#   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cumulative_stats_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative mean+variance of pressure')
+plot_cumulative_stats(
+  p_series, dt=dt, rpm=rpm, sync='none', ylabel='Pressure [Pa]',
+  savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cumulative_stats_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting integral timescale / required averaging time for pressure')
-# plot_integral_timescale(
-#   p_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-#   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_integral_timescale_{case}.png'),
-# )
+print(40*'-')
+print('Plotting integral timescale / required averaging time for pressure')
+plot_integral_timescale(
+  p_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+  savepath=os.path.join(master_path, f'images/cp/convergence/pressure_integral_timescale_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cumulative mean of pressure vs revolutions included')
-# plot_cumulative_mean(
-#   p_series, dt=dt, rpm=rpm, ylabel='Pressure [Pa]',
-#   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cumulative_mean_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative mean of pressure vs revolutions included')
+plot_cumulative_mean(
+  p_series, dt=dt, rpm=rpm, ylabel='Pressure [Pa]',
+  savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cumulative_mean_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cumulative skewness+flatness of pressure')
-# plot_cumulative_moments(
-#   p_series, dt=dt, rpm=rpm, sync='none', label='Pressure',
-#   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cumulative_moments_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative skewness+flatness of pressure')
+plot_cumulative_moments(
+  p_series, dt=dt, rpm=rpm, sync='none', label='Pressure',
+  savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cumulative_moments_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting pressure autocorrelation, first half vs second half of the run')
-# plot_autocorrelation_windows(
-#   p_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
-#   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_autocorrelation_windows_{case}.png'),
-# )
+print(40*'-')
+print('Plotting pressure autocorrelation, first half vs second half of the run')
+plot_autocorrelation_windows(
+  p_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+  savepath=os.path.join(master_path, f'images/cp/convergence/pressure_autocorrelation_windows_{case}.png'),
+)
 
 # print(40*'-')
 # print('Plotting cycle-to-cycle correlation of pressure')
 # plot_cycle_correlation(
-#   p_series, dt=dt, rpm=rpm, period_deg=360.0,
+#   p_series, dt=dt, rpm=rpm, period_deg=72,
 #   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cycle_correlation_{case}.png'),
 # )
 
@@ -478,13 +488,13 @@ sv_forces = SurfaceVariable(
 # isolates one blade half (see friction_lines() above for why), and
 # reverse_chord fixes which end is the leading vs. trailing edge (no
 # automatic detection - check per case, see the method's docstring):
-print(40*'-')
-print('Plotting Cp vs x/c at several radii, average over all frames')
-sv_pressure.plot_cp_radii(
-   radii=radii,
-   frame=None, stat='mean', span_min=span_min, reverse_chord=reverse_chord,
-   savepath=os.path.join(master_path, f'images/cp/avg/cp_radii_avg_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cp vs x/c at several radii, average over all frames')
+# sv_pressure.plot_cp_radii(
+#    radii=radii,
+#    frame=None, stat='mean', span_min=span_min, reverse_chord=reverse_chord,
+#    savepath=os.path.join(master_path, f'images/cp/avg/cp_radii_avg_{case}.png'),
+# )
 
 # for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
 #   print(40*'-')
@@ -503,21 +513,22 @@ sv_pressure.plot_cp_radii(
 #    savepath=os.path.join(master_path, f'images/cp/rms/cp_radii_rms_{case}.png'),
 # )
 
-# ------------- Any surface variable over the whole blade ------------- #
-#
-# Generalizes friction_lines() (above) to any scalar field, and
-# to_common_grid()/field() lets a SurfaceVariable slot into the existing
-# SurfaceField/SurfaceFieldComparator machinery for cross-case deltas -
-# see README.md, "Whole-blade surface plot" / "Cross-case comparison".
+# # ------------- Any surface variable over the whole blade ------------- #
+# #
+# # Generalizes friction_lines() (above) to any scalar field, and
+# # to_common_grid()/field() lets a SurfaceVariable slot into the existing
+# # SurfaceField/SurfaceFieldComparator machinery for cross-case deltas -
+# # see README.md, "Whole-blade surface plot" / "Cross-case comparison".
 
-# Whole-blade -Cp scatter, both surfaces:
-print(40*'-')
-print('Plotting -Cp surface scatter, average over all frames')
-sv_pressure.plot_variable_surface(
-   lambda s: -sv_pressure.cp(surface=s, stat='mean'),
-   cbar_label='-Cp', span_min=span_min, surface='Upper',
-   savepath=os.path.join(master_path, f'images/cp/avg/cp_surface_avg_upper_{case}.png'),
-)
+# # Whole-blade -Cp scatter, both surfaces:
+# print(40*'-')
+# print('Plotting -Cp surface scatter, average over all frames')
+# sv_pressure.plot_variable_surface(
+#    lambda s: -sv_pressure.cp(surface=s, stat='mean'),
+#    cbar_label='-Cp', span_min=span_min, surface='Upper',
+#    figsize=blade_figsize,
+#    savepath=os.path.join(master_path, f'images/cp/avg/cp_surface_avg_upper_{case}.png'),
+# )
 
 # for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
 #   print(40*'-')
@@ -525,6 +536,7 @@ sv_pressure.plot_variable_surface(
 #   sv_pressure_inst.plot_variable_surface(
 #     lambda s: -sv_pressure_inst.cp(surface=s, frame=frame),
 #     cbar_label='-Cp', span_min=span_min, surface='Upper',
+#     figsize=blade_figsize,
 #     savepath=os.path.join(master_path, f'images/cp/inst/cp_surface_upper_frame{frame:03d}_{case}.png'),
 #   )
 
@@ -533,6 +545,7 @@ print('Plotting Skin Friction surface scatter, average over all frames')
 sv_forces.plot_variable_surface(
    lambda s: sv_forces.variable('Skin_Friction', surface=s, stat='mean'),
    cbar_label='Skin Friction [Pa]', span_min=span_min, surface='Upper',
+   figsize=blade_figsize,
    savepath=os.path.join(master_path, f'images/cf/avg/cf_surface_avg_upper_{case}.png'),
 )
 
@@ -562,6 +575,7 @@ sv_forces.plot_variable_surface(
 # sv_pressure.plot_variable_surface(
 #    lambda s: -sv_pressure.cp(surface=s, stat='mean'),
 #    cbar_label='-Cp', span_min=span_min, show_stagnation_line=True,
+#    figsize=blade_figsize,
 #    savepath=os.path.join(master_path, f'images/cp/cp_surface_with_stagnation_{case}.png'),
 # )
 
@@ -598,6 +612,7 @@ sv_forces.plot_variable_surface(
 #   print('Plotting pressure fluctuation, instantaneous frame ', frame)
 #   sv_pressure_inst.plot_pressure_fluctuation(
 #       frame, span_min=span_min, surface='Upper',
+#       figsize=blade_figsize,
 #       savepath=os.path.join(master_path, f'images/pfluct/p_fluct_upper_frame{frame:03d}_{case}.png'),
 #    )
 
@@ -607,6 +622,7 @@ sv_forces.plot_variable_surface(
 # sv_pressure_inst.plot_variable_surface(
 #    lambda s: sv_pressure_inst.variable('static_pressure', surface=s, stat='rms'),
 #    cbar_label='$P_{rms}$ [Pa]', span_min=span_min, surface='Upper',
+#    figsize=blade_figsize,
 #    savepath=os.path.join(master_path, f'images/pfluct/p_rms_surface_upper_{case}.png'),
 # )
 

@@ -17,7 +17,7 @@ case: 5b_fan_shroud
 files:
   inst_force: 2025HF_forces_blade5.h5
   avg_force: 2025HF_avg_forces_blade5.h5
-  inst_pressure: 2025HF_pressure_rotor.h5
+  inst_pressure: 2025HF_pressure_blade5.h5
   avg_pressure: 2025HF_avg_pressure_blade5.h5
 
 rotor:
@@ -44,5 +44,7 @@ friction:
 
 convergence:
   dt: 0.000000419
+
+blade_figsize: [7, 5.5] # null for ISAWE2 case
 
 frame_loop_step: 15

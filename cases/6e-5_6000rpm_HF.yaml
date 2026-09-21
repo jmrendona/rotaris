@@ -44,4 +44,11 @@ friction:
 convergence:
   dt: 0.000056
 
+# Figure size [width, height] in inches for every plot that draws the blade
+# geometry (friction lines + critical/separation/migration overlays, surface
+# scatter/contours). null = each method's own default (14 x 4.5 per surface,
+# made for a long thin blade). Use a squarer size when span and chord extents
+# are similar.
+blade_figsize: null
+
 frame_loop_step: 15
