@@ -129,6 +129,8 @@ for _sub in ('cf/avg', 'cf/inst', 'cp/avg', 'cp/inst', 'cp/rms', 'cp/convergence
              'forces/convergence', 'forces/hanson', 'pfluct/spectra', 'tip_vortex'):
 	os.makedirs(os.path.join(master_path, 'images', _sub), exist_ok=True)
 
+os.makedirs(os.path.join(master_path, 'data', 'pfluct'), exist_ok=True)
+
 
 # ------------- Friction related post-processing ------------- #
 print(40*'-')
@@ -425,13 +427,13 @@ fl.plot_cf_phase_portrait_by_strip(
 # # "Convergence checking on pressure") - needs an INSTANTANEOUS (multi-
 # # frame) pressure file, never a PowerFLOW-pre-averaged one, same
 # # requirement as everywhere else in this project:
-# print(40*'-')
-# print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_file))
-# sv_pressure_inst = SurfaceVariable(
-#   os.path.join(master_path, inst_pressure_file),
-#   r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref,
-#   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
-# )
+print(40*'-')
+print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_file))
+sv_pressure_inst = SurfaceVariable(
+  os.path.join(master_path, inst_pressure_file),
+  r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref,
+  span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
+)
 
 # # Spatial mean pressure/Cp per frame - same reduction
 # # plot_cf_phase_portrait() uses on cf_time_series() - every convergence.py
@@ -626,29 +628,35 @@ fl.plot_cf_phase_portrait_by_strip(
 #    savepath=os.path.join(master_path, f'images/pfluct/p_rms_surface_upper_{case}.png'),
 # )
 
-# # Point time trace + Welch periodogram (wall pressure fluctuations at one
-# # location, given as % of r/R and x/c - see README.md, "Point time trace").
-# # Needs a real time axis: pass dt explicitly if this file has no usable
-# # Metadata/mid_s (see README.md for when that's populated):
+# Point time trace + Welch periodogram (wall pressure fluctuations at one
+# location, given as % of r/R and x/c - see README.md, "Point time trace").
+# Needs a real time axis: pass dt explicitly if this file has no usable
+# Metadata/mid_s (see README.md for when that's populated):
 
-# span_pcts = np.arange(86, 101, 2)  # % of r/R
-# chord_pcts = np.arange(0, 101, 10)  # % of x/c
+span_pcts = np.arange(86, 101, 2)  # % of r/R
+chord_pcts = np.arange(0, 101, 10)  # % of x/c
 
-# for span in span_pcts:
-#   for chord in chord_pcts:
-#     print(40*'-')
-#     print(f'Plotting pressure time trace at span {span}% and chord {chord}%')
-#     sv_pressure_inst.plot_timetrace(
-#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
-#       ylabel='Static pressure [Pa]', dt=dt,
-#       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_timetrace_s{span:03d}_c{chord:03d}_{case}.png'),
-#     )
-#     print(40*'-')
-#     print(f'Plotting pressure periodogram at span {span}% and chord {chord}%')
-#     sv_pressure_inst.plot_periodogram(
-#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
-#       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_periodogram_s{span:03d}_c{chord:03d}_{case}.png'),
-#     )
+for span in span_pcts:
+  for chord in chord_pcts:
+    print(40*'-')
+    print(f'Plotting pressure time trace at span {span}% and chord {chord}%')
+    sv_pressure_inst.plot_timetrace(
+      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
+      ylabel='Static pressure [Pa]', dt=dt,
+      savepath=os.path.join(master_path, f'images/pfluct/spectra/p_timetrace_s{span:03d}_c{chord:03d}_{case}.png'),
+    )
+    print(40*'-')
+    print(f'Plotting pressure periodogram at span {span}% and chord {chord}%')
+    sv_pressure_inst.plot_periodogram(
+      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
+      savepath=os.path.join(master_path, f'images/pfluct/spectra/p_periodogram_s{span:03d}_c{chord:03d}_{case}.png'),
+    )
+    print(40*'-')
+    print(f'Exporting pressure time trace at span {span}% and chord {chord}%')
+    sv_pressure_inst.export_timetrace(
+      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
+      savepath=os.path.join(master_path, f'data/pfluct/p_timetrace_s{span:03d}_c{chord:03d}_{case}.h5'),
+    )
 
 # ------------- Strip forces (Hanson's method input) ------------- #
 #

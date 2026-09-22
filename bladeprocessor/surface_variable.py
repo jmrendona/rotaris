@@ -1098,6 +1098,63 @@ class SurfaceVariable:
 
         return fig, ax
 
+    def export_timetrace(self, name: str, span_pct: float, chord_pct: float, surface: str = 'Upper',
+                          tol: float = 0.0015, chord_percentile: float = 0.1, reverse_chord: bool = False,
+                          span_min: float = None, span_max: float = None, dt: float = None,
+                          savepath: str = None):
+
+        '''
+        Write timetrace() (time + one raw variable, at one point) to its
+        own standalone HDF5 file - e.g. so a collaborator can load just
+        that one signal (for their own model/analysis) without going
+        through SurfaceVariable or the full (possibly huge) pressure
+        file it was extracted from.
+
+        File layout
+        -----------
+        'time' : (n_frames,) - see timetrace()'s Returns for what this
+            is (physical seconds if dt/Metadata/mid_s is available, else
+            a bare frame index).
+        name (e.g. 'static_pressure') : (n_frames,)
+        Root group attributes: surface, r_m and xc (the ACTUAL point
+            used - see timetrace()/_nearest_point(), not necessarily
+            exactly span_pct/chord_pct), r_over_r_tip (only if r_tip was
+            set), span_pct_requested, chord_pct_requested.
+
+        savepath : str
+            Required - no default filename is built here. Bake
+            span_pct/chord_pct into it yourself (same convention this
+            project already uses for plot_timetrace()/plot_periodogram()
+            savepaths), so it's clear which point a given file came from.
+
+        Returns
+        -------
+        point_info : dict - see timetrace().
+        '''
+
+        if savepath is None:
+            raise ValueError(
+                "savepath is required - include span_pct/chord_pct in the filename yourself, same "
+                "convention as plot_timetrace()'s/plot_periodogram()'s caller."
+            )
+
+        t, values, point_info = self.timetrace(
+            name, span_pct, chord_pct, surface=surface, tol=tol, chord_percentile=chord_percentile,
+            reverse_chord=reverse_chord, span_min=span_min, span_max=span_max, dt=dt)
+
+        with h5py.File(savepath, 'w') as f:
+            f.create_dataset('time', data=t)
+            f.create_dataset(name, data=values)
+            f.attrs['surface'] = point_info['surface']
+            f.attrs['r_m'] = point_info['r']
+            if self.r_tip is not None:
+                f.attrs['r_over_r_tip'] = point_info['r'] / self.r_tip
+            f.attrs['xc'] = point_info['xc']
+            f.attrs['span_pct_requested'] = span_pct
+            f.attrs['chord_pct_requested'] = chord_pct
+
+        return point_info
+
     def periodogram(self, name: str, span_pct: float, chord_pct: float, surface: str = 'Upper',
                      fs: float = None, dt: float = None, n_chunk: int = 4, nperseg: int = None,
                      nfft: int = None, detrend='constant',
