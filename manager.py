@@ -306,14 +306,14 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 # #    savepath=os.path.join(master_path, 'images/cf/friction_lines_migration.png'),
 # #)
 
-# # Vortex-footprint critical points (node/saddle/focus - see README.md,
-# # "Vortex-footprint critical points"; 'focus' = actual vortex core, e.g.
-# # a leading-edge or corner/horseshoe vortex, not just an ordinary
-# # separation/reattachment feature). No reverse_chord - works in raw
-# # physical (span, chord) coordinates, not x/c:
-# #crit_points = fl.critical_points(surface='Upper', frame=None, span_min=span_min)
-# #fl.save_critical_points(crit_points, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/cf/critical_points.txt')
-# #print('Poincare index N+F-S =', fl.poincare_index(crit_points))  # see README.md - NOT expected to be 2 on this open, cropped selection
+# Vortex-footprint critical points (node/saddle/focus - see README.md,
+# "Vortex-footprint critical points"; 'focus' = actual vortex core, e.g.
+# a leading-edge or corner/horseshoe vortex, not just an ordinary
+# separation/reattachment feature). No reverse_chord - works in raw
+# physical (span, chord) coordinates, not x/c:
+#crit_points = fl.critical_points(surface='Upper', frame=None, span_min=span_min)
+#fl.save_critical_points(crit_points, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/cf/critical_points.txt')
+#print('Poincare index N+F-S =', fl.poincare_index(crit_points))  # see README.md - NOT expected to be 2 on this open, cropped selection
 
 # show_critical_points_index=True annotates the figure itself with N+F-S:
 print(40*'-')
@@ -399,16 +399,16 @@ fl.plot_cf_phase_portrait_by_strip(
 #    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
 # )
 
-print(40*'-')
-print('Opening SurfaceVariable file: ', os.path.join(master_path, avg_force_file))
-sv_forces = SurfaceVariable(
-   os.path.join(master_path, avg_force_file),
-   r_tip=r_tip,
-   rho_ref=rho_ref,
-   rpm=rpm,
-   pref=pref,
-   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
-)
+# print(40*'-')
+# print('Opening SurfaceVariable file: ', os.path.join(master_path, avg_force_file))
+# sv_forces = SurfaceVariable(
+#    os.path.join(master_path, avg_force_file),
+#    r_tip=r_tip,
+#    rho_ref=rho_ref,
+#    rpm=rpm,
+#    pref=pref,
+#    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
+# )
 
 # # Raw access to any stored variable - instantaneous, mean, or rms/raw_rms:
 #yplus_mean = sv.variable('y+', surface='Upper', frame=None, stat='mean')
@@ -420,66 +420,66 @@ sv_forces = SurfaceVariable(
 #cp_frame0 = sv.cp(surface='Upper', frame=0)
 #cp_rms = sv.cp(surface='Upper', frame=None, stat='rms')
 
-# ------------- Convergence checking on pressure (see README.md) ------------- #
+# # ------------- Convergence checking on pressure (see README.md) ------------- #
 
-# "Convergence checking on pressure") - needs an INSTANTANEOUS (multi-
-# frame) pressure file, never a PowerFLOW-pre-averaged one, same
-# requirement as everywhere else in this project:
-print(40*'-')
-print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_file))
-sv_pressure_inst = SurfaceVariable(
-  os.path.join(master_path, inst_pressure_file),
-  r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref,
-  span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
-)
+# # "Convergence checking on pressure") - needs an INSTANTANEOUS (multi-
+# # frame) pressure file, never a PowerFLOW-pre-averaged one, same
+# # requirement as everywhere else in this project:
+# print(40*'-')
+# print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_file))
+# sv_pressure_inst = SurfaceVariable(
+#   os.path.join(master_path, inst_pressure_file),
+#   r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref,
+#   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
+# )
 
-# Spatial mean pressure/Cp per frame - same reduction
-# plot_cf_phase_portrait() uses on cf_time_series() - every convergence.py
-# function takes this plain 1D per-frame series, exactly like thrust/torque:
-p_series = sv_pressure_inst.variable_time_series('static_pressure', surface='Upper').mean(axis=1)[:-2]  # drop corrupted last frame(s)
-cp_series = sv_pressure_inst.cp_time_series(surface='Upper').mean(axis=1)[:-2]
-
-print(40*'-')
-print('Plotting cumulative mean+variance of pressure')
-plot_cumulative_stats(
-  p_series, dt=dt, rpm=rpm, sync='none', ylabel='Pressure [Pa]',
-  savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cumulative_stats_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting integral timescale / required averaging time for pressure')
-plot_integral_timescale(
-  p_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-  savepath=os.path.join(master_path, f'images/cp/convergence/pressure_integral_timescale_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting cumulative mean of pressure vs revolutions included')
-plot_cumulative_mean(
-  p_series, dt=dt, rpm=rpm, ylabel='Pressure [Pa]',
-  savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cumulative_mean_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting cumulative skewness+flatness of pressure')
-plot_cumulative_moments(
-  p_series, dt=dt, rpm=rpm, sync='none', label='Pressure',
-  savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cumulative_moments_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting pressure autocorrelation, first half vs second half of the run')
-plot_autocorrelation_windows(
-  p_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
-  savepath=os.path.join(master_path, f'images/cp/convergence/pressure_autocorrelation_windows_{case}.png'),
-)
+# # Spatial mean pressure/Cp per frame - same reduction
+# # plot_cf_phase_portrait() uses on cf_time_series() - every convergence.py
+# # function takes this plain 1D per-frame series, exactly like thrust/torque:
+# p_series = sv_pressure_inst.variable_time_series('static_pressure', surface='Upper').mean(axis=1)[:-2]  # drop corrupted last frame(s)
+# cp_series = sv_pressure_inst.cp_time_series(surface='Upper').mean(axis=1)[:-2]
 
 # print(40*'-')
-# print('Plotting cycle-to-cycle correlation of pressure')
-# plot_cycle_correlation(
-#   p_series, dt=dt, rpm=rpm, period_deg=72,
-#   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cycle_correlation_{case}.png'),
+# print('Plotting cumulative mean+variance of pressure')
+# plot_cumulative_stats(
+#   p_series, dt=dt, rpm=rpm, sync='none', ylabel='Pressure [Pa]',
+#   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cumulative_stats_{case}.png'),
 # )
+
+# print(40*'-')
+# print('Plotting integral timescale / required averaging time for pressure')
+# plot_integral_timescale(
+#   p_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+#   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_integral_timescale_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting cumulative mean of pressure vs revolutions included')
+# plot_cumulative_mean(
+#   p_series, dt=dt, rpm=rpm, ylabel='Pressure [Pa]',
+#   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cumulative_mean_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting cumulative skewness+flatness of pressure')
+# plot_cumulative_moments(
+#   p_series, dt=dt, rpm=rpm, sync='none', label='Pressure',
+#   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cumulative_moments_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting pressure autocorrelation, first half vs second half of the run')
+# plot_autocorrelation_windows(
+#   p_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+#   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_autocorrelation_windows_{case}.png'),
+# )
+
+# # print(40*'-')
+# # print('Plotting cycle-to-cycle correlation of pressure')
+# # plot_cycle_correlation(
+# #   p_series, dt=dt, rpm=rpm, period_deg=72,
+# #   savepath=os.path.join(master_path, f'images/cp/convergence/pressure_cycle_correlation_{case}.png'),
+# # )
 
 
 # ------------- Radii cuts profiles for surface variables ------------- #
@@ -540,14 +540,14 @@ plot_autocorrelation_windows(
 #     savepath=os.path.join(master_path, f'images/cp/inst/cp_surface_upper_frame{frame:03d}_{case}.png'),
 #   )
 
-print(40*'-')
-print('Plotting Skin Friction surface scatter, average over all frames')
-sv_forces.plot_variable_surface(
-   lambda s: sv_forces.variable('Skin_Friction', surface=s, stat='mean'),
-   cbar_label='Skin Friction [Pa]', span_min=span_min, surface='Upper',
-   figsize=blade_figsize,
-   savepath=os.path.join(master_path, f'images/cf/avg/cf_surface_avg_upper_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Skin Friction surface scatter, average over all frames')
+# sv_forces.plot_variable_surface(
+#    lambda s: sv_forces.variable('Skin_Friction', surface=s, stat='mean'),
+#    cbar_label='Skin Friction [Pa]', span_min=span_min, surface='Upper',
+#    figsize=blade_figsize,
+#    savepath=os.path.join(master_path, f'images/cf/avg/cf_surface_avg_upper_{case}.png'),
+# )
 
 # # ------------- Leading-edge stagnation point ------------- #
 # #
@@ -602,11 +602,11 @@ sv_forces.plot_variable_surface(
 #comparator_sv.plot_cases(cbar_label='Cp', savepath=os.path.join(master_path, 'images/cp/cp_comparison.png'))
 #comparator_sv.plot_delta('2025', '2026', cbar_label='Cp delta', savepath=os.path.join(master_path, 'images/cp/cp_delta.png'))
 
-# ------------- Computation with instatenous files containing pressure ------------- #
+# # ------------- Computation with instatenous files containing pressure ------------- #
 # 
-# Pressure fluctuation p'(frame) = p(frame) - p_mean, one blade contour
-# per frame - needs a multi-frame file to show a real signal (a
-# single-frame file gives exactly 0 everywhere, since p(frame) == p_mean):
+# # Pressure fluctuation p'(frame) = p(frame) - p_mean, one blade contour
+# # per frame - needs a multi-frame file to show a real signal (a
+# # single-frame file gives exactly 0 everywhere, since p(frame) == p_mean):
 # for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
 #   print(40*'-')
 #   print('Plotting pressure fluctuation, instantaneous frame ', frame)
@@ -626,10 +626,10 @@ sv_forces.plot_variable_surface(
 #    savepath=os.path.join(master_path, f'images/pfluct/p_rms_surface_upper_{case}.png'),
 # )
 
-# Point time trace + Welch periodogram (wall pressure fluctuations at one
-# location, given as % of r/R and x/c - see README.md, "Point time trace").
-# Needs a real time axis: pass dt explicitly if this file has no usable
-# Metadata/mid_s (see README.md for when that's populated):
+# # Point time trace + Welch periodogram (wall pressure fluctuations at one
+# # location, given as % of r/R and x/c - see README.md, "Point time trace").
+# # Needs a real time axis: pass dt explicitly if this file has no usable
+# # Metadata/mid_s (see README.md for when that's populated):
 
 # span_pcts = np.arange(86, 101, 2)  # % of r/R
 # chord_pcts = np.arange(0, 101, 10)  # % of x/c
@@ -646,8 +646,7 @@ sv_forces.plot_variable_surface(
 #     print(40*'-')
 #     print(f'Plotting pressure periodogram at span {span}% and chord {chord}%')
 #     sv_pressure_inst.plot_periodogram(
-#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
-#       ylabel='PSD [Pa$^2$/Hz]', dt=dt,
+#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
 #       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_periodogram_s{span:03d}_c{chord:03d}_{case}.png'),
 #     )
 
@@ -660,31 +659,31 @@ sv_forces.plot_variable_surface(
 # else in this project). Check flip_axial/flip_tangential against what
 # you expect physically before trusting the sign.
 
-print(40*'-')
-print('Opening StripForces file: ', os.path.join(master_path, inst_force_file))
-# span_min=span_min at load time (see FrictionLines' fl = ... above for why) -
-# every compute()/total_loads() call below already passes span_min=span_min
-# anyway to isolate one blade, so this crops the force field actually
-# read off disk to the same subset, instead of loading the whole rotor.
-sf_avg = StripForces(
-   os.path.join(master_path, avg_force_file),
-   r_tip=r_tip,
-   span_min=span_min,
-   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
-   validate_axes=validate_axes,
-)
+# print(40*'-')
+# print('Opening StripForces file: ', os.path.join(master_path, inst_force_file))
+# # span_min=span_min at load time (see FrictionLines' fl = ... above for why) -
+# # every compute()/total_loads() call below already passes span_min=span_min
+# # anyway to isolate one blade, so this crops the force field actually
+# # read off disk to the same subset, instead of loading the whole rotor.
+# sf_avg = StripForces(
+#    os.path.join(master_path, avg_force_file),
+#    r_tip=r_tip,
+#    span_min=span_min,
+#    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
+#    validate_axes=validate_axes,
+# )
 
-print(40*'-')
-print('Computing strip forces')
-result = sf_avg.compute(span_min=span_min, n_span_bins=10)
-#sf_avg.save(result, os.path.join(master_path, 'data/forces/strip_forces.h5'), dt=dt)
+# print(40*'-')
+# print('Computing strip forces')
+# result = sf_avg.compute(span_min=span_min, n_span_bins=10)
+# #sf_avg.save(result, os.path.join(master_path, 'data/forces/strip_forces.h5'), dt=dt)
 
-print(40*'-')
-print('Plotting strip forces bar chart averageg over all frames')
-sf_avg.plot_bar_forces(
-   result, show_totals=False, rho=rho_ref, n_rot=rpm / 60, diameter=2 * r_tip,
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_forces_bar_avg_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting strip forces bar chart averageg over all frames')
+# sf_avg.plot_bar_forces(
+#    result, show_totals=False, rho=rho_ref, n_rot=rpm / 60, diameter=2 * r_tip,
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_forces_bar_avg_{case}.png'),
+# )
 
 # Chordwise-subdivided (non-compact-chord case - see README.md):
 #result_2d = sf.compute(span_min=span_min, n_span_bins=20, n_chord_bins=5)
@@ -694,21 +693,21 @@ sf_avg.plot_bar_forces(
 # strip binning - see README.md, "Integrated totals"). result['totals']
 # is guaranteed consistent with the span_min/span_max compute() above
 # used; total_loads() is the same thing as a standalone call:
-print(40*'-')
-print('thrust [N]:', result['totals']['thrust'].mean())
-print(40*'-')
-print('torque [N.m]:', result['totals']['torque'].mean())
-#totals = sf.total_loads(span_min=span_min)  # standalone, no strip binning needed
+# print(40*'-')
+# print('thrust [N]:', result['totals']['thrust'].mean())
+# print(40*'-')
+# print('torque [N.m]:', result['totals']['torque'].mean())
+# #totals = sf.total_loads(span_min=span_min)  # standalone, no strip binning needed
 
-# Thrust/torque coefficients (propeller convention, C_F = F/(rho*n_rot^2*D^4),
-# C_Q = Q/(rho*n_rot^2*D^5) - see README.md, "Thrust/torque coefficients").
-# n_rot is rev/s, NOT RPM:
-print(40*'-')
-print('Plotting strip forces bar chart averageg over all frames with non-dimensional coefficients')
-sf_avg.plot_bar_forces(
-   result, show_totals=False, rho=rho_ref, n_rot=rpm / 60, diameter=2 * r_tip,
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_forces_bar_coeffs_avg_{case}.png'),
-)
+# # Thrust/torque coefficients (propeller convention, C_F = F/(rho*n_rot^2*D^4),
+# # C_Q = Q/(rho*n_rot^2*D^5) - see README.md, "Thrust/torque coefficients").
+# # n_rot is rev/s, NOT RPM:
+# print(40*'-')
+# print('Plotting strip forces bar chart averageg over all frames with non-dimensional coefficients')
+# sf_avg.plot_bar_forces(
+#    result, show_totals=False, rho=rho_ref, n_rot=rpm / 60, diameter=2 * r_tip,
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_forces_bar_coeffs_avg_{case}.png'),
+# )
 
 # Physical radius instead of r/R on the x-axis:
 #sf.plot_bar_forces(
@@ -985,6 +984,13 @@ print('Plotting cumulative skewness+flatness of thrust')
 plot_cumulative_moments(
    totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', label='Thrust',
    savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_moments_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting cumulative skewness+flatness of torque')
+plot_cumulative_moments(
+   totals_inst['torque'], dt=dt, rpm=rpm, sync='none', label='Torque',
+   savepath=os.path.join(master_path, f'images/forces/convergence/torque_cumulative_moments_{case}.png'),
 )
 
 # Convergence checking: autocorrelation comparison between independent

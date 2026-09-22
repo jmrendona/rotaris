@@ -15,7 +15,7 @@ master_path: /scratch/jmrendon/Rotor-alone/6e-5_6000rpm_HF
 case: 2025HF
 
 files:
-  inst_force: RA-beam_forces_rotor.h5
+  inst_force: 2025HF_forces_rotor.h5
   avg_force: RA-beam-no-interaction_avg_forces_rotor.h5
   inst_pressure: 2025HF_pressure_rotor.h5
   avg_pressure: RA-beam_avg_pressure_rotor.h5
@@ -44,11 +44,6 @@ friction:
 convergence:
   dt: 0.000056
 
-# Figure size [width, height] in inches for every plot that draws the blade
-# geometry (friction lines + critical/separation/migration overlays, surface
-# scatter/contours). null = each method's own default (14 x 4.5 per surface,
-# made for a long thin blade). Use a squarer size when span and chord extents
-# are similar.
-blade_figsize: null
+blade_figsize: null # null for ISAWE2 case
 
 frame_loop_step: 15

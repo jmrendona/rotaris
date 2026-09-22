@@ -1176,7 +1176,8 @@ class SurfaceVariable:
                           fs: float = None, dt: float = None, n_chunk: int = 4, nperseg: int = None,
                           nfft: int = None, detrend='constant',
                           tol: float = 0.0015, chord_percentile: float = 0.1, reverse_chord: bool = False,
-                          span_min: float = None, span_max: float = None, ylabel: str = None, ax=None,
+                          span_min: float = None, span_max: float = None, db: bool = True,
+                          p_ref: float = 2e-5, ylabel: str = None, ax=None,
                           savepath: str = None, dpi: int = 600, **welch_kwargs):
 
         '''
@@ -1184,6 +1185,16 @@ class SurfaceVariable:
         decades) / linear y-axis in plain (non-scientific) notation -
         see periodogram()'s n_chunk/nperseg/nfft for the Welch
         segmentation used.
+
+        db : bool
+            Plot 10*log10(psd / p_ref**2) [dB/Hz], the standard
+            aeroacoustics convention, instead of the raw Pa^2/Hz PSD.
+            periodogram() itself is unaffected - always returns the raw
+            psd - this only changes what's plotted here.
+        p_ref : float
+            Reference pressure [Pa] for the dB conversion above, only
+            used if db=True. Default 2e-5 Pa (20 uPa), the standard
+            acoustic reference (p_ref**2 = 4e-10 Pa^2).
 
         Returns
         -------
@@ -1204,9 +1215,11 @@ class SurfaceVariable:
         # component anyway (that's what detrend='constant' already removes).
         start = 1 if freq[0] == 0 else 0
 
-        ax.semilogx(freq[start:], psd[start:], color='k', linewidth=1.2)
+        y = 10 * np.log10(psd[start:] / p_ref**2) if db else psd[start:]
+
+        ax.semilogx(freq[start:], y, color='k', linewidth=1.2)
         ax.set_xlabel('Frequency [Hz]')
-        ax.set_ylabel(ylabel or 'PSD')
+        ax.set_ylabel(ylabel or ('PSD [dB/Hz]' if db else 'PSD'))
         ax.ticklabel_format(style='plain', axis='y')
         ax.set_title(f"{point_info['surface']}, $r/R={point_info['r'] / self.r_tip:.3f}$, "
                      f"$x/c={point_info['xc']:.3f}$")
