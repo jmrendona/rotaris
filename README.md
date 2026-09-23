@@ -1709,6 +1709,41 @@ comparable magnitude (radial vs. tangential, both usually small - see
 `total_loads()`'s docstring) - `axial` (thrust) is typically much larger
 than either, so forcing `'equal'` there would squash the very structure
 you're trying to see; `'auto'` (default) scales each axis independently.
+`standardize=True` plots each axis as its own z-score
+(`(x - mean(x))/std(x)`) instead of raw physical units - fixes the same
+underlying issue as a mismatched `aspect` when the two components have
+very different absolute ranges (whichever has the smaller range gets
+visually inflated by independent axis auto-scaling), and makes
+`aspect='equal'` meaningful for ANY component pair, not just ones that
+already share a magnitude. `color_by='revolution'` (needs `dt`, `rpm`
+already comes from `__init__`) colors the trajectory by elapsed
+revolutions instead of raw frame index - purely a colorbar relabeling.
+
+`sync='revolution'` (or `'periodicity'`, same convention as
+`bladeprocessor/convergence.py`'s own `sync` parameter) reduces the
+trajectory to one point per revolution instead of every frame - a
+Poincaré section: with several hundred frames per revolution, a
+whole-record phase portrait can be dense enough that turbulent jitter
+obscures the drift of interest regardless of axis scaling. Sampling only
+once per revolution (marked with circles, since there are typically very
+few of them) removes that jitter, making cycle-to-cycle drift in the
+loop itself directly visible. This is a DIFFERENT question from
+`bladeprocessor/convergence.py`'s own use of `sync='revolution'` for
+`cumulative_mean()`/`cumulative_stats()`: there, the periodicity is
+treated as noise to average past so the running MEAN reads cleanly; here,
+the periodicity is the thing being examined, and the same sampling
+trick instead reveals how the periodic orbit itself evolves. The two are
+complementary, not redundant - a signal can show a fully converged
+cumulative mean while its Poincaré section still drifts (e.g. an orbit
+growing in amplitude around a fixed center, which no mean-based check
+can see), or vice versa (a settled orbit riding a still-decaying mean
+transient):
+
+```python
+sf.plot_phase_portrait(loads, component_pair=('axial', 'tangential'), standardize=True,
+                        sync='revolution', dt=0.000056,
+                        savepath='phase_portrait_poincare.png')
+```
 
 **Per strip** - same diagnostic, one small subplot per radial strip in a
 grid, so a LOCALIZED convergence issue (a strip that hasn't closed its
@@ -1746,8 +1781,11 @@ fl.plot_cf_phase_portrait(component_pair=(None, 'chordwise'), surface='Upper',
 
 `component_pair` takes any two of `None` (magnitude), `'chordwise'`,
 `'spanwise'` - the same component names `cf()` uses. Same frame-index
-coloring, same `aspect='auto'`/`'equal'` guidance, and the same per-strip
-grid variant for localizing WHERE on the blade Cf is still evolving:
+coloring, same `aspect='auto'`/`'equal'` guidance, same
+`standardize`/`color_by='revolution'`/`sync='revolution'` options (see
+`StripForces.plot_phase_portrait()` above for the full explanation of
+each), and the same per-strip grid variant for localizing WHERE on the
+blade Cf is still evolving:
 
 ```python
 fl.plot_cf_phase_portrait_by_strip(component_pair=('spanwise', 'chordwise'), surface='Upper',
@@ -1759,6 +1797,30 @@ Built on the new `cf_time_series()` (the full per-frame Cf array,
 unreduced - `cf(stat='rms'/'raw_rms')` is now implemented on top of this
 internally too, same numbers as before, just no longer duplicating the
 computation).
+
+### Convergence checking on Cf itself: `cumulative_stats()` / `cumulative_moments()` fed from `cf_time_series()`
+
+Near-wall/viscous quantities converge more slowly than integrated forces
+(see above), so it is worth running the SAME running-mean/variance and
+skewness/flatness checks already used for thrust/torque on Cf directly,
+not just on the phase portrait. `cf_time_series()`'s spatial mean per
+frame (same reduction `plot_cf_phase_portrait()` uses) is exactly the
+plain 1D series every `bladeprocessor/convergence.py` function expects -
+no additional span cropping needed beyond whatever `span_min`/`span_max`
+`FrictionLines` was already constructed with (see its own
+`__init__`'s docstring):
+
+```python
+from bladeprocessor.convergence import plot_cumulative_stats, plot_cumulative_moments
+
+cf_mag_series = fl.cf_time_series(surface='Upper', component=None).mean(axis=1)
+cf_chordwise_series = fl.cf_time_series(surface='Upper', component='chordwise').mean(axis=1)
+
+plot_cumulative_stats(cf_mag_series, dt=0.000056, rpm=6000, sync='none', ylabel='$C_f$ [-]',
+                       savepath='cf_mag_cumulative_stats.png')
+plot_cumulative_moments(cf_chordwise_series, dt=0.000056, rpm=6000, sync='none', label='$C_{f,chordwise}$',
+                         savepath='cf_chordwise_cumulative_moments.png')
+```
 
 ### Convergence checking: running/cumulative mean - `bladeprocessor/convergence.py`
 

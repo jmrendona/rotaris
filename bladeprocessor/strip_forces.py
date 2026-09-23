@@ -1098,11 +1098,26 @@ class StripForces:
 
         '''
         Rebuild an azimuth-domain curve from harmonics()'s magnitude +
-        phase - `sum_n magnitude_n * cos(n*phi - phase_n)` (the DC/mean
+        phase - `sum_n magnitude_n * cos(n*phi + phase_n)` (the DC/mean
         term isn't included, since harmonics() detrends it away by
         default - add the strip's own time-mean back separately if you
         want an absolute-level reconstruction, not just the fluctuating
         part).
+
+        BUG FIX (found while independently re-deriving these formulas for
+        external documentation): the sign in this formula was previously
+        `cos(n*phi - phase_n)`, inconsistent with `phase`'s own actual
+        convention (`numpy.angle` of the `rfft` coefficient, per
+        harmonics()) - confirmed wrong by direct numerical test: for a
+        pure `cos(phi - 50deg)` synthetic 1P signal, the OLD formula gave
+        a reconstruction differing from the original by up to 1.53 (on a
+        signal ranging over only 2), while `peak_azimuth()` (a SEPARATE,
+        independently-checked formula) correctly recovered the 50deg
+        peak - meaning `peak_azimuth()` and the old reconstruction
+        formula silently disagreed with each other. The `+` sign
+        reproduces the original test signal EXACTLY (0.0 max error).
+        Any prior reconstruct_from_harmonics() output should be treated
+        as unreliable and, if saved, recomputed.
 
         The main use: overlay this against phase_lock()'s own empirical
         folded curve (same azimuth axis) as a validation check - if a
@@ -1139,7 +1154,7 @@ class StripForces:
         mag = harmonics_result['magnitude'][None, :, :]            # (1, n_harmonics, n_span_bins)
         phase = harmonics_result['phase'][None, :, :]               # (1, n_harmonics, n_span_bins)
 
-        reconstructed = np.sum(mag * np.cos(n * phi - phase), axis=1)  # (n_az, n_span_bins)
+        reconstructed = np.sum(mag * np.cos(n * phi + phase), axis=1)  # (n_az, n_span_bins)
 
         return azimuth_deg, reconstructed
 
@@ -1252,6 +1267,8 @@ class StripForces:
 
     def plot_phase_portrait(self, loads: dict, component_pair=('axial', 'radial'), ax=None,
                              cmap: str = 'cividis', linewidth: float = 1.5, aspect='auto',
+                             standardize: bool = False, color_by: str = 'frame', dt: float = None,
+                             sync: str = 'none', period_deg: float = None,
                              savepath: str = None, dpi: int = 600):
 
         '''
@@ -1299,12 +1316,68 @@ class StripForces:
             this class; internally mapped to loads' own key names
             ('thrust', 'radial_force', 'tangential_force').
         aspect : 'auto' or 'equal'
-            'equal' only makes visual sense when both components share a
-            comparable magnitude (e.g. radial vs tangential, both
-            usually small - see total_loads()'s docstring) - axial
-            (thrust) is typically much larger than either, so 'equal'
-            there would squash the very structure you're trying to see.
-            'auto' (default) lets each axis scale independently.
+            'equal' only makes visual sense when both axes are in
+            comparable units - either both components share a comparable
+            magnitude already (e.g. radial vs tangential, both usually
+            small - see total_loads()'s docstring), or standardize=True
+            has put both on the same dimensionless scale (see below).
+            Axial (thrust) is typically much larger than radial/
+            tangential in raw units, so 'equal' on an UNstandardized pair
+            involving axial would squash the very structure you're
+            trying to see. 'auto' (default) lets each axis scale
+            independently.
+        standardize : bool
+            If True, each axis is plotted as its own z-score,
+            (x - mean(x)) / std(x), instead of raw physical units. Two
+            components with very different absolute ranges (e.g. axial
+            varying by ~0.01 N against radial varying by ~0.001 N) get
+            stretched to very different degrees by matplotlib's own
+            auto-scaling when plotted in raw units on the same square
+            axes - inflating whichever component has the SMALLER
+            absolute range into visual noise that isn't actually there
+            proportionally. Standardizing both axes to the same
+            (dimensionless) scale removes this artifact and makes
+            'equal' aspect geometrically meaningful for ANY component
+            pair, not just ones that already happen to share a
+            magnitude. Does not change whether the trajectory is
+            actually closed/converged - only how fairly that shape is
+            rendered.
+        color_by : 'frame' (default) or 'revolution'
+            'frame' colors by raw frame index, as before. 'revolution'
+            colors by elapsed revolutions (frame_index * dt * rpm / 60)
+            instead - more directly readable when checking "how many
+            REVOLUTIONS until this closed up", at the cost of needing dt
+            (rpm is already available from __init__). Purely a colorbar/
+            legend relabeling - the plotted trajectory itself is
+            identical either way.
+        dt : float, optional
+            Physical timestep [s] between frames - required if
+            color_by='revolution' and/or sync != 'none'.
+        sync : 'none' (default), 'revolution', or 'periodicity'
+            If not 'none', the trajectory is first reduced to one point
+            per revolution (or per period_deg-sized period), using the
+            SAME sampling convention as bladeprocessor.convergence's
+            cumulative_mean()/cumulative_stats() sync parameter - see
+            that module's _sync_indices() for the exact frame selection.
+            This is a DIFFERENT use of that same sampling trick, not the
+            same check again: cumulative_mean(sync='revolution') treats
+            the periodicity as noise to average past, so the MEAN reads
+            cleanly; here, the periodicity is the thing being examined,
+            and reducing to one point per cycle removes intra-revolution
+            jitter so the loop's own cycle-to-cycle drift becomes
+            visible, exactly a Poincare section (sample a periodic
+            system once per period; successive samples converging to a
+            fixed point indicates a periodic orbit, still-moving samples
+            indicate it hasn't settled - see Strogatz, "Nonlinear
+            Dynamics and Chaos", already cited above for the general
+            phase-portrait technique). This complements, rather than
+            replaces, the full-frame view above: it shares the same
+            underlying question (has the loop stopped drifting) but
+            cannot show the loop's SHAPE within one revolution the way
+            the full-frame trajectory does - use both. Points are marked
+            with circles (not just connected) since there are typically
+            very few of them. Needs dt (rpm is already available from
+            __init__); period_deg is only used for sync='periodicity'.
 
         Returns
         -------
@@ -1312,21 +1385,53 @@ class StripForces:
         '''
 
         from matplotlib.collections import LineCollection
+        from bladeprocessor.convergence import _sync_indices
 
         x = np.asarray(loads[self._TOTALS_KEY_MAP[component_pair[0]]])
         y = np.asarray(loads[self._TOTALS_KEY_MAP[component_pair[1]]])
         if len(x) < 2:
             raise ValueError(f"Need at least 2 frames for a phase portrait - got {len(x)}.")
 
+        if sync == 'none':
+            idx = np.arange(len(x))
+        else:
+            idx, _ = _sync_indices(len(x), dt=dt, rpm=self.rpm, sync=sync, period_deg=period_deg)
+            x, y = x[idx], y[idx]
+            if len(x) < 2:
+                raise ValueError(f"Only {len(x)} sample(s) left after sync='{sync}' - need at least 2.")
+
+        if standardize:
+            x = (x - x.mean()) / x.std()
+            y = (y - y.mean()) / y.std()
+
+        if color_by == 'frame':
+            point_colors = idx
+            cbar_label = 'Frame index'
+        elif color_by == 'revolution':
+            if dt is None or self.rpm is None:
+                raise ValueError(
+                    "color_by='revolution' needs both dt (this call) and rpm (set in __init__)."
+                )
+            point_colors = idx * dt * self.rpm / 60.0
+            cbar_label = 'Revolutions elapsed'
+        else:
+            raise ValueError(f"Unknown color_by='{color_by}' - use 'frame' or 'revolution'.")
+
         if ax is None:
             fig, ax = plt.subplots(figsize=(6, 6))
         else:
             fig = ax.figure
 
+        vmin, vmax = point_colors.min(), point_colors.max()
         points = np.column_stack([x, y]).reshape(-1, 1, 2)
         segments = np.concatenate([points[:-1], points[1:]], axis=1)
-        lc = LineCollection(segments, cmap=cmap, array=np.arange(len(x) - 1), linewidth=linewidth)
+        lc = LineCollection(segments, cmap=cmap, array=point_colors[:-1], linewidth=linewidth,
+                            norm=plt.Normalize(vmin=vmin, vmax=vmax))
         ax.add_collection(lc)
+
+        if sync != 'none':
+            ax.scatter(x, y, c=point_colors, cmap=cmap, vmin=vmin, vmax=vmax, s=60, zorder=5,
+                       edgecolor='k', linewidth=0.5)
 
         xpad = 0.05 * ((x.max() - x.min()) or 1.0)
         ypad = 0.05 * ((y.max() - y.min()) or 1.0)
@@ -1335,10 +1440,15 @@ class StripForces:
         ax.set_aspect(aspect)
 
         cbar = fig.colorbar(lc, ax=ax)
-        cbar.set_label('Frame index')
+        cbar.set_label(cbar_label)
 
-        ax.set_xlabel(self._COMPONENT_LABELS[component_pair[0]])
-        ax.set_ylabel(self._COMPONENT_LABELS[component_pair[1]])
+        xlabel = self._COMPONENT_LABELS[component_pair[0]]
+        ylabel = self._COMPONENT_LABELS[component_pair[1]]
+        if standardize:
+            xlabel = xlabel.split(' [')[0] + ' (standardized) [-]'
+            ylabel = ylabel.split(' [')[0] + ' (standardized) [-]'
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
         ax.grid(True, alpha=0.3)
         fig.tight_layout()
 
@@ -1349,6 +1459,8 @@ class StripForces:
 
     def plot_phase_portrait_by_strip(self, result: dict, component_pair=('axial', 'radial'), strips=None,
                                       n_cols: int = 4, cmap: str = 'cividis', aspect='auto',
+                                      standardize: bool = False, color_by: str = 'frame', dt: float = None,
+                                      sync: str = 'none', period_deg: float = None,
                                       savepath: str = None, dpi: int = 600):
 
         '''
@@ -1379,6 +1491,13 @@ class StripForces:
             representative subset if needed.
         n_cols : int
             Number of subplot columns - rows are added as needed.
+        standardize, color_by, dt : see plot_phase_portrait() - applied
+            identically to every strip's own subplot (each strip is
+            standardized against its OWN mean/std, not a blade-wide one,
+            so every panel is independently readable).
+        sync, period_deg : see plot_phase_portrait() - the same
+            revolution reduced to one point per revolution applies
+            identically to every strip's own subplot.
 
         Returns
         -------
@@ -1389,6 +1508,7 @@ class StripForces:
         '''
 
         from matplotlib.collections import LineCollection
+        from bladeprocessor.convergence import _sync_indices
 
         if result['chord'] is not None:
             raise ValueError(
@@ -1408,6 +1528,29 @@ class StripForces:
         if n_frames < 2:
             raise ValueError(f"Need at least 2 frames for a phase portrait - got {n_frames}.")
 
+        if sync == 'none':
+            idx = np.arange(n_frames)
+        else:
+            idx, _ = _sync_indices(n_frames, dt=dt, rpm=self.rpm, sync=sync, period_deg=period_deg)
+            x_all, y_all = x_all[idx], y_all[idx]
+            if len(idx) < 2:
+                raise ValueError(f"Only {len(idx)} sample(s) left after sync='{sync}' - need at least 2.")
+
+        if color_by == 'frame':
+            point_colors = idx
+            cbar_label = 'Frame index'
+        elif color_by == 'revolution':
+            if dt is None or self.rpm is None:
+                raise ValueError(
+                    "color_by='revolution' needs both dt (this call) and rpm (set in __init__)."
+                )
+            point_colors = idx * dt * self.rpm / 60.0
+            cbar_label = 'Revolutions elapsed'
+        else:
+            raise ValueError(f"Unknown color_by='{color_by}' - use 'frame' or 'revolution'.")
+
+        vmin, vmax = point_colors.min(), point_colors.max()
+
         n_cols = min(n_cols, len(sel))
         n_rows = int(np.ceil(len(sel) / n_cols))
 
@@ -1418,11 +1561,19 @@ class StripForces:
         for ax, i in zip(axes_flat, sel):
 
             x, y = x_all[:, i], y_all[:, i]
+            if standardize:
+                x = (x - x.mean()) / x.std()
+                y = (y - y.mean()) / y.std()
             points = np.column_stack([x, y]).reshape(-1, 1, 2)
             segments = np.concatenate([points[:-1], points[1:]], axis=1)
-            lc = LineCollection(segments, cmap=cmap, array=np.arange(n_frames - 1), linewidth=1.2)
+            lc = LineCollection(segments, cmap=cmap, array=point_colors[:-1], linewidth=1.2,
+                                norm=plt.Normalize(vmin=vmin, vmax=vmax))
             ax.add_collection(lc)
             last_lc = lc
+
+            if sync != 'none':
+                ax.scatter(x, y, c=point_colors, cmap=cmap, vmin=vmin, vmax=vmax, s=40, zorder=5,
+                           edgecolor='k', linewidth=0.5)
 
             xpad = 0.05 * ((x.max() - x.min()) or 1.0)
             ypad = 0.05 * ((y.max() - y.min()) or 1.0)
@@ -1438,12 +1589,17 @@ class StripForces:
         for ax in axes_flat[len(sel):]:
             ax.axis('off')
 
-        fig.supxlabel(self._COMPONENT_LABELS[component_pair[0]])
-        fig.supylabel(self._COMPONENT_LABELS[component_pair[1]])
+        xlabel = self._COMPONENT_LABELS[component_pair[0]]
+        ylabel = self._COMPONENT_LABELS[component_pair[1]]
+        if standardize:
+            xlabel = xlabel.split(' [')[0] + ' (standardized) [-]'
+            ylabel = ylabel.split(' [')[0] + ' (standardized) [-]'
+        fig.supxlabel(xlabel)
+        fig.supylabel(ylabel)
         fig.tight_layout()
 
         if last_lc is not None:
-            fig.colorbar(last_lc, ax=axes_flat[:len(sel)].tolist(), label='Frame index', shrink=0.6)
+            fig.colorbar(last_lc, ax=axes_flat[:len(sel)].tolist(), label=cbar_label, shrink=0.6)
 
         if savepath:
             fig.savefig(savepath, dpi=dpi)

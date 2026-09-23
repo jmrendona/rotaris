@@ -683,6 +683,8 @@ class FrictionLines:
     def plot_cf_phase_portrait(self, component_pair=(None, 'chordwise'), surface: str = 'Upper',
                                 span_min: float = None, span_max: float = None, ax=None,
                                 cmap: str = 'cividis', linewidth: float = 1.5, aspect='auto',
+                                standardize: bool = False, color_by: str = 'frame', dt: float = None,
+                                sync: str = 'none', period_deg: float = None,
                                 savepath: str = None, dpi: int = 600):
 
         '''
@@ -725,7 +727,21 @@ class FrictionLines:
             selection mixes both blades' Cf into one spatial mean).
         aspect : 'auto' or 'equal' - see StripForces.plot_phase_portrait()
             for when 'equal' does/doesn't make visual sense (comparable
-            magnitude components only).
+            magnitude components, or standardize=True below).
+        standardize, color_by, dt : see StripForces.plot_phase_portrait() -
+            identical meaning here: standardize plots each axis as its
+            own z-score instead of raw Cf units (fixes the same "very
+            different absolute ranges get stretched unevenly by
+            auto-scaling" artifact); color_by='revolution' needs dt
+            (rpm is already available from __init__).
+        sync, period_deg : see StripForces.plot_phase_portrait() - reduces
+            the trajectory to one point per revolution (a Poincare
+            section) instead of every frame, removing intra-revolution
+            jitter so cycle-to-cycle drift in the Cf loop itself becomes
+            visible - a different question from the full-frame view
+            above, not a replacement for it (see that method's docstring
+            for the full distinction from cumulative_stats()'s own,
+            unrelated use of the same sync convention).
 
         Returns
         -------
@@ -733,6 +749,7 @@ class FrictionLines:
         '''
 
         from matplotlib.collections import LineCollection
+        from bladeprocessor.convergence import _sync_indices
 
         span, _ = self._span_chord(surface)
         mask = np.ones(len(span), dtype=bool)
@@ -748,15 +765,46 @@ class FrictionLines:
         if len(x) < 2:
             raise ValueError(f"Need at least 2 frames for a phase portrait - got {len(x)}.")
 
+        if sync == 'none':
+            idx = np.arange(len(x))
+        else:
+            idx, _ = _sync_indices(len(x), dt=dt, rpm=self.rpm, sync=sync, period_deg=period_deg)
+            x, y = x[idx], y[idx]
+            if len(x) < 2:
+                raise ValueError(f"Only {len(x)} sample(s) left after sync='{sync}' - need at least 2.")
+
+        if standardize:
+            x = (x - x.mean()) / x.std()
+            y = (y - y.mean()) / y.std()
+
+        if color_by == 'frame':
+            point_colors = idx
+            cbar_label = 'Frame index'
+        elif color_by == 'revolution':
+            if dt is None or self.rpm is None:
+                raise ValueError(
+                    "color_by='revolution' needs both dt (this call) and rpm (set in __init__)."
+                )
+            point_colors = idx * dt * self.rpm / 60.0
+            cbar_label = 'Revolutions elapsed'
+        else:
+            raise ValueError(f"Unknown color_by='{color_by}' - use 'frame' or 'revolution'.")
+
         if ax is None:
             fig, ax = plt.subplots(figsize=(6, 6))
         else:
             fig = ax.figure
 
+        vmin, vmax = point_colors.min(), point_colors.max()
         points = np.column_stack([x, y]).reshape(-1, 1, 2)
         segments = np.concatenate([points[:-1], points[1:]], axis=1)
-        lc = LineCollection(segments, cmap=cmap, array=np.arange(len(x) - 1), linewidth=linewidth)
+        lc = LineCollection(segments, cmap=cmap, array=point_colors[:-1], linewidth=linewidth,
+                            norm=plt.Normalize(vmin=vmin, vmax=vmax))
         ax.add_collection(lc)
+
+        if sync != 'none':
+            ax.scatter(x, y, c=point_colors, cmap=cmap, vmin=vmin, vmax=vmax, s=60, zorder=5,
+                       edgecolor='k', linewidth=0.5)
 
         xpad = 0.05 * ((x.max() - x.min()) or 1.0)
         ypad = 0.05 * ((y.max() - y.min()) or 1.0)
@@ -765,10 +813,15 @@ class FrictionLines:
         ax.set_aspect(aspect)
 
         cbar = fig.colorbar(lc, ax=ax)
-        cbar.set_label('Frame index')
+        cbar.set_label(cbar_label)
 
-        ax.set_xlabel(self._CF_COMPONENT_LABELS[component_pair[0]])
-        ax.set_ylabel(self._CF_COMPONENT_LABELS[component_pair[1]])
+        xlabel = self._CF_COMPONENT_LABELS[component_pair[0]]
+        ylabel = self._CF_COMPONENT_LABELS[component_pair[1]]
+        if standardize:
+            xlabel = xlabel.split(' [')[0] + ' (standardized) [-]'
+            ylabel = ylabel.split(' [')[0] + ' (standardized) [-]'
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
         ax.grid(True, alpha=0.3)
         fig.tight_layout()
 
@@ -837,6 +890,8 @@ class FrictionLines:
                                          span_min: float = None, span_max: float = None,
                                          n_span_bins: int = 10, min_count: int = 10, strips=None,
                                          n_cols: int = 4, cmap: str = 'cividis', aspect='auto',
+                                         standardize: bool = False, color_by: str = 'frame', dt: float = None,
+                                         sync: str = 'none', period_deg: float = None,
                                          savepath: str = None, dpi: int = 600):
 
         '''
@@ -858,6 +913,11 @@ class FrictionLines:
             Which bin indices to plot - None (default) plots every
             non-empty bin.
         n_cols : number of subplot columns - rows are added as needed.
+        standardize, color_by, dt : see plot_cf_phase_portrait() - each
+            strip is standardized against its OWN mean/std (not a
+            blade-wide one), so every panel is independently readable.
+        sync, period_deg : see plot_cf_phase_portrait() - reduces to one
+            point per revolution, identically for every strip's subplot.
 
         Returns
         -------
@@ -865,6 +925,7 @@ class FrictionLines:
         '''
 
         from matplotlib.collections import LineCollection
+        from bladeprocessor.convergence import _sync_indices
 
         radius, series = self._cf_binned_time_series(
             component_pair, surface=surface, span_min=span_min, span_max=span_max,
@@ -881,6 +942,29 @@ class FrictionLines:
         if n_frames < 2:
             raise ValueError(f"Need at least 2 frames for a phase portrait - got {n_frames}.")
 
+        if sync == 'none':
+            idx = np.arange(n_frames)
+        else:
+            idx, _ = _sync_indices(n_frames, dt=dt, rpm=self.rpm, sync=sync, period_deg=period_deg)
+            x_all, y_all = x_all[idx], y_all[idx]
+            if len(idx) < 2:
+                raise ValueError(f"Only {len(idx)} sample(s) left after sync='{sync}' - need at least 2.")
+
+        if color_by == 'frame':
+            point_colors = idx
+            cbar_label = 'Frame index'
+        elif color_by == 'revolution':
+            if dt is None or self.rpm is None:
+                raise ValueError(
+                    "color_by='revolution' needs both dt (this call) and rpm (set in __init__)."
+                )
+            point_colors = idx * dt * self.rpm / 60.0
+            cbar_label = 'Revolutions elapsed'
+        else:
+            raise ValueError(f"Unknown color_by='{color_by}' - use 'frame' or 'revolution'.")
+
+        vmin, vmax = point_colors.min(), point_colors.max()
+
         n_cols = min(n_cols, len(sel))
         n_rows = int(np.ceil(len(sel) / n_cols))
 
@@ -891,11 +975,19 @@ class FrictionLines:
         for ax, i in zip(axes_flat, sel):
 
             x, y = x_all[:, i], y_all[:, i]
+            if standardize:
+                x = (x - x.mean()) / x.std()
+                y = (y - y.mean()) / y.std()
             points = np.column_stack([x, y]).reshape(-1, 1, 2)
             segments = np.concatenate([points[:-1], points[1:]], axis=1)
-            lc = LineCollection(segments, cmap=cmap, array=np.arange(n_frames - 1), linewidth=1.2)
+            lc = LineCollection(segments, cmap=cmap, array=point_colors[:-1], linewidth=1.2,
+                                norm=plt.Normalize(vmin=vmin, vmax=vmax))
             ax.add_collection(lc)
             last_lc = lc
+
+            if sync != 'none':
+                ax.scatter(x, y, c=point_colors, cmap=cmap, vmin=vmin, vmax=vmax, s=40, zorder=5,
+                           edgecolor='k', linewidth=0.5)
 
             xpad = 0.05 * ((x.max() - x.min()) or 1.0)
             ypad = 0.05 * ((y.max() - y.min()) or 1.0)
@@ -911,12 +1003,17 @@ class FrictionLines:
         for ax in axes_flat[len(sel):]:
             ax.axis('off')
 
-        fig.supxlabel(self._CF_COMPONENT_LABELS[component_pair[0]])
-        fig.supylabel(self._CF_COMPONENT_LABELS[component_pair[1]])
+        xlabel = self._CF_COMPONENT_LABELS[component_pair[0]]
+        ylabel = self._CF_COMPONENT_LABELS[component_pair[1]]
+        if standardize:
+            xlabel = xlabel.split(' [')[0] + ' (standardized) [-]'
+            ylabel = ylabel.split(' [')[0] + ' (standardized) [-]'
+        fig.supxlabel(xlabel)
+        fig.supylabel(ylabel)
         fig.tight_layout()
 
         if last_lc is not None:
-            fig.colorbar(last_lc, ax=axes_flat[:len(sel)].tolist(), label='Frame index', shrink=0.6)
+            fig.colorbar(last_lc, ax=axes_flat[:len(sel)].tolist(), label=cbar_label, shrink=0.6)
 
         if savepath:
             fig.savefig(savepath, dpi=dpi)

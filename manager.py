@@ -382,6 +382,62 @@ os.makedirs(os.path.join(master_path, 'data', 'pfluct'), exist_ok=True)
 #    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_spanwise_chordwise_by_strip_{case}.png'),
 # )
 
+# # Convergence checking: cumulative mean+variance and higher-order
+# # moments (skewness/flatness) of Cf ITSELF - the same tools already
+# # used for thrust/torque above (see "Convergence checking" further
+# # down), fed with Cf's own spatial-mean-per-frame series instead. Near-
+# # wall/viscous quantities are known to converge MORE SLOWLY than
+# # integrated forces (see the Cf phase-portrait note above), so this is
+# # worth checking even once thrust/torque already look converged. No
+# # extra span cropping needed here - fl was already constructed with
+# # span_min=span_min, so cf_time_series() only ever covers the one
+# # blade half fl was built with; just reduce it to one scalar per frame:
+# cf_mag_series = fl.cf_time_series(surface='Upper', component=None).mean(axis=1)
+# cf_chordwise_series = fl.cf_time_series(surface='Upper', component='chordwise').mean(axis=1)
+# cf_spanwise_series = fl.cf_time_series(surface='Upper', component='spanwise').mean(axis=1)
+
+# print(40*'-')
+# print('Plotting cumulative mean+variance of Cf magnitude')
+# plot_cumulative_stats(
+#    cf_mag_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
+#    savepath=os.path.join(master_path, f'images/cf/cf_mag_cumulative_stats_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting cumulative mean+variance of chordwise Cf')
+# plot_cumulative_stats(
+#    cf_chordwise_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_{f,chordwise}$ [-]',
+#    savepath=os.path.join(master_path, f'images/cf/cf_chordwise_cumulative_stats_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting cumulative mean+variance of spanwise Cf')
+# plot_cumulative_stats(
+#    cf_spanwise_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_{f,spanwise}$ [-]',
+#    savepath=os.path.join(master_path, f'images/cf/cf_spanwise_cumulative_stats_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting cumulative skewness+flatness of Cf magnitude')
+# plot_cumulative_moments(
+#    cf_mag_series, dt=dt, rpm=rpm, sync='none', label='$C_f$',
+#    savepath=os.path.join(master_path, f'images/cf/cf_mag_cumulative_moments_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting cumulative skewness+flatness of chordwise Cf')
+# plot_cumulative_moments(
+#    cf_chordwise_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,chordwise}$',
+#    savepath=os.path.join(master_path, f'images/cf/cf_chordwise_cumulative_moments_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting cumulative skewness+flatness of spanwise Cf')
+# plot_cumulative_moments(
+#    cf_spanwise_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,spanwise}$',
+#    savepath=os.path.join(master_path, f'images/cf/cf_spanwise_cumulative_moments_{case}.png'),
+# )
+
 # ------------- Any surface variable at radii (Cp, y+, RMS, ...) ------------- #
 #
 # Input: a convert_snc_to_h5(..., surface_split=True) file - the pressure
