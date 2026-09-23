@@ -132,164 +132,164 @@ for _sub in ('cf/avg', 'cf/inst', 'cp/avg', 'cp/inst', 'cp/rms', 'cp/convergence
 os.makedirs(os.path.join(master_path, 'data', 'pfluct'), exist_ok=True)
 
 
-# ------------- Friction related post-processing ------------- #
-print(40*'-')
-print('Opening FrictionLines file: ', os.path.join(master_path, inst_force_file))
-# span_min=span_min here (not just on every call below) - for a whole-rotor
-# case with no separate blade parts to select via face_name at
-# conversion time, every single call below already passes span_min=span_min
-# anyway (to isolate one blade - see the note further down), so cropping
-# at load time means the (potentially huge) force field is only ever
-# read for the surviving ~half of the points, not the whole rotor - see
-# FrictionLines.__init__'s span_min/span_max docstring. Fixed a real OOM
-# on a ~660 GB case this way.
-fl = FrictionLines(
-   os.path.join(master_path, inst_force_file),
-   r_tip=r_tip,
-   rho_ref=rho_ref,
-   rpm=rpm,
-   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
-   span_min=span_min, validate_axes=validate_axes
-)
+# # ------------- Friction related post-processing ------------- #
+# print(40*'-')
+# print('Opening FrictionLines file: ', os.path.join(master_path, inst_force_file))
+# # span_min=span_min here (not just on every call below) - for a whole-rotor
+# # case with no separate blade parts to select via face_name at
+# # conversion time, every single call below already passes span_min=span_min
+# # anyway (to isolate one blade - see the note further down), so cropping
+# # at load time means the (potentially huge) force field is only ever
+# # read for the surviving ~half of the points, not the whole rotor - see
+# # FrictionLines.__init__'s span_min/span_max docstring. Fixed a real OOM
+# # on a ~660 GB case this way.
+# fl = FrictionLines(
+#    os.path.join(master_path, inst_force_file),
+#    r_tip=r_tip,
+#    rho_ref=rho_ref,
+#    rpm=rpm,
+#    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
+#    span_min=span_min, validate_axes=validate_axes
+# )
 
-# # Dimensional wall shear vector (tau = F - (F.n)n), no rho_ref/rpm needed:
-# tau = fl.wall_shear(surface='Upper', frame=None)  # frame=None -> average over every frame in the file
+# # # Dimensional wall shear vector (tau = F - (F.n)n), no rho_ref/rpm needed:
+# # tau = fl.wall_shear(surface='Upper', frame=None)  # frame=None -> average over every frame in the file
 
-# Cf magnitude and signed chordwise/spanwise components, one frame or the average:
-cf_mag = fl.cf(surface='Upper', frame=None, component=None)
-print(40*'-')
-print('Average Cf magnitude: ', np.mean(cf_mag))
-# cf_chordwise_frame0 = fl.cf(surface='Upper', frame=0, component='chordwise')
+# # Cf magnitude and signed chordwise/spanwise components, one frame or the average:
+# cf_mag = fl.cf(surface='Upper', frame=None, component=None)
+# print(40*'-')
+# print('Average Cf magnitude: ', np.mean(cf_mag))
+# # cf_chordwise_frame0 = fl.cf(surface='Upper', frame=0, component='chordwise')
 
-for frame in range(0,fl.n_frames,frame_loop_step):
-	cf_mag = fl.cf(surface='Upper', frame=frame, component=None)
-	print(40*'-')
-	print(f'Cf magnitude: {np.mean(cf_mag)} at frame {frame:03d}')
+# for frame in range(0,fl.n_frames,frame_loop_step):
+# 	cf_mag = fl.cf(surface='Upper', frame=frame, component=None)
+# 	print(40*'-')
+# 	print(f'Cf magnitude: {np.mean(cf_mag)} at frame {frame:03d}')
 
-# Cf vs local x/c at several radii, one plot per call - instantaneous and
-# average. span_min isolates one blade (REQUIRED in practice - without it,
-# a radius band mixes both blades' chord ranges and produces a spurious
-# double peak, see README.md); reverse_chord fixes which end is the
-# leading vs. trailing edge (no automatic detection - check per case, Cf
-# should peak sharply near x/c=0 and decay toward x/c=1; if it's flipped,
-# set reverse_chord=reverse_chord - see README.md's "Two bugs found and fixed"):
+# # Cf vs local x/c at several radii, one plot per call - instantaneous and
+# # average. span_min isolates one blade (REQUIRED in practice - without it,
+# # a radius band mixes both blades' chord ranges and produces a spurious
+# # double peak, see README.md); reverse_chord fixes which end is the
+# # leading vs. trailing edge (no automatic detection - check per case, Cf
+# # should peak sharply near x/c=0 and decay toward x/c=1; if it's flipped,
+# # set reverse_chord=reverse_chord - see README.md's "Two bugs found and fixed"):
 
-print(40*'-')
-print('Plotting Cf vs x/c at several radii, Upper surface, average over all frames')
-print(40*'-')
-print('Plotting Cf vs x/c magnitude')
-fl.plot_cf_radii(
-   radii=radii,#[0.045, 0.072, 0.100, 0.117, 0.122],
-   frame=None, component=None, span_min=span_min, reverse_chord=reverse_chord,
-   savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_mag_avg_{case}.png'),
-)
-print(40*'-')
-print('Plotting Cf vs x/c chordwise component')
-fl.plot_cf_radii(
-   radii=radii,
-   frame=None, component='chordwise', span_min=span_min, reverse_chord=reverse_chord,
-   savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_chordwise_avg_{case}.png'),
-)
-print(40*'-')
-print('Plotting Cf vs x/c spanwise component')
-fl.plot_cf_radii(
-   radii=radii,
-   frame=None, component='spanwise', span_min=span_min, reverse_chord=reverse_chord,
-   savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_spanwise_avg_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf vs x/c at several radii, Upper surface, average over all frames')
+# print(40*'-')
+# print('Plotting Cf vs x/c magnitude')
+# fl.plot_cf_radii(
+#    radii=radii,#[0.045, 0.072, 0.100, 0.117, 0.122],
+#    frame=None, component=None, span_min=span_min, reverse_chord=reverse_chord,
+#    savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_mag_avg_{case}.png'),
+# )
+# print(40*'-')
+# print('Plotting Cf vs x/c chordwise component')
+# fl.plot_cf_radii(
+#    radii=radii,
+#    frame=None, component='chordwise', span_min=span_min, reverse_chord=reverse_chord,
+#    savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_chordwise_avg_{case}.png'),
+# )
+# print(40*'-')
+# print('Plotting Cf vs x/c spanwise component')
+# fl.plot_cf_radii(
+#    radii=radii,
+#    frame=None, component='spanwise', span_min=span_min, reverse_chord=reverse_chord,
+#    savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_spanwise_avg_{case}.png'),
+# )
 
-for frame in range(0,fl.n_frames,frame_loop_step):
-	print(40*'-')
-	print(f'Plotting Cf vs x/c at several radii, Upper surface, average for frame {frame:03d}')
-	print(40*'-')
-	print('Plotting Cf vs x/c magnitude')
-	fl.plot_cf_radii(
-	radii=radii,
-	frame=frame, component=None, span_min=span_min, reverse_chord=reverse_chord,
-	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_mag_frame{frame:03d}_{case}.png'),
-	)
-	print(40*'-')
-	print('Plotting Cf vs x/c chordwise component')
-	fl.plot_cf_radii(
-	radii=radii,
-	frame=frame, component='chordwise', span_min=span_min, reverse_chord=reverse_chord,
-	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_chordwise_frame{frame:03d}_{case}.png'),
-	)
-	print(40*'-')
-	print('Plotting Cf vs x/c spanwise component')
-	fl.plot_cf_radii(
-	radii=radii,
-	frame=frame, component='spanwise', span_min=span_min, reverse_chord=reverse_chord,
-	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_spanwise_frame{frame:03d}_{case}.png'),
-	)
+# for frame in range(0,fl.n_frames,frame_loop_step):
+# 	print(40*'-')
+# 	print(f'Plotting Cf vs x/c at several radii, Upper surface, average for frame {frame:03d}')
+# 	print(40*'-')
+# 	print('Plotting Cf vs x/c magnitude')
+# 	fl.plot_cf_radii(
+# 	radii=radii,
+# 	frame=frame, component=None, span_min=span_min, reverse_chord=reverse_chord,
+# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_mag_frame{frame:03d}_{case}.png'),
+# 	)
+# 	print(40*'-')
+# 	print('Plotting Cf vs x/c chordwise component')
+# 	fl.plot_cf_radii(
+# 	radii=radii,
+# 	frame=frame, component='chordwise', span_min=span_min, reverse_chord=reverse_chord,
+# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_chordwise_frame{frame:03d}_{case}.png'),
+# 	)
+# 	print(40*'-')
+# 	print('Plotting Cf vs x/c spanwise component')
+# 	fl.plot_cf_radii(
+# 	radii=radii,
+# 	frame=frame, component='spanwise', span_min=span_min, reverse_chord=reverse_chord,
+# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_spanwise_frame{frame:03d}_{case}.png'),
+# 	)
 
-# Cf unsteadiness (RMS fluctuation about the mean - see README.md, "Cf
-# unsteadiness"): flags transition/wandering separation lines/moving
-# vortex cores that the mean Cf field alone can miss.
-print(40*'-')
-print('Plotting Cf RMS vs x/c at several radii, Upper surface, average over all frames')
-print(40*'-')
-print('Plotting Cf RMS vs x/c magnitude')
-fl.plot_cf_radii(
-   radii=radii,
-   surface='Upper', frame=None, stat='rms', span_min=span_min, reverse_chord=reverse_chord,
-   savepath=os.path.join(master_path, f'images/cf/cf_rms_radii_avg_{case}.png'),
-)
-print(40*'-')
-print('Plotting Cf RMS vs x/c color map')
-fl.friction_lines(
-   surface='Upper', frame=None, stat='rms', span_min=span_min,
-   figsize=blade_figsize,
-   savepath=os.path.join(master_path, f'images/cf/cf_rms_map_{case}.png'),
-)
+# # Cf unsteadiness (RMS fluctuation about the mean - see README.md, "Cf
+# # unsteadiness"): flags transition/wandering separation lines/moving
+# # vortex cores that the mean Cf field alone can miss.
+# print(40*'-')
+# print('Plotting Cf RMS vs x/c at several radii, Upper surface, average over all frames')
+# print(40*'-')
+# print('Plotting Cf RMS vs x/c magnitude')
+# fl.plot_cf_radii(
+#    radii=radii,
+#    surface='Upper', frame=None, stat='rms', span_min=span_min, reverse_chord=reverse_chord,
+#    savepath=os.path.join(master_path, f'images/cf/cf_rms_radii_avg_{case}.png'),
+# )
+# print(40*'-')
+# print('Plotting Cf RMS vs x/c color map')
+# fl.friction_lines(
+#    surface='Upper', frame=None, stat='rms', span_min=span_min,
+#    figsize=blade_figsize,
+#    savepath=os.path.join(master_path, f'images/cf/cf_rms_map_{case}.png'),
+# )
 
-# Friction lines (Upper+Lower stacked by default) - span_min isolates one
-# blade half on a two-bladed rotor centered at span=0 (see the method's
-# docstring - there's no reliable automatic hub cutoff, pass what's right
-# for this case's mesh):
-print(40*'-')
-print('Plotting Friction Lines, Upper surface, average over all frames')
-fl.friction_lines(
-   frame=None, span_min=span_min, surface='Upper',
-   figsize=blade_figsize,
-   savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_avg_{case}.png'),
-)
+# # Friction lines (Upper+Lower stacked by default) - span_min isolates one
+# # blade half on a two-bladed rotor centered at span=0 (see the method's
+# # docstring - there's no reliable automatic hub cutoff, pass what's right
+# # for this case's mesh):
+# print(40*'-')
+# print('Plotting Friction Lines, Upper surface, average over all frames')
+# fl.friction_lines(
+#    frame=None, span_min=span_min, surface='Upper',
+#    figsize=blade_figsize,
+#    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_avg_{case}.png'),
+# )
 
-for frame in range(0,fl.n_frames,frame_loop_step):
-	print(40*'-')
-	print(f'Plotting Friction Lines, Upper surface, for frame {frame:03d}')
-	fl.friction_lines(
-	   frame=frame, span_min=span_min, surface='Upper',
-	   figsize=blade_figsize,
-	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_frame{frame:03d}_{case}.png'),
-	)
+# for frame in range(0,fl.n_frames,frame_loop_step):
+# 	print(40*'-')
+# 	print(f'Plotting Friction Lines, Upper surface, for frame {frame:03d}')
+# 	fl.friction_lines(
+# 	   frame=frame, span_min=span_min, surface='Upper',
+# 	   figsize=blade_figsize,
+# 	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_frame{frame:03d}_{case}.png'),
+# 	)
 
-# Separation/reattachment line (chordwise-Cf sign crossings) - restricted
-# to one blade section via span_min/span_max like everything else here;
-# reverse_chord must match what plot_cf_radii()/cf_at_radii() needed on
-# this case (see README.md, "Separation/reattachment line"):
-#sep_points = fl.separation_line(surface='Upper', frame=None, span_min=span_min, reverse_chord=reverse_chord)
-#fl.save_separation_line(sep_points, os.path.join(master_path, 'data/cf/separation_line.txt'))
+# # Separation/reattachment line (chordwise-Cf sign crossings) - restricted
+# # to one blade section via span_min/span_max like everything else here;
+# # reverse_chord must match what plot_cf_radii()/cf_at_radii() needed on
+# # this case (see README.md, "Separation/reattachment line"):
+# #sep_points = fl.separation_line(surface='Upper', frame=None, span_min=span_min, reverse_chord=reverse_chord)
+# #fl.save_separation_line(sep_points, os.path.join(master_path, 'data/cf/separation_line.txt'))
 
-# Overlaid directly on friction_lines() (separation in red, reattachment in cyan):
-print(40*'-')
-print('Plotting Friction Lines with separation/reattachment line, Upper surface, average over all frames')
-fl.friction_lines(
-   surface='Upper', frame=None, span_min=span_min, show_separation_line=True,
-   separation_line_kwargs={'reverse_chord': reverse_chord},
-   figsize=blade_figsize,
-   savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_separation_{case}.png'),
-)
+# # Overlaid directly on friction_lines() (separation in red, reattachment in cyan):
+# print(40*'-')
+# print('Plotting Friction Lines with separation/reattachment line, Upper surface, average over all frames')
+# fl.friction_lines(
+#    surface='Upper', frame=None, span_min=span_min, show_separation_line=True,
+#    separation_line_kwargs={'reverse_chord': reverse_chord},
+#    figsize=blade_figsize,
+#    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_separation_{case}.png'),
+# )
 
-for frame in range(0,fl.n_frames,frame_loop_step):
-	print(40*'-')
-	print(f'Plotting Friction Lines with separation/reattachment line, Upper surface, for frame {frame:03d}')
-	fl.friction_lines(
-	   surface='Upper', frame=frame, span_min=span_min, show_separation_line=True,
-	   separation_line_kwargs={'reverse_chord': reverse_chord},
-	   figsize=blade_figsize,
-	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_separation_frame{frame:03d}_{case}.png'),
-	)
+# for frame in range(0,fl.n_frames,frame_loop_step):
+# 	print(40*'-')
+# 	print(f'Plotting Friction Lines with separation/reattachment line, Upper surface, for frame {frame:03d}')
+# 	fl.friction_lines(
+# 	   surface='Upper', frame=frame, span_min=span_min, show_separation_line=True,
+# 	   separation_line_kwargs={'reverse_chord': reverse_chord},
+# 	   figsize=blade_figsize,
+# 	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_separation_frame{frame:03d}_{case}.png'),
+# 	)
 
 # # Spanwise migration-reversal line (spanwise-Cf sign crossings - a
 # # DIFFERENT physical phenomenon from separation/reattachment above, see
@@ -318,69 +318,69 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 #print('Poincare index N+F-S =', fl.poincare_index(crit_points))  # see README.md - NOT expected to be 2 on this open, cropped selection
 
 # show_critical_points_index=True annotates the figure itself with N+F-S:
-print(40*'-')
-print('Plotting Friction Lines with critical points, Upper surface, average over all frames')
-fl.friction_lines(
-   surface='Upper', frame=None, span_min=span_min, show_critical_points=True, show_critical_points_index=False,
-   figsize=blade_figsize,
-   savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_critical_points_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Friction Lines with critical points, Upper surface, average over all frames')
+# fl.friction_lines(
+#    surface='Upper', frame=None, span_min=span_min, show_critical_points=True, show_critical_points_index=False,
+#    figsize=blade_figsize,
+#    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_critical_points_{case}.png'),
+# )
 
-for frame in range(0,fl.n_frames,frame_loop_step):
-	print(40*'-')
-	print(f'Plotting Friction Lines with critical points, Upper surface, for frame {frame:03d}')
-	fl.friction_lines(
-	surface='Upper', frame=frame, span_min=span_min, show_critical_points=True, show_critical_points_index=False,
-	figsize=blade_figsize,
-	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_critical_points_frame{frame:03d}_{case}.png'),
-	)
+# for frame in range(0,fl.n_frames,frame_loop_step):
+# 	print(40*'-')
+# 	print(f'Plotting Friction Lines with critical points, Upper surface, for frame {frame:03d}')
+# 	fl.friction_lines(
+# 	surface='Upper', frame=frame, span_min=span_min, show_critical_points=True, show_critical_points_index=False,
+# 	figsize=blade_figsize,
+# 	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_critical_points_frame{frame:03d}_{case}.png'),
+# 	)
 
-# Convergence checking: Cf phase portrait (see README.md, "Convergence
-# checking: wall-shear/Cf phase portraits") - near-wall/viscous
-# quantities converge MORE SLOWLY than integrated forces, so this needs
-# checking separately from StripForces' phase portraits even if those
-# already look converged:
-print(40*'-')
-print('Plotting Cf phase portrait (magnitude vs chordwise), Upper surface')
-fl.plot_cf_phase_portrait(
-   component_pair=(None, 'chordwise'), surface='Upper', span_min=span_min,
-   savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_mag_chordwise_{case}.png'),
-)
+# # Convergence checking: Cf phase portrait (see README.md, "Convergence
+# # checking: wall-shear/Cf phase portraits") - near-wall/viscous
+# # quantities converge MORE SLOWLY than integrated forces, so this needs
+# # checking separately from StripForces' phase portraits even if those
+# # already look converged:
+# print(40*'-')
+# print('Plotting Cf phase portrait (magnitude vs chordwise), Upper surface')
+# fl.plot_cf_phase_portrait(
+#    component_pair=(None, 'chordwise'), surface='Upper', span_min=span_min,
+#    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_mag_chordwise_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting Cf phase portrait (magnitude vs spanwise), Upper surface')
-fl.plot_cf_phase_portrait(
-   component_pair=(None, 'spanwise'), surface='Upper', span_min=span_min,
-   savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_mag_spanwise_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf phase portrait (magnitude vs spanwise), Upper surface')
+# fl.plot_cf_phase_portrait(
+#    component_pair=(None, 'spanwise'), surface='Upper', span_min=span_min,
+#    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_mag_spanwise_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting Cf phase portrait (magnitude vs spanwise), Upper surface')
-fl.plot_cf_phase_portrait(
-   component_pair=('spanwise', 'chordwise'), surface='Upper', span_min=span_min,
-   savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_spanwise_chordwise_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf phase portrait (magnitude vs spanwise), Upper surface')
+# fl.plot_cf_phase_portrait(
+#    component_pair=('spanwise', 'chordwise'), surface='Upper', span_min=span_min,
+#    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_spanwise_chordwise_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
-fl.plot_cf_phase_portrait_by_strip(
-   component_pair=(None, 'chordwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_mag_chordwise_by_strip_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
+# fl.plot_cf_phase_portrait_by_strip(
+#    component_pair=(None, 'chordwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_mag_chordwise_by_strip_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
-fl.plot_cf_phase_portrait_by_strip(
-   component_pair=(None, 'spanwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_mag_spanwise_by_strip_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
+# fl.plot_cf_phase_portrait_by_strip(
+#    component_pair=(None, 'spanwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_mag_spanwise_by_strip_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
-fl.plot_cf_phase_portrait_by_strip(
-   component_pair=('spanwise', 'chordwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_spanwise_chordwise_by_strip_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
+# fl.plot_cf_phase_portrait_by_strip(
+#    component_pair=('spanwise', 'chordwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_spanwise_chordwise_by_strip_{case}.png'),
+# )
 
 # ------------- Any surface variable at radii (Cp, y+, RMS, ...) ------------- #
 #
@@ -422,18 +422,18 @@ fl.plot_cf_phase_portrait_by_strip(
 #cp_frame0 = sv.cp(surface='Upper', frame=0)
 #cp_rms = sv.cp(surface='Upper', frame=None, stat='rms')
 
-# # ------------- Convergence checking on pressure (see README.md) ------------- #
+# ------------- Convergence checking on pressure (see README.md) ------------- #
 
-# # "Convergence checking on pressure") - needs an INSTANTANEOUS (multi-
-# # frame) pressure file, never a PowerFLOW-pre-averaged one, same
-# # requirement as everywhere else in this project:
-print(40*'-')
-print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_file))
-sv_pressure_inst = SurfaceVariable(
-  os.path.join(master_path, inst_pressure_file),
-  r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref,
-  span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
-)
+# "Convergence checking on pressure") - needs an INSTANTANEOUS (multi-
+# frame) pressure file, never a PowerFLOW-pre-averaged one, same
+# requirement as everywhere else in this project:
+# print(40*'-')
+# print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_file))
+# sv_pressure_inst = SurfaceVariable(
+#   os.path.join(master_path, inst_pressure_file),
+#   r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref,
+#   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
+# )
 
 # # Spatial mean pressure/Cp per frame - same reduction
 # # plot_cf_phase_portrait() uses on cf_time_series() - every convergence.py
@@ -633,39 +633,39 @@ sv_pressure_inst = SurfaceVariable(
 # Needs a real time axis: pass dt explicitly if this file has no usable
 # Metadata/mid_s (see README.md for when that's populated):
 
-span_pcts = np.arange(86, 101, 2)  # % of r/R
-chord_pcts = np.arange(0, 101, 10)  # % of x/c
+# span_pcts = np.arange(86, 101, 2)  # % of r/R
+# chord_pcts = np.arange(0, 101, 10)  # % of x/c
 
-for span in span_pcts:
-  for chord in chord_pcts:
-    print(40*'-')
-    print(f'Plotting pressure time trace at span {span}% and chord {chord}%')
-    sv_pressure_inst.plot_timetrace(
-      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
-      ylabel='Static pressure [Pa]', dt=dt,
-      savepath=os.path.join(master_path, f'images/pfluct/spectra/p_timetrace_s{span:03d}_c{chord:03d}_{case}.png'),
-    )
-    print(40*'-')
-    print(f'Plotting pressure periodogram at span {span}% and chord {chord}%')
-    sv_pressure_inst.plot_periodogram(
-      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
-      savepath=os.path.join(master_path, f'images/pfluct/spectra/p_periodogram_s{span:03d}_c{chord:03d}_{case}.png'),
-    )
-    print(40*'-')
-    print(f'Exporting pressure time trace at span {span}% and chord {chord}%')
-    sv_pressure_inst.export_timetrace(
-      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
-      savepath=os.path.join(master_path, f'data/pfluct/p_timetrace_s{span:03d}_c{chord:03d}_{case}.h5'),
-    )
+# for span in span_pcts:
+#   for chord in chord_pcts:
+#     print(40*'-')
+#     print(f'Plotting pressure time trace at span {span}% and chord {chord}%')
+#     sv_pressure_inst.plot_timetrace(
+#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
+#       ylabel='Static pressure [Pa]', dt=dt,
+#       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_timetrace_s{span:03d}_c{chord:03d}_{case}.png'),
+#     )
+#     print(40*'-')
+#     print(f'Plotting pressure periodogram at span {span}% and chord {chord}%')
+#     sv_pressure_inst.plot_periodogram(
+#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
+#       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_periodogram_s{span:03d}_c{chord:03d}_{case}.png'),
+#     )
+#     print(40*'-')
+#     print(f'Exporting pressure time trace at span {span}% and chord {chord}%')
+#     sv_pressure_inst.export_timetrace(
+#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
+#       savepath=os.path.join(master_path, f'data/pfluct/p_timetrace_s{span:03d}_c{chord:03d}_{case}.h5'),
+#     )
 
-# ------------- Strip forces (Hanson's method input) ------------- #
-#
-# Per-radial-strip, time-resolved axial/radial/tangential force, computed
-# directly from a SNCReader.to_h5() file - replaces the manual PowerVIZ
-# "Force Graph" CSV export (ForcesCSVConverter above). span_min isolates
-# one blade (see README.md, "Strip forces" - same reason as everywhere
-# else in this project). Check flip_axial/flip_tangential against what
-# you expect physically before trusting the sign.
+# # ------------- Strip forces (Hanson's method input) ------------- #
+
+# # Per-radial-strip, time-resolved axial/radial/tangential force, computed
+# # directly from a SNCReader.to_h5() file - replaces the manual PowerVIZ
+# # "Force Graph" CSV export (ForcesCSVConverter above). span_min isolates
+# # one blade (see README.md, "Strip forces" - same reason as everywhere
+# # else in this project). Check flip_axial/flip_tangential against what
+# # you expect physically before trusting the sign.
 
 # print(40*'-')
 # print('Opening StripForces file: ', os.path.join(master_path, inst_force_file))
@@ -693,14 +693,14 @@ for span in span_pcts:
 #    savepath=os.path.join(master_path, f'images/forces/hanson/strip_forces_bar_avg_{case}.png'),
 # )
 
-# Chordwise-subdivided (non-compact-chord case - see README.md):
-#result_2d = sf.compute(span_min=span_min, n_span_bins=20, n_chord_bins=5)
-#sf.save(result_2d, os.path.join(master_path, 'data/forces/strip_forces_2d.h5'), dt=dt)
+# # Chordwise-subdivided (non-compact-chord case - see README.md):
+# # result_2d = sf.compute(span_min=span_min, n_span_bins=20, n_chord_bins=5)
+# # sf.save(result_2d, os.path.join(master_path, 'data/forces/strip_forces_2d.h5'), dt=dt)
 
-# Integrated totals (thrust/torque/radial/tangential force, independent of
-# strip binning - see README.md, "Integrated totals"). result['totals']
-# is guaranteed consistent with the span_min/span_max compute() above
-# used; total_loads() is the same thing as a standalone call:
+# # Integrated totals (thrust/torque/radial/tangential force, independent of
+# # strip binning - see README.md, "Integrated totals"). result['totals']
+# # is guaranteed consistent with the span_min/span_max compute() above
+# # used; total_loads() is the same thing as a standalone call:
 # print(40*'-')
 # print('thrust [N]:', result['totals']['thrust'].mean())
 # print(40*'-')
@@ -717,11 +717,11 @@ for span in span_pcts:
 #    savepath=os.path.join(master_path, f'images/forces/hanson/strip_forces_bar_coeffs_avg_{case}.png'),
 # )
 
-# Physical radius instead of r/R on the x-axis:
-#sf.plot_bar_forces(
+# # Physical radius instead of r/R on the x-axis:
+# sf.plot_bar_forces(
 #    result, show_totals=True, normalize_radius=False,
 #    savepath=os.path.join(master_path, 'images/forces/strip_forces_bar_radius.png'),
-#)
+# )
 
 # ------------- Time domain / phase-locked / harmonics (Hanson's method) ------------- #
 #
@@ -944,7 +944,7 @@ print(40*'-')
 print('Plotting cumulative mean of thrust vs revolutions included')
 plot_cumulative_mean(
    totals_inst['torque'], dt=dt, rpm=rpm, ylabel='Torque [Nm]',
-   savepath=os.path.join(master_path, f'images/forces/torque_cumulative_mean_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/torque_cumulative_mean_{case}.png'),
 )
 
 # Mean AND variance together (Pope's <U>/<u'^2> pair). sync='none'
@@ -1018,7 +1018,7 @@ print(40*'-')
 print('Plotting torque autocorrelation, first half vs second half of the run')
 plot_autocorrelation_windows(
    totals_inst['torque'], n_windows=2, dt=dt, labels=['First half', 'Second half'],
-   savepath=os.path.join(master_path, f'images/forces/torque_autocorrelation_windows_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/torque_autocorrelation_windows_{case}.png'),
 )
 
 # Convergence checking: statistical uncertainty of the mean (SEM), from
@@ -1044,6 +1044,11 @@ print(f"mean={stats['mean']:.4g} N, sigma={stats['sigma']:.4g} N, T_int={stats['
 plot_integral_timescale(
    totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
    savepath=os.path.join(master_path, f'images/forces/convergence/thrust_integral_timescale_{case}.png'),
+)
+
+plot_integral_timescale(
+   totals_inst['torque'], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+   savepath=os.path.join(master_path, f'images/forces/convergence/torque_integral_timescale_{case}.png'),
 )
 
 # How many MORE revolutions to reach a target precision (e.g. 0.1%
