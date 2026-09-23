@@ -125,32 +125,32 @@ frame_loop_step = _cfg['frame_loop_step']
 # Output folders under master_path/images - exist_ok=True leaves any folder
 # (and everything already saved in it) untouched on re-runs, and makedirs
 # creates the parents (cf, cp, forces, pfluct) implicitly.
-for _sub in ('cf/avg', 'cf/inst', 'cp/avg', 'cp/inst', 'cp/rms', 'cp/convergence',
+for _sub in ('cf/avg', 'cf/inst', 'cf/rms', 'cf/convergence', 'cp/avg', 'cp/inst', 'cp/rms', 'cp/convergence',
              'forces/convergence', 'forces/hanson', 'pfluct/spectra', 'tip_vortex'):
 	os.makedirs(os.path.join(master_path, 'images', _sub), exist_ok=True)
 
 os.makedirs(os.path.join(master_path, 'data', 'pfluct'), exist_ok=True)
 
 
-# # ------------- Friction related post-processing ------------- #
-# print(40*'-')
-# print('Opening FrictionLines file: ', os.path.join(master_path, inst_force_file))
-# # span_min=span_min here (not just on every call below) - for a whole-rotor
-# # case with no separate blade parts to select via face_name at
-# # conversion time, every single call below already passes span_min=span_min
-# # anyway (to isolate one blade - see the note further down), so cropping
-# # at load time means the (potentially huge) force field is only ever
-# # read for the surviving ~half of the points, not the whole rotor - see
-# # FrictionLines.__init__'s span_min/span_max docstring. Fixed a real OOM
-# # on a ~660 GB case this way.
-# fl = FrictionLines(
-#    os.path.join(master_path, inst_force_file),
-#    r_tip=r_tip,
-#    rho_ref=rho_ref,
-#    rpm=rpm,
-#    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
-#    span_min=span_min, validate_axes=validate_axes
-# )
+# ------------- Friction related post-processing ------------- #
+print(40*'-')
+print('Opening FrictionLines file: ', os.path.join(master_path, inst_force_file))
+# span_min=span_min here (not just on every call below) - for a whole-rotor
+# case with no separate blade parts to select via face_name at
+# conversion time, every single call below already passes span_min=span_min
+# anyway (to isolate one blade - see the note further down), so cropping
+# at load time means the (potentially huge) force field is only ever
+# read for the surviving ~half of the points, not the whole rotor - see
+# FrictionLines.__init__'s span_min/span_max docstring. Fixed a real OOM
+# on a ~660 GB case this way.
+fl = FrictionLines(
+   os.path.join(master_path, inst_force_file),
+   r_tip=r_tip,
+   rho_ref=rho_ref,
+   rpm=rpm,
+   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
+   span_min=span_min, validate_axes=validate_axes
+)
 
 # # # Dimensional wall shear vector (tau = F - (F.n)n), no rho_ref/rpm needed:
 # # tau = fl.wall_shear(surface='Upper', frame=None)  # frame=None -> average over every frame in the file
@@ -382,61 +382,61 @@ os.makedirs(os.path.join(master_path, 'data', 'pfluct'), exist_ok=True)
 #    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_spanwise_chordwise_by_strip_{case}.png'),
 # )
 
-# # Convergence checking: cumulative mean+variance and higher-order
-# # moments (skewness/flatness) of Cf ITSELF - the same tools already
-# # used for thrust/torque above (see "Convergence checking" further
-# # down), fed with Cf's own spatial-mean-per-frame series instead. Near-
-# # wall/viscous quantities are known to converge MORE SLOWLY than
-# # integrated forces (see the Cf phase-portrait note above), so this is
-# # worth checking even once thrust/torque already look converged. No
-# # extra span cropping needed here - fl was already constructed with
-# # span_min=span_min, so cf_time_series() only ever covers the one
-# # blade half fl was built with; just reduce it to one scalar per frame:
-# cf_mag_series = fl.cf_time_series(surface='Upper', component=None).mean(axis=1)
-# cf_chordwise_series = fl.cf_time_series(surface='Upper', component='chordwise').mean(axis=1)
-# cf_spanwise_series = fl.cf_time_series(surface='Upper', component='spanwise').mean(axis=1)
+# Convergence checking: cumulative mean+variance and higher-order
+# moments (skewness/flatness) of Cf ITSELF - the same tools already
+# used for thrust/torque above (see "Convergence checking" further
+# down), fed with Cf's own spatial-mean-per-frame series instead. Near-
+# wall/viscous quantities are known to converge MORE SLOWLY than
+# integrated forces (see the Cf phase-portrait note above), so this is
+# worth checking even once thrust/torque already look converged. No
+# extra span cropping needed here - fl was already constructed with
+# span_min=span_min, so cf_time_series() only ever covers the one
+# blade half fl was built with; just reduce it to one scalar per frame:
+cf_mag_series = fl.cf_time_series(surface='Upper', component=None).mean(axis=1)
+cf_chordwise_series = fl.cf_time_series(surface='Upper', component='chordwise').mean(axis=1)
+cf_spanwise_series = fl.cf_time_series(surface='Upper', component='spanwise').mean(axis=1)
 
-# print(40*'-')
-# print('Plotting cumulative mean+variance of Cf magnitude')
-# plot_cumulative_stats(
-#    cf_mag_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
-#    savepath=os.path.join(master_path, f'images/cf/cf_mag_cumulative_stats_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative mean+variance of Cf magnitude')
+plot_cumulative_stats(
+   cf_mag_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
+   savepath=os.path.join(master_path, f'images/cf/cf_mag_cumulative_stats_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cumulative mean+variance of chordwise Cf')
-# plot_cumulative_stats(
-#    cf_chordwise_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_{f,chordwise}$ [-]',
-#    savepath=os.path.join(master_path, f'images/cf/cf_chordwise_cumulative_stats_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative mean+variance of chordwise Cf')
+plot_cumulative_stats(
+   cf_chordwise_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_{f,chordwise}$ [-]',
+   savepath=os.path.join(master_path, f'images/cf/cf_chordwise_cumulative_stats_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cumulative mean+variance of spanwise Cf')
-# plot_cumulative_stats(
-#    cf_spanwise_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_{f,spanwise}$ [-]',
-#    savepath=os.path.join(master_path, f'images/cf/cf_spanwise_cumulative_stats_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative mean+variance of spanwise Cf')
+plot_cumulative_stats(
+   cf_spanwise_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_{f,spanwise}$ [-]',
+   savepath=os.path.join(master_path, f'images/cf/cf_spanwise_cumulative_stats_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cumulative skewness+flatness of Cf magnitude')
-# plot_cumulative_moments(
-#    cf_mag_series, dt=dt, rpm=rpm, sync='none', label='$C_f$',
-#    savepath=os.path.join(master_path, f'images/cf/cf_mag_cumulative_moments_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative skewness+flatness of Cf magnitude')
+plot_cumulative_moments(
+   cf_mag_series, dt=dt, rpm=rpm, sync='none', label='$C_f$',
+   savepath=os.path.join(master_path, f'images/cf/cf_mag_cumulative_moments_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cumulative skewness+flatness of chordwise Cf')
-# plot_cumulative_moments(
-#    cf_chordwise_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,chordwise}$',
-#    savepath=os.path.join(master_path, f'images/cf/cf_chordwise_cumulative_moments_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative skewness+flatness of chordwise Cf')
+plot_cumulative_moments(
+   cf_chordwise_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,chordwise}$',
+   savepath=os.path.join(master_path, f'images/cf/cf_chordwise_cumulative_moments_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cumulative skewness+flatness of spanwise Cf')
-# plot_cumulative_moments(
-#    cf_spanwise_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,spanwise}$',
-#    savepath=os.path.join(master_path, f'images/cf/cf_spanwise_cumulative_moments_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative skewness+flatness of spanwise Cf')
+plot_cumulative_moments(
+   cf_spanwise_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,spanwise}$',
+   savepath=os.path.join(master_path, f'images/cf/cf_spanwise_cumulative_moments_{case}.png'),
+)
 
 # ------------- Any surface variable at radii (Cp, y+, RMS, ...) ------------- #
 #
@@ -785,359 +785,359 @@ os.makedirs(os.path.join(master_path, 'data', 'pfluct'), exist_ok=True)
 # README.md, "Average vs. instantaneous cases". Needs rpm (set on
 # StripForces itself, not compute()) for phase_lock()/harmonics().
 
-print(40*'-')
-print('Opening StripForces file: ', os.path.join(master_path, inst_force_file))
-# span_min=span_min at load time - see sf_avg above. This is the big
-# multi-frame/transient file, so this is the crop that actually matters
-# for memory (the one that OOM-killed a real ~660 GB whole-rotor case
-# before this parameter existed).
-sf_inst = StripForces(
-   os.path.join(master_path, inst_force_file),
-   r_tip=r_tip, rpm=rpm,
-   span_min=span_min,
-   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
-   validate_axes=validate_axes,
-)
-
-print(40*'-')
-print('Computing instantaneous strip forces')
-result_inst = sf_inst.compute(span_min=span_min, n_span_bins=10)
-
-# Raw per-strip time trace (see README.md, "Time trace"):
-print(40*'-')
-print('Plotting instantaneous strip forces time trace for the axial component')
-sf_inst.plot_time_trace(
-   result_inst, dt=dt, component='axial', strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_time_trace_axial_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting instantaneous strip forces time trace for the radial component')
-sf_inst.plot_time_trace(
-   result_inst, dt=dt, component='radial', strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_time_trace_radial_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting instantaneous strip forces time trace for the tangential component')
-sf_inst.plot_time_trace(
-   result_inst, dt=dt, component='tangential', strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_time_trace_tangential_{case}.png'),
-)
-
-# Phase-locked (revolution-folded) force vs azimuth (see README.md,
-# "Phase-locked (revolution-folded) forces"):
-print(40*'-')
-print('Plotting phase-locked forces vs azimuth for the axial component')
-phase_locked = sf_inst.phase_lock(result_inst, dt=dt, n_azimuth_bins=72)
-sf_inst.plot_vs_angle(
-   phase_locked, component='axial', strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_vs_angle_axial_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting phase-locked forces vs azimuth for the radial component')
-sf_inst.plot_vs_angle(
-   phase_locked, component='radial', strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_vs_angle_radial_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting phase-locked forces vs azimuth for the tangential component')
-sf_inst.plot_vs_angle(
-   phase_locked, component='tangential', strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_vs_angle_tangential_{case}.png'),
-)
-
-# Harmonics of the rotation frequency - Hanson's method's actual |F_n(r)|
-# input (see README.md, "Harmonics (Hanson's method's actual input)"):
-print(40*'-')
-print('Plotting harmonics for the axial component')
-h = sf_inst.harmonics(result_inst, dt=dt, component='axial', n_harmonics=17)
-sf_inst.plot_harmonics(
-   h, strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_axial_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting harmonics for the radial component')
-h = sf_inst.harmonics(result_inst, dt=dt, component='radial', n_harmonics=17)
-sf_inst.plot_harmonics(
-   h, strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_radial_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting harmonics for the tangential component')
-h = sf_inst.harmonics(result_inst, dt=dt, component='tangential', n_harmonics=17)
-sf_inst.plot_harmonics(
-   h, strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_tangential_{case}.png'),
-)
-
-# With phase (needed before actually handing this to Hanson's model, or
-# to check a harmonic's peak azimuth against a known physical cause -
-# see README.md, "Phase"):
-print(40*'-')
-print('Plotting harmonics with phase for the axial component')
-h_phase = sf_inst.harmonics(result_inst, dt=dt, component='axial', n_harmonics=17, return_phase=True)
-sf_inst.plot_harmonics(
-   h_phase, strips=[0, 2, 4, 6, 8, 9], show_phase=True,
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_phase_axial_{case}.png'),
-)
-
-print(40*'-')
-print('Computing peak azimuth of each harmonic for the axial component')
-peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
-print(40*'-')
-print('Axial component peak azimuth of each harmonic (deg): ', peak_deg)
-
-print(40*'-')
-print('Plotting harmonics with phase for the radial component')
-h_phase = sf_inst.harmonics(result_inst, dt=dt, component='radial', n_harmonics=17, return_phase=True)
-sf_inst.plot_harmonics(
-   h_phase, strips=[0, 2, 4, 6, 8, 9], show_phase=True,
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_phase_radial_{case}.png'),
-)
-
-print(40*'-')
-print('Computing peak azimuth of each harmonic for the radial component')
-peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
-print(40*'-')
-print('Radial component peak azimuth of each harmonic (deg): ', peak_deg)
-
-
-print(40*'-')
-print('Plotting harmonics with phase for the tangential component')
-h_phase = sf_inst.harmonics(result_inst, dt=dt, component='tangential', n_harmonics=17, return_phase=True)
-sf_inst.plot_harmonics(
-   h_phase, strips=[0, 2, 4, 6, 8, 9], show_phase=True,
-   savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_phase_tangential_{case}.png'),
-)
-
-print(40*'-')
-print('Computing peak azimuth of each harmonic for the tangential component')
-peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
-print(40*'-')
-print('Tangential component peak azimuth of each harmonic (deg): ', peak_deg)
-
-
-# Reconstruction check against phase_lock()'s own empirical curve:
-#phase_locked = sf_inst.phase_lock(result_inst, dt=dt, n_azimuth_bins=72)
-#az, recon = sf_inst.reconstruct_from_harmonics(h_phase, azimuth_deg=phase_locked['azimuth_deg'])
-
-# Hanson-model-ready output file (radius/chord/harmonic/magnitude/phase,
-# self-contained, no need for this class or the .snc-derived file again):
-#sf_inst.save_harmonics(h_phase, os.path.join(master_path, 'data/forces/strip_harmonics.h5'))
-
-# ------------- Convergence checking: phase portraits (see README.md) ------------- #
-#
-# Fx-vs-Fy-style plots (one force component vs another, over time) - a
-# CLOSED loop means the run has settled into periodic operation; a
-# drifting/spiraling trajectory means it hasn't yet. Needs an "inst" file,
-# same as the time-domain block above - a single already-averaged frame
-# has no trajectory to trace. See README.md, "Convergence checking: phase
-# portraits" for the full explanation.
-
-print(40*'-')
-print('Plotting whole-blade phase portrait (axial vs tangential)')
-totals_inst = sf_inst.total_loads(span_min=span_min)  # standalone total, same span as result_inst above
-sf_inst.plot_phase_portrait(
-   totals_inst, component_pair=('axial', 'tangential'),
-   savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_axial_tangential_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting whole-blade phase portrait (axial vs radial)')
-totals_inst = sf_inst.total_loads(span_min=span_min)  # standalone total, same span as result_inst above
-sf_inst.plot_phase_portrait(
-   totals_inst, component_pair=('axial', 'radial'),
-   savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_axial_radial_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting whole-blade phase portrait (radial vs tangential)')
-totals_inst = sf_inst.total_loads(span_min=span_min)  # standalone total, same span as result_inst above
-sf_inst.plot_phase_portrait(
-   totals_inst, component_pair=('tangential', 'radial'),
-   savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_tangential_radial_{case}.png'),
-)
-
-
-print(40*'-')
-print('Plotting per-strip phase portraits (axial vs radial) - localizes convergence issues by span')
-sf_inst.plot_phase_portrait_by_strip(
-   result_inst, component_pair=('axial', 'radial'), strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_by_strip_axial_radial_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting per-strip phase portraits (axial vs tangential) - localizes convergence issues by span')
-sf_inst.plot_phase_portrait_by_strip(
-   result_inst, component_pair=('axial', 'tangential'), strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_by_strip_axial_tangential_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting per-strip phase portraits (tangential vs radial) - localizes convergence issues by span')
-sf_inst.plot_phase_portrait_by_strip(
-   result_inst, component_pair=('tangential', 'radial'), strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_by_strip_tangential_radial_{case}.png'),
-)
-
-# Convergence checking: cumulative (running) mean vs revolutions included
-# (see README.md, "Convergence checking: running/cumulative mean") - a
-# converged quantity's running mean flattens to a horizontal asymptote.
-# Not tied to StripForces specifically - takes any plain 1D array:
-print(40*'-')
-print('Plotting cumulative mean of thrust vs revolutions included')
-plot_cumulative_mean(
-   totals_inst['thrust'], dt=dt, rpm=rpm, ylabel='Thrust [N]',
-   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_mean_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting cumulative mean of thrust vs revolutions included')
-plot_cumulative_mean(
-   totals_inst['torque'], dt=dt, rpm=rpm, ylabel='Torque [Nm]',
-   savepath=os.path.join(master_path, f'images/forces/convergence/torque_cumulative_mean_{case}.png'),
-)
-
-# Mean AND variance together (Pope's <U>/<u'^2> pair). sync='none'
-# (every frame - fine for an isolated rotor in hover, where each frame
-# is already a reasonably independent-ish realization); use
-# sync='revolution' (needs dt+rpm) INSTEAD if the signal has a real
-# once-per-revolution component - REQUIRED then to see a clean
-# asymptote (see README.md, "Mean AND variance together, synced to
-# revolution boundaries" - a plain per-frame running mean of such a
-# signal shows a persistent ripple that this removes); or
-# sync='periodicity' (needs dt+rpm+period_deg) for a case whose real
-# periodicity is SHORTER than one revolution (e.g. a 4-blade rotor /
-# 4-vane stator interaction repeating every 360/4=90 degrees):
-print(40*'-')
-print('Plotting cumulative mean+variance of thrust, synced to revolution boundaries')
-plot_cumulative_stats(
-   totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', ylabel='Thrust [N]',
-   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_stats_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting cumulative mean+variance of thrust, synced to revolution boundaries')
-plot_cumulative_stats(
-   totals_inst['torque'], dt=dt, rpm=rpm, sync='none', ylabel='Torque [Nm]',
-   savepath=os.path.join(master_path, f'images/forces/convergence/torque_cumulative_stats_{case}.png'),
-)
-
-# Example for a rotor-stator case instead (NOT this project's isolated
-# rotor - shown for reference): 4 blades / 4 vanes repeat every
-# 360/4=90 degrees, so sync every 90 degrees rather than every full
-# revolution to get 4x the comparable-phase samples per run:
-# plot_cumulative_stats(
-#   totals_inst['thrust'], dt=dt, rpm=rpm, sync='periodicity', period_deg=90.0,
-#   ylabel='Thrust [N]',
-#   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_stats_periodicity_{case}.png'),
-# )
-
-# Convergence checking: 3rd/4th-order statistics (running skewness and
-# flatness - see README.md, "Convergence checking: higher-order
-# moments (skewness/flatness)"). Needs substantially more revolutions
-# to converge than the mean/variance above - don't expect it to flatten
-# as quickly:
-print(40*'-')
-print('Plotting cumulative skewness+flatness of thrust')
-plot_cumulative_moments(
-   totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', label='Thrust',
-   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_moments_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting cumulative skewness+flatness of torque')
-plot_cumulative_moments(
-   totals_inst['torque'], dt=dt, rpm=rpm, sync='none', label='Torque',
-   savepath=os.path.join(master_path, f'images/forces/convergence/torque_cumulative_moments_{case}.png'),
-)
-
-# Convergence checking: autocorrelation comparison between independent
-# windows (see README.md, "Convergence checking: autocorrelation" - NOT
-# a single-window "is rho(s) even" check, which is guaranteed to pass
-# trivially regardless of convergence - comparing INDEPENDENT windows is
-# what's actually meaningful):
-
-print(40*'-')
-print('Plotting thrust autocorrelation, first half vs second half of the run')
-plot_autocorrelation_windows(
-   totals_inst['thrust'], n_windows=2, dt=dt, labels=['First half', 'Second half'],
-   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_autocorrelation_windows_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting torque autocorrelation, first half vs second half of the run')
-plot_autocorrelation_windows(
-   totals_inst['torque'], n_windows=2, dt=dt, labels=['First half', 'Second half'],
-   savepath=os.path.join(master_path, f'images/forces/convergence/torque_autocorrelation_windows_{case}.png'),
-)
-
-# Convergence checking: statistical uncertainty of the mean (SEM), from
-# the signal's own integral timescale (see README.md, "Convergence
-# checking: statistical uncertainty of the mean") - reuses the same
-# autocorrelation machinery above, but turns it into an actual error
-# bar on thrust/torque instead of just an eyeballed plot. sync='none'
-# here for the same reason as cumulative_stats above (isolated rotor in
-# hover); switch to 'revolution'/'periodicity' for a case with a real
-# periodic component - see standard_error()'s docstring for why (the
-# raw per-frame autocorrelation of a periodic signal never decays to
-# zero, which corrupts the integral-timescale estimate).
-print(40*'-')
-print('Estimating standard error of the mean thrust')
-stats = standard_error(totals_inst['thrust'], dt=dt, rpm=rpm, sync='none')
-print(f"mean={stats['mean']:.4g} N, sigma={stats['sigma']:.4g} N, T_int={stats['T_int']:.4g} s, "
-      f"n_eff={stats['n_eff']:.1f}, SEM={stats['sem']:.4g} N ({stats['relative_sem']*100:.3f}% of mean)")
-
-# Same thing, plotted - the rho(s) curve with the actually-integrated
-# region shaded and T_int/SEM/n_eff/revolutions_required as an inset
-# (same style as plot_bar_forces()'s show_totals) - target_relative_sem
-# defaults to 0.01 (1% of the mean), override for a stricter/looser target:
-plot_integral_timescale(
-   totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_integral_timescale_{case}.png'),
-)
-
-plot_integral_timescale(
-   totals_inst['torque'], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-   savepath=os.path.join(master_path, f'images/forces/convergence/torque_integral_timescale_{case}.png'),
-)
-
-# How many MORE revolutions to reach a target precision (e.g. 0.1%
-# relative SEM on thrust) - answers "how much longer do I need to run
-# this" with an actual number instead of a guess:
-req = required_averaging_time(
-   totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.001,
-)
-print(f"Need {req['revolutions_required']:.1f} total revolutions for 0.1% relative SEM "
-      f"({req['revolutions_current']:.1f} already run, "
-      f"{req['additional_revolutions']:.1f} more needed)")
-
-# Convergence checking: cycle-to-cycle waveform correlation (see
-# README.md, "Convergence checking: cycle-to-cycle correlation") -
-# checks a DIFFERENT thing than everything above: not whether a running
-# STATISTIC has flattened, but whether the per-revolution WAVEFORM
-# SHAPE has stopped changing - the actual assumption phase_lock()/
-# harmonics() below and TipVortexPhaseAverage depend on. period_deg=360
-# (default) = one full revolution:
 # print(40*'-')
-# print('Plotting cycle-to-cycle correlation of thrust')
-# plot_cycle_correlation(
-#    totals_inst['thrust'], dt=dt, rpm=rpm, period_deg=360.0,
-#    savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cycle_correlation_{case}.png'),
+# print('Opening StripForces file: ', os.path.join(master_path, inst_force_file))
+# # span_min=span_min at load time - see sf_avg above. This is the big
+# # multi-frame/transient file, so this is the crop that actually matters
+# # for memory (the one that OOM-killed a real ~660 GB whole-rotor case
+# # before this parameter existed).
+# sf_inst = StripForces(
+#    os.path.join(master_path, inst_force_file),
+#    r_tip=r_tip, rpm=rpm,
+#    span_min=span_min,
+#    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
+#    validate_axes=validate_axes,
 # )
 
-# # Rotor-stator example instead (NOT this project's isolated rotor -
-# # shown for reference): correlate every 90-degree interaction period
-# # rather than every full revolution:
-# plot_cycle_correlation(
-#   totals_inst['thrust'], dt=dt, rpm=rpm,,period_deg=90.0,
-#   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cycle_correlation_90deg_{case}.png'),
+# print(40*'-')
+# print('Computing instantaneous strip forces')
+# result_inst = sf_inst.compute(span_min=span_min, n_span_bins=10)
+
+# # Raw per-strip time trace (see README.md, "Time trace"):
+# print(40*'-')
+# print('Plotting instantaneous strip forces time trace for the axial component')
+# sf_inst.plot_time_trace(
+#    result_inst, dt=dt, component='axial', strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_time_trace_axial_{case}.png'),
 # )
+
+# print(40*'-')
+# print('Plotting instantaneous strip forces time trace for the radial component')
+# sf_inst.plot_time_trace(
+#    result_inst, dt=dt, component='radial', strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_time_trace_radial_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting instantaneous strip forces time trace for the tangential component')
+# sf_inst.plot_time_trace(
+#    result_inst, dt=dt, component='tangential', strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_time_trace_tangential_{case}.png'),
+# )
+
+# # Phase-locked (revolution-folded) force vs azimuth (see README.md,
+# # "Phase-locked (revolution-folded) forces"):
+# print(40*'-')
+# print('Plotting phase-locked forces vs azimuth for the axial component')
+# phase_locked = sf_inst.phase_lock(result_inst, dt=dt, n_azimuth_bins=72)
+# sf_inst.plot_vs_angle(
+#    phase_locked, component='axial', strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_vs_angle_axial_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting phase-locked forces vs azimuth for the radial component')
+# sf_inst.plot_vs_angle(
+#    phase_locked, component='radial', strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_vs_angle_radial_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting phase-locked forces vs azimuth for the tangential component')
+# sf_inst.plot_vs_angle(
+#    phase_locked, component='tangential', strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_vs_angle_tangential_{case}.png'),
+# )
+
+# # Harmonics of the rotation frequency - Hanson's method's actual |F_n(r)|
+# # input (see README.md, "Harmonics (Hanson's method's actual input)"):
+# print(40*'-')
+# print('Plotting harmonics for the axial component')
+# h = sf_inst.harmonics(result_inst, dt=dt, component='axial', n_harmonics=17)
+# sf_inst.plot_harmonics(
+#    h, strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_axial_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting harmonics for the radial component')
+# h = sf_inst.harmonics(result_inst, dt=dt, component='radial', n_harmonics=17)
+# sf_inst.plot_harmonics(
+#    h, strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_radial_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting harmonics for the tangential component')
+# h = sf_inst.harmonics(result_inst, dt=dt, component='tangential', n_harmonics=17)
+# sf_inst.plot_harmonics(
+#    h, strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_tangential_{case}.png'),
+# )
+
+# # With phase (needed before actually handing this to Hanson's model, or
+# # to check a harmonic's peak azimuth against a known physical cause -
+# # see README.md, "Phase"):
+# print(40*'-')
+# print('Plotting harmonics with phase for the axial component')
+# h_phase = sf_inst.harmonics(result_inst, dt=dt, component='axial', n_harmonics=17, return_phase=True)
+# sf_inst.plot_harmonics(
+#    h_phase, strips=[0, 2, 4, 6, 8, 9], show_phase=True,
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_phase_axial_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Computing peak azimuth of each harmonic for the axial component')
+# peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
+# print(40*'-')
+# print('Axial component peak azimuth of each harmonic (deg): ', peak_deg)
+
+# print(40*'-')
+# print('Plotting harmonics with phase for the radial component')
+# h_phase = sf_inst.harmonics(result_inst, dt=dt, component='radial', n_harmonics=17, return_phase=True)
+# sf_inst.plot_harmonics(
+#    h_phase, strips=[0, 2, 4, 6, 8, 9], show_phase=True,
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_phase_radial_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Computing peak azimuth of each harmonic for the radial component')
+# peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
+# print(40*'-')
+# print('Radial component peak azimuth of each harmonic (deg): ', peak_deg)
+
+
+# print(40*'-')
+# print('Plotting harmonics with phase for the tangential component')
+# h_phase = sf_inst.harmonics(result_inst, dt=dt, component='tangential', n_harmonics=17, return_phase=True)
+# sf_inst.plot_harmonics(
+#    h_phase, strips=[0, 2, 4, 6, 8, 9], show_phase=True,
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_phase_tangential_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Computing peak azimuth of each harmonic for the tangential component')
+# peak_deg = sf_inst.peak_azimuth(h_phase)  # (n_harmonics, n_span_bins)
+# print(40*'-')
+# print('Tangential component peak azimuth of each harmonic (deg): ', peak_deg)
+
+
+# # Reconstruction check against phase_lock()'s own empirical curve:
+# #phase_locked = sf_inst.phase_lock(result_inst, dt=dt, n_azimuth_bins=72)
+# #az, recon = sf_inst.reconstruct_from_harmonics(h_phase, azimuth_deg=phase_locked['azimuth_deg'])
+
+# # Hanson-model-ready output file (radius/chord/harmonic/magnitude/phase,
+# # self-contained, no need for this class or the .snc-derived file again):
+# #sf_inst.save_harmonics(h_phase, os.path.join(master_path, 'data/forces/strip_harmonics.h5'))
+
+# # ------------- Convergence checking: phase portraits (see README.md) ------------- #
+# #
+# # Fx-vs-Fy-style plots (one force component vs another, over time) - a
+# # CLOSED loop means the run has settled into periodic operation; a
+# # drifting/spiraling trajectory means it hasn't yet. Needs an "inst" file,
+# # same as the time-domain block above - a single already-averaged frame
+# # has no trajectory to trace. See README.md, "Convergence checking: phase
+# # portraits" for the full explanation.
+
+# print(40*'-')
+# print('Plotting whole-blade phase portrait (axial vs tangential)')
+# totals_inst = sf_inst.total_loads(span_min=span_min)  # standalone total, same span as result_inst above
+# sf_inst.plot_phase_portrait(
+#    totals_inst, component_pair=('axial', 'tangential'),
+#    savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_axial_tangential_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting whole-blade phase portrait (axial vs radial)')
+# totals_inst = sf_inst.total_loads(span_min=span_min)  # standalone total, same span as result_inst above
+# sf_inst.plot_phase_portrait(
+#    totals_inst, component_pair=('axial', 'radial'),
+#    savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_axial_radial_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting whole-blade phase portrait (radial vs tangential)')
+# totals_inst = sf_inst.total_loads(span_min=span_min)  # standalone total, same span as result_inst above
+# sf_inst.plot_phase_portrait(
+#    totals_inst, component_pair=('tangential', 'radial'),
+#    savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_tangential_radial_{case}.png'),
+# )
+
+
+# print(40*'-')
+# print('Plotting per-strip phase portraits (axial vs radial) - localizes convergence issues by span')
+# sf_inst.plot_phase_portrait_by_strip(
+#    result_inst, component_pair=('axial', 'radial'), strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_by_strip_axial_radial_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting per-strip phase portraits (axial vs tangential) - localizes convergence issues by span')
+# sf_inst.plot_phase_portrait_by_strip(
+#    result_inst, component_pair=('axial', 'tangential'), strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_by_strip_axial_tangential_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting per-strip phase portraits (tangential vs radial) - localizes convergence issues by span')
+# sf_inst.plot_phase_portrait_by_strip(
+#    result_inst, component_pair=('tangential', 'radial'), strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_by_strip_tangential_radial_{case}.png'),
+# )
+
+# # Convergence checking: cumulative (running) mean vs revolutions included
+# # (see README.md, "Convergence checking: running/cumulative mean") - a
+# # converged quantity's running mean flattens to a horizontal asymptote.
+# # Not tied to StripForces specifically - takes any plain 1D array:
+# print(40*'-')
+# print('Plotting cumulative mean of thrust vs revolutions included')
+# plot_cumulative_mean(
+#    totals_inst['thrust'], dt=dt, rpm=rpm, ylabel='Thrust [N]',
+#    savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_mean_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting cumulative mean of thrust vs revolutions included')
+# plot_cumulative_mean(
+#    totals_inst['torque'], dt=dt, rpm=rpm, ylabel='Torque [Nm]',
+#    savepath=os.path.join(master_path, f'images/forces/convergence/torque_cumulative_mean_{case}.png'),
+# )
+
+# # Mean AND variance together (Pope's <U>/<u'^2> pair). sync='none'
+# # (every frame - fine for an isolated rotor in hover, where each frame
+# # is already a reasonably independent-ish realization); use
+# # sync='revolution' (needs dt+rpm) INSTEAD if the signal has a real
+# # once-per-revolution component - REQUIRED then to see a clean
+# # asymptote (see README.md, "Mean AND variance together, synced to
+# # revolution boundaries" - a plain per-frame running mean of such a
+# # signal shows a persistent ripple that this removes); or
+# # sync='periodicity' (needs dt+rpm+period_deg) for a case whose real
+# # periodicity is SHORTER than one revolution (e.g. a 4-blade rotor /
+# # 4-vane stator interaction repeating every 360/4=90 degrees):
+# print(40*'-')
+# print('Plotting cumulative mean+variance of thrust, synced to revolution boundaries')
+# plot_cumulative_stats(
+#    totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', ylabel='Thrust [N]',
+#    savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_stats_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting cumulative mean+variance of thrust, synced to revolution boundaries')
+# plot_cumulative_stats(
+#    totals_inst['torque'], dt=dt, rpm=rpm, sync='none', ylabel='Torque [Nm]',
+#    savepath=os.path.join(master_path, f'images/forces/convergence/torque_cumulative_stats_{case}.png'),
+# )
+
+# # Example for a rotor-stator case instead (NOT this project's isolated
+# # rotor - shown for reference): 4 blades / 4 vanes repeat every
+# # 360/4=90 degrees, so sync every 90 degrees rather than every full
+# # revolution to get 4x the comparable-phase samples per run:
+# # plot_cumulative_stats(
+# #   totals_inst['thrust'], dt=dt, rpm=rpm, sync='periodicity', period_deg=90.0,
+# #   ylabel='Thrust [N]',
+# #   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_stats_periodicity_{case}.png'),
+# # )
+
+# # Convergence checking: 3rd/4th-order statistics (running skewness and
+# # flatness - see README.md, "Convergence checking: higher-order
+# # moments (skewness/flatness)"). Needs substantially more revolutions
+# # to converge than the mean/variance above - don't expect it to flatten
+# # as quickly:
+# print(40*'-')
+# print('Plotting cumulative skewness+flatness of thrust')
+# plot_cumulative_moments(
+#    totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', label='Thrust',
+#    savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_moments_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting cumulative skewness+flatness of torque')
+# plot_cumulative_moments(
+#    totals_inst['torque'], dt=dt, rpm=rpm, sync='none', label='Torque',
+#    savepath=os.path.join(master_path, f'images/forces/convergence/torque_cumulative_moments_{case}.png'),
+# )
+
+# # Convergence checking: autocorrelation comparison between independent
+# # windows (see README.md, "Convergence checking: autocorrelation" - NOT
+# # a single-window "is rho(s) even" check, which is guaranteed to pass
+# # trivially regardless of convergence - comparing INDEPENDENT windows is
+# # what's actually meaningful):
+
+# print(40*'-')
+# print('Plotting thrust autocorrelation, first half vs second half of the run')
+# plot_autocorrelation_windows(
+#    totals_inst['thrust'], n_windows=2, dt=dt, labels=['First half', 'Second half'],
+#    savepath=os.path.join(master_path, f'images/forces/convergence/thrust_autocorrelation_windows_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting torque autocorrelation, first half vs second half of the run')
+# plot_autocorrelation_windows(
+#    totals_inst['torque'], n_windows=2, dt=dt, labels=['First half', 'Second half'],
+#    savepath=os.path.join(master_path, f'images/forces/convergence/torque_autocorrelation_windows_{case}.png'),
+# )
+
+# # Convergence checking: statistical uncertainty of the mean (SEM), from
+# # the signal's own integral timescale (see README.md, "Convergence
+# # checking: statistical uncertainty of the mean") - reuses the same
+# # autocorrelation machinery above, but turns it into an actual error
+# # bar on thrust/torque instead of just an eyeballed plot. sync='none'
+# # here for the same reason as cumulative_stats above (isolated rotor in
+# # hover); switch to 'revolution'/'periodicity' for a case with a real
+# # periodic component - see standard_error()'s docstring for why (the
+# # raw per-frame autocorrelation of a periodic signal never decays to
+# # zero, which corrupts the integral-timescale estimate).
+# print(40*'-')
+# print('Estimating standard error of the mean thrust')
+# stats = standard_error(totals_inst['thrust'], dt=dt, rpm=rpm, sync='none')
+# print(f"mean={stats['mean']:.4g} N, sigma={stats['sigma']:.4g} N, T_int={stats['T_int']:.4g} s, "
+#       f"n_eff={stats['n_eff']:.1f}, SEM={stats['sem']:.4g} N ({stats['relative_sem']*100:.3f}% of mean)")
+
+# # Same thing, plotted - the rho(s) curve with the actually-integrated
+# # region shaded and T_int/SEM/n_eff/revolutions_required as an inset
+# # (same style as plot_bar_forces()'s show_totals) - target_relative_sem
+# # defaults to 0.01 (1% of the mean), override for a stricter/looser target:
+# plot_integral_timescale(
+#    totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+#    savepath=os.path.join(master_path, f'images/forces/convergence/thrust_integral_timescale_{case}.png'),
+# )
+
+# plot_integral_timescale(
+#    totals_inst['torque'], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+#    savepath=os.path.join(master_path, f'images/forces/convergence/torque_integral_timescale_{case}.png'),
+# )
+
+# # How many MORE revolutions to reach a target precision (e.g. 0.1%
+# # relative SEM on thrust) - answers "how much longer do I need to run
+# # this" with an actual number instead of a guess:
+# req = required_averaging_time(
+#    totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.001,
+# )
+# print(f"Need {req['revolutions_required']:.1f} total revolutions for 0.1% relative SEM "
+#       f"({req['revolutions_current']:.1f} already run, "
+#       f"{req['additional_revolutions']:.1f} more needed)")
+
+# # Convergence checking: cycle-to-cycle waveform correlation (see
+# # README.md, "Convergence checking: cycle-to-cycle correlation") -
+# # checks a DIFFERENT thing than everything above: not whether a running
+# # STATISTIC has flattened, but whether the per-revolution WAVEFORM
+# # SHAPE has stopped changing - the actual assumption phase_lock()/
+# # harmonics() below and TipVortexPhaseAverage depend on. period_deg=360
+# # (default) = one full revolution:
+# # print(40*'-')
+# # print('Plotting cycle-to-cycle correlation of thrust')
+# # plot_cycle_correlation(
+# #    totals_inst['thrust'], dt=dt, rpm=rpm, period_deg=360.0,
+# #    savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cycle_correlation_{case}.png'),
+# # )
+
+# # # Rotor-stator example instead (NOT this project's isolated rotor -
+# # # shown for reference): correlate every 90-degree interaction period
+# # # rather than every full revolution:
+# # plot_cycle_correlation(
+# #   totals_inst['thrust'], dt=dt, rpm=rpm,,period_deg=90.0,
+# #   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cycle_correlation_90deg_{case}.png'),
+# # )
 
 # ------------- Tip-vortex tracking: phase-locked plane averaging (see README.md) ------------- #
 #
