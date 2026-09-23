@@ -233,14 +233,14 @@ fl = FrictionLines(
 # fl.plot_cf_radii(
 #    radii=radii,
 #    surface='Upper', frame=None, stat='rms', span_min=span_min, reverse_chord=reverse_chord,
-#    savepath=os.path.join(master_path, f'images/cf/cf_rms_radii_avg_{case}.png'),
+#    savepath=os.path.join(master_path, f'images/cf/rms/cf_rms_radii_avg_{case}.png'),
 # )
 # print(40*'-')
 # print('Plotting Cf RMS vs x/c color map')
 # fl.friction_lines(
 #    surface='Upper', frame=None, stat='rms', span_min=span_min,
 #    figsize=blade_figsize,
-#    savepath=os.path.join(master_path, f'images/cf/cf_rms_map_{case}.png'),
+#    savepath=os.path.join(master_path, f'images/cf/rms/cf_rms_map_{case}.png'),
 # )
 
 # # Friction lines (Upper+Lower stacked by default) - span_min isolates one
@@ -344,42 +344,42 @@ fl = FrictionLines(
 # print('Plotting Cf phase portrait (magnitude vs chordwise), Upper surface')
 # fl.plot_cf_phase_portrait(
 #    component_pair=(None, 'chordwise'), surface='Upper', span_min=span_min,
-#    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_mag_chordwise_{case}.png'),
+#    savepath=os.path.join(master_path, f'images/cf/convergence/cf_phase_portrait_mag_chordwise_{case}.png'),
 # )
 
 # print(40*'-')
 # print('Plotting Cf phase portrait (magnitude vs spanwise), Upper surface')
 # fl.plot_cf_phase_portrait(
 #    component_pair=(None, 'spanwise'), surface='Upper', span_min=span_min,
-#    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_mag_spanwise_{case}.png'),
+#    savepath=os.path.join(master_path, f'images/cf/convergence/cf_phase_portrait_mag_spanwise_{case}.png'),
 # )
 
 # print(40*'-')
 # print('Plotting Cf phase portrait (magnitude vs spanwise), Upper surface')
 # fl.plot_cf_phase_portrait(
 #    component_pair=('spanwise', 'chordwise'), surface='Upper', span_min=span_min,
-#    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_spanwise_chordwise_{case}.png'),
+#    savepath=os.path.join(master_path, f'images/cf/convergence/cf_phase_portrait_spanwise_chordwise_{case}.png'),
 # )
 
 # print(40*'-')
 # print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
 # fl.plot_cf_phase_portrait_by_strip(
 #    component_pair=(None, 'chordwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
-#    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_mag_chordwise_by_strip_{case}.png'),
+#    savepath=os.path.join(master_path, f'images/cf/convergence/cf_phase_portrait_mag_chordwise_by_strip_{case}.png'),
 # )
 
 # print(40*'-')
 # print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
 # fl.plot_cf_phase_portrait_by_strip(
 #    component_pair=(None, 'spanwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
-#    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_mag_spanwise_by_strip_{case}.png'),
+#    savepath=os.path.join(master_path, f'images/cf/convergence/cf_phase_portrait_mag_spanwise_by_strip_{case}.png'),
 # )
 
 # print(40*'-')
 # print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
 # fl.plot_cf_phase_portrait_by_strip(
 #    component_pair=('spanwise', 'chordwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
-#    savepath=os.path.join(master_path, f'images/cf/cf_phase_portrait_spanwise_chordwise_by_strip_{case}.png'),
+#    savepath=os.path.join(master_path, f'images/cf/convergence/cf_phase_portrait_spanwise_chordwise_by_strip_{case}.png'),
 # )
 
 # Convergence checking: cumulative mean+variance and higher-order
@@ -400,43 +400,86 @@ print(40*'-')
 print('Plotting cumulative mean+variance of Cf magnitude')
 plot_cumulative_stats(
    cf_mag_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
-   savepath=os.path.join(master_path, f'images/cf/cf_mag_cumulative_stats_{case}.png'),
+   savepath=os.path.join(master_path, f'images/cf/convergence/cf_mag_cumulative_stats_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting cumulative mean+variance of chordwise Cf')
 plot_cumulative_stats(
    cf_chordwise_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_{f,chordwise}$ [-]',
-   savepath=os.path.join(master_path, f'images/cf/cf_chordwise_cumulative_stats_{case}.png'),
+   savepath=os.path.join(master_path, f'images/cf/convergence/cf_chordwise_cumulative_stats_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting cumulative mean+variance of spanwise Cf')
 plot_cumulative_stats(
    cf_spanwise_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_{f,spanwise}$ [-]',
-   savepath=os.path.join(master_path, f'images/cf/cf_spanwise_cumulative_stats_{case}.png'),
+   savepath=os.path.join(master_path, f'images/cf/convergence/cf_spanwise_cumulative_stats_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting cumulative skewness+flatness of Cf magnitude')
 plot_cumulative_moments(
    cf_mag_series, dt=dt, rpm=rpm, sync='none', label='$C_f$',
-   savepath=os.path.join(master_path, f'images/cf/cf_mag_cumulative_moments_{case}.png'),
+   savepath=os.path.join(master_path, f'images/cf/convergence/cf_mag_cumulative_moments_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting cumulative skewness+flatness of chordwise Cf')
 plot_cumulative_moments(
    cf_chordwise_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,chordwise}$',
-   savepath=os.path.join(master_path, f'images/cf/cf_chordwise_cumulative_moments_{case}.png'),
+   savepath=os.path.join(master_path, f'images/cf/convergence/cf_chordwise_cumulative_moments_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting cumulative skewness+flatness of spanwise Cf')
 plot_cumulative_moments(
    cf_spanwise_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,spanwise}$',
-   savepath=os.path.join(master_path, f'images/cf/cf_spanwise_cumulative_moments_{case}.png'),
+   savepath=os.path.join(master_path, f'images/cf/convergence/cf_spanwise_cumulative_moments_{case}.png'),
 )
+
+print(40*'-')
+print('Plotting cf magnitude autocorrelation, first half vs second half of the run')
+plot_autocorrelation_windows(
+  cf_mag_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+  savepath=os.path.join(master_path, f'images/cf/convergence/cf_mag_autocorrelation_windows_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting cf spanwise autocorrelation, first half vs second half of the run')
+plot_autocorrelation_windows(
+  cf_spanwise_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+  savepath=os.path.join(master_path, f'images/cf/convergence/cf_spanwise_autocorrelation_windows_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting cf chordwise autocorrelation, first half vs second half of the run')
+plot_autocorrelation_windows(
+  cf_chordwise_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+  savepath=os.path.join(master_path, f'images/cf/convergence/cf_chordwise_autocorrelation_windows_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting integral timescale / required averaging time for cf magnitude')
+plot_integral_timescale(
+  cf_mag_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+  savepath=os.path.join(master_path, f'images/cf/convergence/cf_mag_integral_timescale_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting integral timescale / required averaging time for cf spanwise')
+plot_integral_timescale(
+  cf_spanwise_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+  savepath=os.path.join(master_path, f'images/cf/convergence/cf_spanwise_integral_timescale_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting integral timescale / required averaging time for cf chordwise')
+plot_integral_timescale(
+  cf_chordwise_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+  savepath=os.path.join(master_path, f'images/cf/convergence/cf_chordwise_integral_timescale_{case}.png'),
+)
+
 
 # ------------- Any surface variable at radii (Cp, y+, RMS, ...) ------------- #
 #
