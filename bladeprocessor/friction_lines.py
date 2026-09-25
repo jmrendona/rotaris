@@ -590,6 +590,126 @@ class FrictionLines:
 
         return curves
 
+    def _nearest_point(self, span_pct: float, chord_pct: float, surface: str = 'Upper',
+                        tol: float = 0.0015, reverse_chord: bool = False,
+                        span_min: float = None, span_max: float = None):
+
+        '''
+        Index of the raw surfel nearest a target (r/R, x/c) location,
+        given as percentages (0-100 each) - same idea and purpose as
+        SurfaceVariable._nearest_point() (see that docstring for the
+        full rationale: this exists so a single point can be picked by a
+        physically meaningful location instead of an opaque raw array
+        index), reimplemented here since FrictionLines keeps its own
+        separate radius/chord machinery (_radius(), _span_chord()) and
+        its own chordwise-normalization convention (plain per-band
+        min/max, matching cf_at_radii() - NOT SurfaceVariable's
+        percentile-trimmed version).
+
+        r/R uses this instance's r_tip (constructor arg); x/c uses the
+        SAME local, per-radius-band min/max chordwise convention as
+        cf_at_radii() (see that method's docstring for reverse_chord and
+        why span_min/span_max matter on a multi-blade file).
+
+        Returns
+        -------
+        idx : int
+            Index into this surface's raw point arrays (self.surfaces
+            [surface]['positions']/['force']/['normals'], and
+            cf_time_series()'s/cf()'s own point axis).
+        r_actual, xc_actual : float
+            The ACTUAL (radius [m], chord fraction) of the selected
+            point - report these alongside any requested span_pct/
+            chord_pct, since the nearest raw surfel generally won't sit
+            exactly on the target.
+        '''
+
+        if self.r_tip is None:
+            raise ValueError("r_tip must be set (in __init__) to locate a point by span percentage.")
+
+        r_target = (span_pct / 100.0) * self.r_tip
+        xc_target = chord_pct / 100.0
+
+        r = self._radius(surface)
+        span, chord = self._span_chord(surface)
+
+        mask = np.ones(len(r), dtype=bool)
+        if span_min is not None:
+            mask &= span >= span_min
+        if span_max is not None:
+            mask &= span <= span_max
+
+        band = mask & (np.abs(r - r_target) < tol)
+        n_sel = int(band.sum())
+        if n_sel < 10:
+            raise ValueError(
+                f"Only {n_sel} points within {tol} m of r={r_target:.4f} m (span_pct={span_pct}) "
+                f"on {surface} (after span_min/span_max cropping) - widen tol, check span_pct, "
+                "or check span_min/span_max."
+            )
+
+        idx_band = np.flatnonzero(band)
+        c = chord[band]
+        c_min, c_max = c.min(), c.max()
+        xc = (c - c_min) / (c_max - c_min)
+        if reverse_chord:
+            xc = 1 - xc
+
+        local_idx = int(np.argmin(np.abs(xc - xc_target)))
+        idx = int(idx_band[local_idx])
+
+        return idx, float(r[idx]), float(xc[local_idx])
+
+    def cf_time_series_at_point(self, span_pct: float, chord_pct: float, surface: str = 'Upper',
+                                 component: str = None, tol: float = 0.0015, reverse_chord: bool = False,
+                                 span_min: float = None, span_max: float = None):
+
+        '''
+        Cf at EVERY frame, at the ONE raw surfel nearest a given
+        (span_pct, chord_pct) location (see _nearest_point()) - the
+        single-point counterpart to cf_time_series() (every point) and
+        cf_at_radii() (many points along a full chord band).
+
+        Built specifically to feed a single, spatially-UNAVERAGED series
+        into the convergence-checking tools (cumulative_stats(),
+        cumulative_moments(), integral_timescale(), ...) instead of
+        cf_time_series(...).mean(axis=1)'s spatial mean. A converged
+        spatial mean is a NECESSARY but not SUFFICIENT condition for
+        convergence at any given point: averaging over many points can
+        make an aggregate look flat through cross-cancellation of
+        point-to-point fluctuation, even while individual points are
+        still evolving - the same reasoning Pope's own convergence
+        illustration applies to a single random variable's repeated
+        realizations, not a pre-averaged spatial aggregate. Checking a
+        single point directly - ideally one expected to be hardest to
+        converge, e.g. near a separation line or the tip - is a strictly
+        stronger test. See README.md's convergence-checking section.
+
+        Parameters
+        ----------
+        span_pct, chord_pct : float
+            Target location as percentages (0-100) of r/R and x/c - see
+            _nearest_point() for exactly how these map to a raw point
+            (the nearest available surfel, NOT an interpolated value).
+        component : None, 'chordwise', or 'spanwise' - see cf().
+
+        Returns
+        -------
+        values : np.ndarray, shape (n_frames,)
+        point_info : dict
+            {'idx', 'r', 'xc', 'surface'} - the ACTUAL point used (see
+            _nearest_point()), since the nearest raw surfel won't sit
+            exactly on the requested span_pct/chord_pct.
+        '''
+
+        idx, r_actual, xc_actual = self._nearest_point(
+            span_pct, chord_pct, surface=surface, tol=tol, reverse_chord=reverse_chord,
+            span_min=span_min, span_max=span_max)
+
+        series = self.cf_time_series(surface=surface, component=component)[:, idx]
+
+        return series, {'idx': idx, 'r': r_actual, 'xc': xc_actual, 'surface': surface}
+
     def plot_cf_radii(self, radii, surface: str = 'Upper', frame: int = None, component: str = None,
                        stat: str = 'mean', tol: float = 0.0015, n_chord_bins: int = 150, span_min: float = None,
                        span_max: float = None, reverse_chord: bool = False, cmap: str = 'cividis',

@@ -303,8 +303,85 @@ def cumulative_stats(series, dt: float = None, rpm: float = None,
     return x, running_mean, running_var, revolutions
 
 
+def rolling_stats(series, window: int, dt: float = None, rpm: float = None,
+                   sync: str = 'none', period_deg: float = None):
+
+    '''
+    Fixed-length, one-sample-at-a-time SLIDING window mean and variance -
+    the fixed-sensitivity counterpart to cumulative_stats()'s ever-
+    growing-from-zero running statistic.
+
+    A cumulative statistic's sensitivity to new data shrinks as 1/n: by
+    late in a long run, a single additional sample barely moves it at
+    all, so a genuine late-run drift can hide behind an already-flat-
+    looking cumulative curve simply because the curve has gotten
+    "stiff", not because the process has actually settled. A window of
+    FIXED length `window`, recomputed one sample at a time as it slides
+    through the whole record, keeps EQUAL sensitivity throughout - if it
+    still visibly moves late in the record while the cumulative curve
+    has already gone flat, that is real, additional evidence the process
+    has not converged, not a plotting artifact of the cumulative
+    average's own shrinking responsiveness. See plot_cumulative_stats()'s
+    `window` parameter to overlay both directly for comparison.
+
+    sync, period_deg : see cumulative_stats()/_sync_indices() - the same
+        three modes; `window` is counted in SYNC'D samples (post-sync
+        index count), matching cumulative_stats()'s own convention for
+        what "one sample" means.
+
+    Parameters
+    ----------
+    series, dt, rpm : see cumulative_mean().
+    window : int
+        Fixed number of (sync'd) samples per window - no default; this
+        is the one genuinely new choice this diagnostic needs. A
+        reasonable starting point is a small multiple of
+        integral_timescale()'s own T_int (converted to a sample count),
+        so each window actually spans several decorrelation times rather
+        than being dominated by a single one.
+
+    Returns
+    -------
+    x : np.ndarray, shape (n_sub - window + 1,)
+        Time [s] (or frame/revolution index, matching cumulative_mean())
+        of the LAST sample in each window - i.e. "using only the most
+        recent `window` samples as of this point in the record".
+    rolling_mean, rolling_var : np.ndarray, same shape as x - population
+        variance, same convention as cumulative_stats().
+    revolutions : np.ndarray, or None - see cumulative_mean().
+    '''
+
+    series = np.asarray(series, dtype=float)
+    if series.ndim != 1:
+        raise ValueError(f"series must be 1D (one value per frame), got shape {series.shape}")
+    if window < 2:
+        raise ValueError(f"window must be at least 2 - got {window}.")
+
+    idx, _ = _sync_indices(len(series), dt=dt, rpm=rpm, sync=sync, period_deg=period_deg)
+    sub = series[idx]
+    if len(sub) < window:
+        raise ValueError(f"Only {len(sub)} sample(s) left after sync='{sync}' - fewer than window={window}.")
+
+    # Two cumulative sums, subtracted `window` apart, give every
+    # fixed-length window's sum in one vectorized pass - equivalent to,
+    # but far cheaper than, recomputing each window's sum from scratch.
+    csum = np.cumsum(np.insert(sub, 0, 0.0))
+    csum2 = np.cumsum(np.insert(sub ** 2, 0, 0.0))
+
+    rolling_mean = (csum[window:] - csum[:-window]) / window
+    rolling_meansq = (csum2[window:] - csum2[:-window]) / window
+    rolling_var = rolling_meansq - rolling_mean ** 2
+
+    end_idx = idx[window - 1:]
+    x = end_idx * dt if dt is not None else end_idx.astype(float)
+    revolutions = x * rpm / 60.0 if (dt is not None and rpm is not None) else None
+
+    return x, rolling_mean, rolling_var, revolutions
+
+
 def plot_cumulative_stats(series, dt: float = None, rpm: float = None, sync: str = 'none',
-                           period_deg: float = None, ylabel: str = None, color: str = 'black',
+                           period_deg: float = None, window: int = None, ylabel: str = None,
+                           color: str = 'black', window_color: str = 'tab:orange',
                            savepath: str = None, dpi: int = 600):
 
     '''
@@ -313,6 +390,15 @@ def plot_cumulative_stats(series, dt: float = None, rpm: float = None, sync: str
     Pope's own <U>-and-<u'^2>-vs-sample-count figure (see that function's
     docstring for the citation caveat and what sync/period_deg fix for a
     periodic-plus-turbulent signal).
+
+    window : int, optional
+        If given, also overlay rolling_stats()'s FIXED-length sliding
+        statistic (see that function's docstring for why this is a
+        genuinely different, complementary check, not a duplicate of the
+        cumulative curve) in `window_color`. A late-record disagreement
+        between the two - the rolling curve still visibly moving while
+        the cumulative one has gone flat - is real evidence the process
+        has not actually settled.
 
     Returns
     -------
@@ -325,15 +411,25 @@ def plot_cumulative_stats(series, dt: float = None, rpm: float = None, sync: str
     fig, (ax_mean, ax_var) = plt.subplots(2, 1, figsize=(9, 8), sharex=True)
 
     marker = 'o-' if sync != 'none' else '-'
-    ax_mean.plot(x, running_mean, marker, color=color, linewidth=1.5, markersize=4)
+    cumulative_label = 'Cumulative' if window is not None else None
+    ax_mean.plot(x, running_mean, marker, color=color, linewidth=1.5, markersize=4, label=cumulative_label)
     ax_mean.set_ylabel(ylabel or r'$\langle X \rangle$')
     ax_mean.grid(True, alpha=0.4)
 
-    ax_var.plot(x, running_var, marker, color=color, linewidth=1.5, markersize=4)
+    ax_var.plot(x, running_var, marker, color=color, linewidth=1.5, markersize=4, label=cumulative_label)
     ax_var.set_xlabel('Time [s]' if dt is not None else 'Frame index')
     ax_var.set_ylabel(r"$\langle x'^2 \rangle$")
     ax_var.grid(True, alpha=0.4)
     ax_var.set_xlim(x[0], x[-1])
+
+    if window is not None:
+        xw, rolling_mean, rolling_var, _ = rolling_stats(
+            series, window, dt=dt, rpm=rpm, sync=sync, period_deg=period_deg)
+        window_label = f'Rolling (window={window})'
+        ax_mean.plot(xw, rolling_mean, '-', color=window_color, linewidth=1.2, alpha=0.85, label=window_label)
+        ax_var.plot(xw, rolling_var, '-', color=window_color, linewidth=1.2, alpha=0.85, label=window_label)
+        ax_mean.legend()
+        ax_var.legend()
 
     if revolutions is not None:
         ax_top = ax_mean.twiny()
@@ -433,8 +529,72 @@ def cumulative_moments(series, dt: float = None, rpm: float = None,
     return x, running_skewness, running_flatness, revolutions
 
 
+def rolling_moments(series, window: int, dt: float = None, rpm: float = None,
+                     sync: str = 'none', period_deg: float = None):
+
+    '''
+    Fixed-length, one-sample-at-a-time SLIDING window skewness and
+    flatness - rolling_stats()'s counterpart one order higher, same
+    rationale (see rolling_stats()'s own docstring). Skewness/flatness
+    are already known (cumulative_moments()'s own docstring) to need
+    substantially more samples to converge than the mean/variance do -
+    which makes them, if anything, MORE likely to still be moving
+    locally even after their cumulative curve has gone visually flat, so
+    this comparison matters at least as much here as for
+    rolling_stats()/cumulative_stats().
+
+    Same numerical-stability approach as cumulative_moments() (a single
+    up-front location shift by the sync'd series' own mean, before
+    accumulating any power sums) - see that function's docstring.
+
+    Returns
+    -------
+    x, revolutions : see rolling_stats().
+    rolling_skewness, rolling_flatness : np.ndarray, same shape as x.
+    '''
+
+    series = np.asarray(series, dtype=float)
+    if series.ndim != 1:
+        raise ValueError(f"series must be 1D (one value per frame), got shape {series.shape}")
+    if window < 4:
+        raise ValueError(f"window must be at least 4 for a meaningful skewness/flatness - got {window}.")
+
+    idx, _ = _sync_indices(len(series), dt=dt, rpm=rpm, sync=sync, period_deg=period_deg)
+    sub = series[idx]
+    if len(sub) < window:
+        raise ValueError(f"Only {len(sub)} sample(s) left after sync='{sync}' - fewer than window={window}.")
+
+    shift = sub.mean()
+    s = sub - shift  # location shift only - doesn't change skewness/flatness, avoids cancellation
+
+    c1 = np.cumsum(np.insert(s, 0, 0.0))
+    c2 = np.cumsum(np.insert(s ** 2, 0, 0.0))
+    c3 = np.cumsum(np.insert(s ** 3, 0, 0.0))
+    c4 = np.cumsum(np.insert(s ** 4, 0, 0.0))
+
+    m1 = (c1[window:] - c1[:-window]) / window
+    m2 = (c2[window:] - c2[:-window]) / window
+    m3 = (c3[window:] - c3[:-window]) / window
+    m4 = (c4[window:] - c4[:-window]) / window
+
+    mu2 = m2 - m1 ** 2
+    mu3 = m3 - 3 * m1 * m2 + 2 * m1 ** 3
+    mu4 = m4 - 4 * m1 * m3 + 6 * m1 ** 2 * m2 - 3 * m1 ** 4
+
+    with np.errstate(invalid='ignore', divide='ignore'):
+        rolling_skewness = mu3 / mu2 ** 1.5
+        rolling_flatness = mu4 / mu2 ** 2
+
+    end_idx = idx[window - 1:]
+    x = end_idx * dt if dt is not None else end_idx.astype(float)
+    revolutions = x * rpm / 60.0 if (dt is not None and rpm is not None) else None
+
+    return x, rolling_skewness, rolling_flatness, revolutions
+
+
 def plot_cumulative_moments(series, dt: float = None, rpm: float = None, sync: str = 'none',
-                             period_deg: float = None, label: str = None, color: str = 'black',
+                             period_deg: float = None, window: int = None, label: str = None,
+                             color: str = 'black', window_color: str = 'tab:orange',
                              savepath: str = None, dpi: int = 600):
 
     '''
@@ -445,6 +605,11 @@ def plot_cumulative_moments(series, dt: float = None, rpm: float = None, sync: s
     label : str, optional
         Prefixed to the y-axis labels (e.g. 'Thrust') - defaults to
         nothing (plain 'Skewness [-]' / 'Flatness [-]').
+    window : int, optional
+        If given, also overlay rolling_moments()'s FIXED-length sliding
+        skewness/flatness in `window_color` - see
+        plot_cumulative_stats()'s own `window` parameter for the
+        rationale (identical here, one order higher).
 
     Returns
     -------
@@ -458,18 +623,28 @@ def plot_cumulative_moments(series, dt: float = None, rpm: float = None, sync: s
 
     marker = 'o-' if sync != 'none' else '-'
     prefix = f'{label} ' if label else ''
+    cumulative_label = 'Cumulative' if window is not None else None
 
-    ax_skew.plot(x, running_skewness, marker, color=color, linewidth=1.5, markersize=4)
+    ax_skew.plot(x, running_skewness, marker, color=color, linewidth=1.5, markersize=4, label=cumulative_label)
     ax_skew.axhline(0, color='k', linewidth=0.8, alpha=0.5, linestyle='--')
     ax_skew.set_ylabel(f'{prefix}Skewness [-]')
     ax_skew.grid(True, alpha=0.4)
 
-    ax_flat.plot(x, running_flatness, marker, color=color, linewidth=1.5, markersize=4)
+    ax_flat.plot(x, running_flatness, marker, color=color, linewidth=1.5, markersize=4, label=cumulative_label)
     ax_flat.axhline(3, color='k', linewidth=0.8, alpha=0.5, linestyle='--')
     ax_flat.set_xlabel('Time [s]' if dt is not None else 'Frame index')
     ax_flat.set_ylabel(f'{prefix}Flatness [-]')
     ax_flat.grid(True, alpha=0.4)
     ax_flat.set_xlim(x[0], x[-1])
+
+    if window is not None:
+        xw, rolling_skewness, rolling_flatness, _ = rolling_moments(
+            series, window, dt=dt, rpm=rpm, sync=sync, period_deg=period_deg)
+        window_label = f'Rolling (window={window})'
+        ax_skew.plot(xw, rolling_skewness, '-', color=window_color, linewidth=1.2, alpha=0.85, label=window_label)
+        ax_flat.plot(xw, rolling_flatness, '-', color=window_color, linewidth=1.2, alpha=0.85, label=window_label)
+        ax_skew.legend()
+        ax_flat.legend()
 
     if revolutions is not None:
         ax_top = ax_skew.twiny()

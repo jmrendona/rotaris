@@ -1890,6 +1890,29 @@ plot_cumulative_moments(cf_chordwise_series, dt=0.000056, rpm=6000, sync='none',
                          savepath='cf_chordwise_cumulative_moments.png')
 ```
 
+### Convergence checking at a single point, not just the spatial mean
+
+Every example above feeds these functions a SPATIAL MEAN (`cf_time_series(...).mean(axis=1)`, `total_loads()`'s whole-blade sum). A converged spatial mean is a NECESSARY but not SUFFICIENT condition for local convergence: averaging over many points/strips can make an aggregate look flat purely through cross-cancellation of point-to-point fluctuation, even while any individual point is still evolving - the same reasoning Pope's own convergence illustration (`<U>`/`<u'^2>` vs. sample count) applies to a single random variable's repeated realizations, not a pre-averaged spatial aggregate. Checking a single point directly - ideally one expected to be hardest to converge (near a separation line, the tip) - is a strictly stronger test, and worth running ALONGSIDE the spatial-mean check above, not instead of it.
+
+`FrictionLines.cf_time_series_at_point(span_pct, chord_pct, ...)` and `StripForces.nearest_strip(span_pct, result)` pick that single point/strip by a physically meaningful location (percentages of `r/R` and, for `FrictionLines`, local `x/c`) instead of an opaque raw array index - the same idea as `SurfaceVariable.timetrace()`'s `(span_pct, chord_pct)` convention used for wall-pressure spectra:
+
+```python
+from bladeprocessor.convergence import plot_cumulative_stats
+
+# FrictionLines: a single point near the tip, 25% chord, Upper surface:
+cf_tip_series, point_info = fl.cf_time_series_at_point(span_pct=90, chord_pct=25, surface='Upper')
+print(point_info)  # {'idx', 'r', 'xc', 'surface'} - the ACTUAL point used
+plot_cumulative_stats(cf_tip_series, dt=0.000056, rpm=6000, ylabel='$C_f$ [-]',
+                       savepath='cf_tip_point_cumulative_stats.png')
+
+# StripForces: the single strip nearest 90% span, from an existing compute() result:
+idx, r_actual = sf.nearest_strip(90, result_inst)
+plot_cumulative_stats(result_inst['axial'][:, idx], dt=0.000056, rpm=6000, ylabel='Thrust [N]',
+                       savepath='thrust_tip_strip_cumulative_stats.png')
+```
+
+`chord_pct`/`span_pct` map to the nearest RAW surfel/strip, not an interpolated value - `point_info`/`r_actual` report exactly which point was actually used, since it generally won't sit exactly on the requested target (see `FrictionLines._nearest_point()`'s and `StripForces.nearest_strip()`'s own docstrings). `FrictionLines._nearest_point()` uses the same local, per-radius-band chordwise normalization as `cf_at_radii()` (plain min/max, `reverse_chord` orientation caveat and all - see that method).
+
 ### Convergence checking: running/cumulative mean - `bladeprocessor/convergence.py`
 
 The cumulative (running) mean of any scalar time series as a function of
@@ -1964,6 +1987,33 @@ can be that slow dilution finishing, not necessarily the flow itself
 still being transient right then. Slicing out an initial warm-up window
 before calling any function in this module (e.g.
 `loads['thrust'][frames_per_rev:]`) isolates the two.
+
+#### Cross-checking the cumulative curve with a fixed-size rolling window
+
+The "~1/t, not exponentially" dilution above has a sharper consequence:
+a CUMULATIVE statistic's sensitivity to new data shrinks as `1/n`, so by
+late in a long run a single additional sample barely moves it at all - a
+genuine late-run drift can hide behind an already-flat-LOOKING cumulative
+curve simply because the curve has gotten "stiff", not because the
+process has actually settled. `rolling_stats()`/`rolling_moments()`
+compute the SAME statistics over a FIXED-length window, recomputed one
+sample at a time as it slides through the whole record, which keeps
+EQUAL sensitivity throughout - passed as `window` to `plot_cumulative_stats()`/
+`plot_cumulative_moments()`, it overlays directly on the cumulative
+curve for comparison:
+
+```python
+plot_cumulative_stats(loads['thrust'], dt=0.000056, rpm=6000, window=200,
+                       ylabel='Thrust [N]', savepath='thrust_cumulative_stats_rolling.png')
+```
+
+If the rolling curve still visibly moves late in the record while the
+cumulative one has already gone flat, that is real, additional evidence
+the process has not converged - not a plotting artifact. `window` is
+counted in (sync'd) samples, with no automatic default: a reasonable
+starting point is a small multiple of `integral_timescale()`'s own
+`T_int`, converted to a sample count, so each window spans several
+decorrelation times rather than being dominated by just one.
 
 ### Convergence checking: autocorrelation
 

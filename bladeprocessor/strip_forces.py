@@ -501,6 +501,58 @@ class StripForces:
             'totals': totals,
         }
 
+    def nearest_strip(self, span_pct: float, result: dict):
+
+        '''
+        Index of the strip in a compute() result nearest a target
+        span_pct (r/R, 0-100) - the StripForces counterpart to
+        FrictionLines._nearest_point(): since a StripForces "strip" is
+        already a chord-integrated radial band (see compute()), there is
+        no separate chord_pct to pick here, only which radial STRIP is
+        closest to the target.
+
+        Built for the same reason as FrictionLines.cf_time_series_at_point():
+        so a single, spatially-UNAVERAGED strip's own series (e.g.
+        result['axial'][:, idx]) can be fed into the convergence-checking
+        tools (cumulative_stats(), integral_timescale(), ...) directly,
+        picked by a physically meaningful r/R rather than an opaque
+        array index - complementing, not replacing, total_loads()'s
+        whole-blade spatial sum (a converged spatial total is necessary
+        but not sufficient for convergence at any given strip - see
+        README.md's convergence-checking section).
+
+        Parameters
+        ----------
+        span_pct : float
+            Target r/R as a percentage (0-100) - e.g. 90 for a strip
+            near the tip.
+        result : dict
+            compute()'s return value (any n_span_bins/n_chord_bins - only
+            'radius' is used).
+
+        Returns
+        -------
+        idx : int
+            Index into result['radius']/result['axial']/etc.'s strip axis.
+        r_actual : float
+            The ACTUAL mean radius [m] of the selected strip - report
+            alongside the requested span_pct, since a discrete strip
+            generally won't sit exactly on the target.
+        '''
+
+        if self.r_tip is None:
+            raise ValueError("r_tip must be set (in __init__) to locate a strip by span percentage.")
+
+        r_target = (span_pct / 100.0) * self.r_tip
+        radius = result['radius']
+        valid = np.flatnonzero(~np.isnan(radius))
+        if valid.size == 0:
+            raise ValueError("result['radius'] has no valid (non-NaN) strips.")
+
+        idx = int(valid[np.argmin(np.abs(radius[valid] - r_target))])
+
+        return idx, float(radius[idx])
+
     def save(self, result: dict, filepath: str, dt: float = None):
 
         '''

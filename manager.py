@@ -438,6 +438,38 @@ plot_cumulative_moments(
    savepath=os.path.join(master_path, f'images/cf/convergence/cf_spanwise_cumulative_moments_{case}.png'),
 )
 
+# # Rolling (fixed-size sliding window) overlay on top of the cumulative
+# # curve above (see README.md, "Cross-checking the cumulative curve with
+# # a fixed-size rolling window") - a cumulative statistic's sensitivity
+# # to new data shrinks as 1/n, so a late-run drift can hide behind an
+# # already-flat-looking cumulative curve; a fixed-length window stays
+# # equally sensitive throughout. window has no good universal default -
+# # pick something like a few times integral_timescale()'s own T_int
+# # (converted to a sample count) once that's been computed for this
+# # case, not blindly reused from another one.
+# plot_cumulative_stats(
+#    cf_mag_series, dt=dt, rpm=rpm, sync='none', window=200, ylabel='$C_f$ [-]',
+#    savepath=os.path.join(master_path, f'images/cf/convergence/cf_mag_cumulative_stats_rolling_{case}.png'),
+# )
+
+# Convergence at a SINGLE point, not just the spatial mean above (see
+# README.md, "Convergence checking at a single point, not just the
+# spatial mean") - a converged spatial mean is necessary but not
+# sufficient for convergence at any given point; span_pct/chord_pct=90/25
+# targets a point near the tip, a location expected to be among the
+# hardest to converge (see friction_lines_test_migration_overlay.png-
+# style separation/reattachment discussion above for why the tip region
+# is a reasonable "hardest case" choice on this project's own geometry -
+# adjust per case).
+print(40*'-')
+print('Plotting cumulative mean+variance of Cf magnitude at a single point near the tip')
+cf_tip_series, cf_tip_point_info = fl.cf_time_series_at_point(span_pct=90, chord_pct=25, surface='Upper')
+print('Point actually used: ', cf_tip_point_info)
+plot_cumulative_stats(
+   cf_tip_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
+   savepath=os.path.join(master_path, f'images/cf/convergence/cf_tip_point_cumulative_stats_{case}.png'),
+)
+
 print(40*'-')
 print('Plotting cf magnitude autocorrelation, first half vs second half of the run')
 plot_autocorrelation_windows(
@@ -1123,6 +1155,34 @@ plot_integral_timescale(
 # plot_cumulative_moments(
 #    totals_inst['torque'], dt=dt, rpm=rpm, sync='none', label='Torque',
 #    savepath=os.path.join(master_path, f'images/forces/convergence/torque_cumulative_moments_{case}.png'),
+# )
+
+# # Rolling (fixed-size sliding window) overlay on the cumulative curve
+# # above (see README.md, "Cross-checking the cumulative curve with a
+# # fixed-size rolling window") - reveals a late-run drift a cumulative
+# # curve's own shrinking (1/n) sensitivity can hide. window has no good
+# # universal default - pick a few times integral_timescale()'s own
+# # T_int (as a sample count) for this case, not a blindly reused number.
+# print(40*'-')
+# print('Plotting cumulative mean+variance of thrust with a rolling-window overlay')
+# plot_cumulative_stats(
+#    totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', window=200, ylabel='Thrust [N]',
+#    savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_stats_rolling_{case}.png'),
+# )
+
+# # Convergence at a SINGLE strip, not just the whole-blade total above
+# # (see README.md, "Convergence checking at a single point, not just the
+# # spatial mean") - a converged whole-blade total is necessary but not
+# # sufficient for convergence at any given strip; nearest_strip() picks
+# # one by r/R instead of an opaque strip index - 90% span (near the tip)
+# # is a reasonable "hardest to converge" starting choice, adjust per case.
+# print(40*'-')
+# print('Plotting cumulative mean+variance of axial force at the strip nearest 90% span')
+# tip_idx, tip_r_actual = sf_inst.nearest_strip(90, result_inst)
+# print(f'Strip actually used: idx={tip_idx}, r={tip_r_actual:.4f} m')
+# plot_cumulative_stats(
+#    result_inst['axial'][:, tip_idx], dt=dt, rpm=rpm, sync='none', ylabel='Axial force [N]',
+#    savepath=os.path.join(master_path, f'images/forces/convergence/axial_tip_strip_cumulative_stats_{case}.png'),
 # )
 
 # # Convergence checking: autocorrelation comparison between independent
