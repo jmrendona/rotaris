@@ -1634,6 +1634,27 @@ Uses a plain FFT over the whole time series (not Welch's method like
 `SurfaceVariable.periodogram()`). The file should span close to an
 integer number of full revolutions.
 
+`harmonics()`'s result also always includes `'mean'` (`F_0(r)`, shape
+`(n_span_bins,)`) - each strip's own time-averaged, SIGNED load,
+regardless of `detrend` (which only controls the `n >= 1` harmonics'
+own FFT, not whether this value is reported). Don't mistake this for an
+irrelevant leftover: a perfectly steady per-blade load, once mounted on
+a rotating blade and summed across all blades, is exactly the classical
+**Gutin steady loading noise** source - it radiates strongly at the
+blade-passage frequency and its harmonics purely because the *source*
+is moving in a circle (a retarded-time/Doppler effect), even though it
+never oscillates in the rotating frame; for many rotors in
+near-axisymmetric, low-speed conditions `F_0` is the *dominant* loading
+noise term, not a silent one. See
+`rotaris-docs/strip_forces_section.tex`'s "Harmonic Decomposition and
+Hanson's Method" subsection for the full derivation (blade-count
+selection rule, steady vs. unsteady loading noise, and the
+radiation-efficiency caveat on comparing `|F_n|` across different `n`).
+`plot_harmonics(..., show_mean=True)` (default) draws this as a 'Mean'
+bar (`|F_0|`, since the log-magnitude axis can't show its sign directly)
+alongside the 1P, 2P, ... bars; it's omitted from the phase panel, since
+a constant has no periodic phase.
+
 #### Phase: `harmonics(return_phase=True)` / `peak_azimuth()` / `reconstruct_from_harmonics()`
 
 Off by default (most exploratory work), `harmonics(..., return_phase=True)`
@@ -1650,13 +1671,20 @@ also returns each harmonic's phase [rad], needed for two things:
    revolution).
 
 `reconstruct_from_harmonics()` rebuilds an azimuth-domain curve from
-magnitude + phase (`sum_n magnitude_n * cos(n*phi - phase_n)`, DC
-excluded since `harmonics()` detrends it away) an overlay this against
-`phase_lock()`'s own empirical folded curve as a validation check: if a
-handful of harmonics already reconstructs the real curve closely, that
-confirms the FFT decomposition captured the dominant unsteady content
-(and tells you honestly how many harmonics actually matter for this
-case), rather than trusting magnitudes/phases blind.
+magnitude + phase (`sum_n magnitude_n * cos(n*phi + phase_n)` - note the
+`+`, fixed this session after a sign-convention bug; the fluctuating
+part only, DC/`F_0` excluded, since the sum only runs over the `n >= 1`
+harmonics - add `h['mean']` back separately for an absolute-level
+reconstruction) and overlay this against `phase_lock()`'s own empirical
+folded curve as a validation check: if a handful of harmonics already
+reconstructs the real curve closely, that confirms the FFT decomposition
+captured the dominant unsteady content (and tells you honestly how many
+harmonics actually matter for this case), rather than trusting
+magnitudes/phases blind. This reconstruction, swept over the full
+0-360 deg azimuth range, is also the answer to "what does this harmonic
+content actually look like at every rotor position" - `plot_harmonics()`
+alone only reports magnitude/phase, an abstract per-harmonic descriptor,
+not a directly-plotted curve versus azimuth.
 
 ```python
 h = sf.harmonics(result, dt=0.000056, component='axial', n_harmonics=17, return_phase=True)
@@ -1670,10 +1698,50 @@ az, recon = sf.reconstruct_from_harmonics(h, azimuth_deg=phase_locked['azimuth_d
 ```
 
 **Downstream output**: `save_harmonics(h, filepath)` writes `radius`,
-`chord` (if chord-subdivided), `harmonic`, `magnitude`, and `phase` (if
-present) to one self-contained `.h5` file giving the actual Hanson-model-ready
-artifact, usable without this class or the original `.snc`-derived file
-again.
+`chord` (if chord-subdivided), `harmonic`, `magnitude`, `mean`, and
+`phase` (if present) to one self-contained `.h5` file giving the actual
+Hanson-model-ready artifact, usable without this class or the original
+`.snc`-derived file again.
+
+#### One harmonic at a time, around the true azimuth: `plot_harmonic_polar()`
+
+A companion to `plot_harmonics()` for digging into ONE harmonic at a
+time: a polar plot (radius = force [N], angle = azimuth [deg], same
+`0 deg`-at-east/counterclockwise convention as `plot_vs_angle()`) of
+that single harmonic's own reconstructed contribution around a full
+revolution, for one strip - or a small handful, overlaid - literally a
+circle, bulging outward where that harmonic peaks and shrinking where it
+troughs, with exactly `harmonic` such bumps per revolution (an earlier
+`plot_harmonics_heatmap()` attempt at a similar idea - one grid cell per
+(harmonic, strip) pair - packed too much into one plot to actually be
+readable and was removed).
+
+```python
+h = sf.harmonics(result, dt=0.000056, component='axial', n_harmonics=17, return_phase=True)
+
+# a single strip - literally one circle:
+sf.plot_harmonic_polar(h, harmonic=1, strips=4, savepath='strip_1P_polar_strip5.png')
+
+# a handful of strips overlaid, same harmonic, for comparison:
+sf.plot_harmonic_polar(h, harmonic=3, strips=[0, 3, 6, 9], savepath='strip_3P_polar.png')
+```
+
+`include_mean=True` (default) adds the strip's own `F_0` back in, so the
+radius reads as an actual physical force over the revolution (mean +/-
+this one harmonic's oscillation) rather than the oscillation alone
+centered on zero - this also keeps the curve non-negative in the normal
+case, which matters here: matplotlib's polar axes plot a NEGATIVE radius
+at the mirrored azimuth (`angle + 180 deg`), which would relocate part
+of the curve away from the true azimuth it actually belongs to.
+`mark_peaks=True` (default) stars each curve's `harmonic` equally spaced
+peak azimuths (`peak_azimuth()`'s own value) directly on the curve - the
+direct visual answer to "where does this harmonic peak".
+
+**This does NOT replace `reconstruct_from_harmonics()`/`plot_vs_angle()`**,
+which sum ALL harmonics together into the actual total loading curve at
+a strip; this plots exactly ONE harmonic in isolation (plus, optionally,
+the mean), to see that one harmonic's own shape and peak location
+without the others superimposed on top of it.
 
 ### Convergence checking: phase portraits - `plot_phase_portrait()` / `plot_phase_portrait_by_strip()`
 

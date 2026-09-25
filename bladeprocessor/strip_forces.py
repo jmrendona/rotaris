@@ -988,9 +988,20 @@ class StripForces:
             resolve (Nyquist: rotation frequency * n_harmonics <= 1/(2 dt)).
         detrend : bool
             Remove each strip's own mean before the FFT (default True) -
-            a nonzero mean shows up at 0P (DC), not a real harmonic;
-            doesn't change 1P and above, but keeps a large DC offset
-            from dominating the FFT's overall scaling.
+            a nonzero mean shows up at 0P (DC) in the FFT itself, not a
+            real (oscillating) harmonic; doesn't change 1P and above,
+            but keeps a large DC offset from dominating the FFT's
+            overall scaling. This does NOT affect whether the mean
+            itself is reported - see 'mean' below, which is always
+            returned regardless of this flag. F_0 is not acoustically
+            irrelevant just because it doesn't oscillate in this
+            (rotating, per-blade) frame: a STEADY per-blade loading,
+            once combined across all rotating blades, is exactly the
+            classical Gutin "steady loading noise" source, radiating at
+            the blade-passage frequency and its harmonics purely because
+            the source itself is moving in a circle - see this project's
+            documentation section on harmonic decomposition
+            (rotaris-docs/strip_forces_section.tex) for the derivation.
         return_phase : bool
             If True, also return each harmonic's PHASE (radians, from
             `numpy.angle`, in `(-pi, pi]`) alongside its magnitude - see
@@ -1025,6 +1036,14 @@ class StripForces:
             'phase' : np.ndarray, shape (n_harmonics, n_span_bins) -
                 only present if return_phase=True - phase [rad] at each
                 harmonic, each strip.
+            'mean' : np.ndarray, shape (n_span_bins,) - F_0(r) [N], each
+                strip's own time-averaged (signed) load - the steady
+                thrust/torque contribution at that station. Computed
+                directly as arr.mean(axis=0), independent of `detrend`
+                (which only controls the n>=1 harmonics' own FFT scaling,
+                not this value). Unlike 'magnitude', this is signed, not
+                an absolute value, and has no associated phase - a
+                constant has no azimuth at which it "peaks".
         '''
 
         if self.rpm is None:
@@ -1062,6 +1081,7 @@ class StripForces:
             'radius': result['radius'], 'chord': result['chord'],
             'harmonic': harmonic_numbers,
             'magnitude': magnitude[bin_idx],
+            'mean': arr.mean(axis=0),
         }
         if return_phase:
             out['phase'] = phase[bin_idx]
@@ -1180,8 +1200,11 @@ class StripForces:
             data.create_dataset('magnitude', data=harmonics_result['magnitude'])
             if 'phase' in harmonics_result:
                 data.create_dataset('phase', data=harmonics_result['phase'])
+            if 'mean' in harmonics_result:
+                data.create_dataset('mean', data=harmonics_result['mean'])
 
-    def plot_harmonics(self, harmonics_result: dict, strips=None, show_phase: bool = False, ax=None,
+    def plot_harmonics(self, harmonics_result: dict, strips=None, show_phase: bool = False,
+                        show_mean: bool = True, ax=None,
                         cmap: str = 'cividis', savepath: str = None, dpi: int = 600):
 
         '''
@@ -1200,6 +1223,15 @@ class StripForces:
             about to hand this off downstream (see harmonics()'s "What
             the phase is for" note), not for a first look at the
             spectrum.
+        show_mean : bool
+            If True (default), also draw a '0P'/'Mean' bar using
+            |harmonics_result['mean']| alongside the 1P, 2P, ... bars,
+            on the SAME log-magnitude axis - the steady per-blade load,
+            plotted as an absolute value since the log axis can't show
+            its sign directly (this term IS signed - see harmonics()'s
+            'mean' docstring entry). Not drawn in the phase panel: a
+            constant term has no periodic phase. Set False to reproduce
+            the old (harmonic-only) bar chart.
 
         Returns
         -------
@@ -1212,13 +1244,23 @@ class StripForces:
             raise ValueError(
                 "show_phase=True needs harmonics_result['phase'] - call harmonics(..., return_phase=True) first."
             )
+        show_mean = show_mean and 'mean' in harmonics_result
 
         radius = harmonics_result['radius']
         valid = np.flatnonzero(~np.isnan(radius))
         sel = valid if strips is None else np.asarray(strips)
 
-        harmonic = harmonics_result['harmonic']
+        harmonic_ac = harmonics_result['harmonic']
         mag = harmonics_result['magnitude']  # (n_harmonics, n_span_bins)
+
+        if show_mean:
+            # Only the magnitude panel gets a 0P/mean bar - the phase
+            # panel (below) keeps using harmonic_ac unchanged, since a
+            # constant term has no periodic phase to show.
+            harmonic = np.concatenate([[0], harmonic_ac])
+            mag = np.vstack([np.abs(harmonics_result['mean'])[None, :], mag])
+        else:
+            harmonic = harmonic_ac
 
         if ax is None:
             if show_phase:
@@ -1239,8 +1281,10 @@ class StripForces:
             ax.bar(harmonic + offset, mag[:, i], width=width, color=color, label=f'Strip {i + 1}')
 
         ax.set_yscale('log')
-        ax.set_ylabel(r'$|F_n|$ [N]')
+        ax.set_ylabel(r'$|F_n|$ [N]' + (r' (0P $=|$mean$|$)' if show_mean else ''))
         ax.set_xticks(harmonic)
+        ax.set_xticklabels(['Mean' if h == 0 else f'{int(h)}' for h in harmonic] if show_mean
+                            else [f'{int(h)}' for h in harmonic])
         ax.grid(True, which='both', axis='y', alpha=0.3)
         ax.legend()
 
@@ -1248,7 +1292,7 @@ class StripForces:
             phase_deg = np.rad2deg(harmonics_result['phase'])
             for k, (color, i) in enumerate(zip(colors, sel)):
                 offset = (k - (n_bars - 1) / 2) * width
-                ax_phase.bar(harmonic + offset, phase_deg[:, i], width=width, color=color)
+                ax_phase.bar(harmonic_ac + offset, phase_deg[:, i], width=width, color=color)
             ax_phase.set_xlabel('Harmonic ($n$P)')
             ax_phase.set_ylabel(r'$\angle F_n$ [$^\circ$]')
             ax_phase.set_ylim(-180, 180)
@@ -1262,6 +1306,133 @@ class StripForces:
             fig.savefig(savepath, dpi=dpi)
 
         return (fig, (ax, ax_phase)) if show_phase else (fig, ax)
+
+    def plot_harmonic_polar(self, harmonics_result: dict, harmonic: int, strips=None, include_mean: bool = True,
+                             mark_peaks: bool = True, n_azimuth: int = 361, ylabel: str = r'$F$ [N]',
+                             ax=None, cmap: str = 'cividis', savepath: str = None, dpi: int = 600):
+
+        '''
+        ONE chosen harmonic's own contribution, spelled out around a
+        full revolution on a polar axis - radius = force [N], angle =
+        azimuth [deg], same convention as plot_vs_angle() (0 deg at 3
+        o'clock/east, increasing counterclockwise) - so what this plot
+        shows sits at the harmonic's TRUE physical rotor position, not
+        an abstract phase number or an anonymous grid cell.
+
+        Replaces the previous plot_harmonics_heatmap() (removed - one
+        cell per (harmonic, strip) pair packed every harmonic and every
+        strip into a single grid, and was not actually readable at
+        realistic strip/harmonic counts). This does the opposite: one
+        harmonic, one (or a handful of) strip(s), drawn out fully - a
+        literal circle, bulging outward where that harmonic's own
+        contribution peaks and shrinking where it troughs, with exactly
+        `harmonic` such bumps per revolution (a harmonic of order n
+        completes n cycles per revolution - see harmonics()'s own "What
+        the phase is for" note and peak_azimuth()).
+
+        harmonic : int
+            Which harmonic (1, 2, 3, ... for 1P, 2P, 3P, ...) to isolate
+            and plot - no default; the entire point of this plot is
+            looking at one at a time (use plot_harmonics() for an
+            overview across every harmonic first, then come here to dig
+            into a specific one).
+        strips : int or array-like of int, optional
+            Which strip(s) to draw - one colored curve each, same
+            `strips=None` -> "every valid strip" default as
+            plot_vs_angle()/plot_harmonics(). Pass a single index for a
+            genuinely single circle; a short list overlays a handful for
+            comparison (still just `len(strips)` curves on one polar
+            axis, not a grid).
+        include_mean : bool
+            If True (default), add the strip's own F_0 (harmonics_result
+            ['mean']) back in, so the radius reads as an actual physical
+            force [N] over the revolution (mean +/- this one harmonic's
+            oscillation), not the oscillation centered on zero. This
+            also keeps the curve non-negative whenever the mean
+            dominates the oscillation amplitude, as is typical for a
+            real rotor's thrust - matplotlib's polar axes plot a
+            NEGATIVE radius at the mirrored azimuth (angle + 180 deg),
+            which would relocate part of the curve away from the true
+            azimuth it actually belongs to; include_mean=True avoids
+            triggering that in the normal case. Set False to see the
+            oscillation alone, centered on zero, at the cost of that
+            caveat if it dips negative.
+        mark_peaks : bool
+            If True (default), mark each curve's `harmonic` equally
+            spaced peak azimuths (peak_azimuth()'s own value) with a
+            star - the direct visual answer to "where does this harmonic
+            peak".
+        n_azimuth : int
+            Number of azimuth samples around the revolution (default
+            361, i.e. one per degree) - this is a closed-form
+            reconstruction (a single cosine), not raw data, so a dense
+            default costs nothing.
+
+        Needs harmonics_result['phase'] - call harmonics(...,
+        return_phase=True) first.
+
+        Returns
+        -------
+        (fig, ax)
+        '''
+
+        if harmonics_result['chord'] is not None:
+            raise ValueError("plot_harmonic_polar() only supports a per-radial-strip harmonics() result.")
+        if 'phase' not in harmonics_result:
+            raise ValueError(
+                "plot_harmonic_polar() needs harmonics_result['phase'] - call harmonics(..., return_phase=True) first."
+            )
+
+        harmonic_numbers = harmonics_result['harmonic']
+        match = np.flatnonzero(harmonic_numbers == harmonic)
+        if match.size == 0:
+            raise ValueError(
+                f"harmonic={harmonic} is not in this harmonics_result (available: "
+                f"{harmonic_numbers.min()}P-{harmonic_numbers.max()}P)."
+            )
+        n_idx = match[0]
+
+        radius = harmonics_result['radius']
+        valid = np.flatnonzero(~np.isnan(radius))
+        sel = valid if strips is None else np.atleast_1d(strips)
+
+        mag = harmonics_result['magnitude'][n_idx]  # (n_span_bins,)
+        phase = harmonics_result['phase'][n_idx]  # (n_span_bins,)
+        mean = harmonics_result['mean'] if (include_mean and 'mean' in harmonics_result) \
+            else np.zeros_like(mag)
+
+        azimuth_deg = np.linspace(0, 360, n_azimuth)
+        theta = np.deg2rad(azimuth_deg)
+
+        if ax is None:
+            fig = plt.figure(figsize=(7, 7))
+            ax = fig.add_subplot(111, projection='polar')
+        else:
+            fig = ax.figure
+
+        colors = plt.cm.get_cmap(cmap)(np.linspace(0, 1, len(sel)))
+        for color, i in zip(colors, sel):
+            r = mean[i] + mag[i] * np.cos(harmonic * theta + phase[i])
+            ax.plot(theta, r, color=color, label=f'Strip {i + 1}')
+
+            if mark_peaks:
+                first_peak = (-np.rad2deg(phase[i]) / harmonic) % (360.0 / harmonic)
+                peak_azimuths_deg = (first_peak + np.arange(harmonic) * (360.0 / harmonic)) % 360.0
+                ax.scatter(np.deg2rad(peak_azimuths_deg), np.full(harmonic, mean[i] + mag[i]),
+                           color=color, marker='*', s=90, zorder=5, edgecolor='k', linewidth=0.5)
+
+        ax.set_theta_zero_location('E')
+        ax.set_theta_direction(1)
+        ax.set_ylabel(ylabel, labelpad=30)
+        ax.set_title(f'{harmonic}P contribution' + (' (+ mean)' if include_mean else ''))
+        ax.legend(loc='upper left', bbox_to_anchor=(1.05, 1.05))
+
+        fig.tight_layout()
+
+        if savepath:
+            fig.savefig(savepath, dpi=dpi)
+
+        return fig, ax
 
     _TOTALS_KEY_MAP = {'axial': 'thrust', 'radial': 'radial_force', 'tangential': 'tangential_force'}
 

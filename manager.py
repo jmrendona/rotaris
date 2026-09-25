@@ -964,6 +964,31 @@ plot_integral_timescale(
 # print(40*'-')
 # print('Tangential component peak azimuth of each harmonic (deg): ', peak_deg)
 
+# # One harmonic at a time, around the true azimuth (see README.md,
+# # "One harmonic at a time, around the true azimuth: plot_harmonic_polar()")
+# # - a companion to the bar charts above, not a replacement: isolates a
+# # SINGLE chosen harmonic's own contribution and spells it out around a
+# # full revolution on a polar axis (radius = force, angle = azimuth),
+# # for one strip or a handful overlaid - NOT a substitute for
+# # reconstruct_from_harmonics()/plot_vs_angle()'s actual TOTAL loading
+# # curve (all harmonics summed). Pick the harmonic(s)/strip(s) actually
+# # worth a closer look at from the bar charts above first - 1P and the
+# # tip strip are typical starting points.
+# print(40*'-')
+# print('Plotting 1P polar contribution for the axial component, tip strip')
+# h_phase_axial = sf_inst.harmonics(result_inst, dt=dt, component='axial', n_harmonics=17, return_phase=True)
+# sf_inst.plot_harmonic_polar(
+#    h_phase_axial, harmonic=1, strips=9,
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonic_polar_1P_axial_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting 1P polar contribution for the axial component, several strips overlaid')
+# sf_inst.plot_harmonic_polar(
+#    h_phase_axial, harmonic=1, strips=[0, 2, 4, 6, 8, 9],
+#    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonic_polar_1P_overlay_axial_{case}.png'),
+# )
+
 
 # # Reconstruction check against phase_lock()'s own empirical curve:
 # #phase_locked = sf_inst.phase_lock(result_inst, dt=dt, n_azimuth_bins=72)
