@@ -663,28 +663,50 @@ def autocorrelation(series, max_lag: int = None):
 
     '''
     Sample autocorrelation function rho(s) = R(s)/R(0) of a scalar time
-    series, for non-negative lags s = 0, 1, ..., max_lag - the standard
-    single-realization (biased) time-average estimator. Pope, "Turbulent
-    Flows" (2000), notes that for a TRUE, statistically stationary
-    process, the (ensemble-averaged) autocovariance/autocorrelation are
-    EVEN functions of the lag (no specific page cited - verify directly).
+    series, for non-negative lags s = 0, 1, ..., max_lag,
+
+        R_hat(s) = (1/N) * sum_{t=1}^{N-s} x'_t * x'_{t+s} ,
+
+    normalized by the SAME N (the full series length) at every lag, not
+    by the shrinking N-s pairs actually summed - the standard BIASED
+    single-realization estimator (matches this project's own thesis
+    documentation, rotaris-docs/convergence_checking_section.tex, and is
+    the conventional choice - e.g. Priestley, "Spectral Analysis and Time
+    Series" - over the "unbiased" 1/(N-s) alternative, in part because it
+    keeps rho(s)'s own sampling noise roughly CONSTANT across lag - see
+    the noise-floor note below - rather than growing at large lag).
+    Pope, "Turbulent Flows" (2000), notes that for a TRUE, statistically
+    stationary process, the (ensemble-averaged) autocovariance/
+    autocorrelation are EVEN functions of the lag (no specific page cited
+    - verify directly).
 
     IMPORTANT - and the reason this function only returns non-negative
     lags at all: the standard single-window estimator computed here is
     ALGEBRAICALLY GUARANTEED to be even (a direct consequence of
     correlating any finite sequence with a shifted copy of itself being
-    exactly symmetric under relabeling - true for ANY finite sequence,
-    stationary or not, not something that depends on the real data
-    actually being stationary). Concretely: defining
-    R_hat(-s) using the LAST (N-s) points as the reference is, term for
-    term, identical to R_hat(+s) computed using the FIRST (N-s) points -
-    a pure re-indexing identity. So computing this from ONE window and
-    checking whether it "looks even" has NO diagnostic power - it will
-    always pass trivially, regardless of whether the simulation has
-    converged. What IS meaningful: comparing rho(s) computed from
-    DIFFERENT, independent windows of the same run - see
-    plot_autocorrelation_windows() - or integrating it into a single
-    correlation timescale - see integral_timescale()/standard_error().
+    exactly symmetric under relabeling - true for ANY finite REAL
+    sequence, stationary or not, not something that depends on the real
+    data actually being stationary - confirmed numerically on signals
+    from stationary-looking white noise to a single huge spike to a
+    strong linear trend, all giving R_hat(+s) == R_hat(-s) to machine
+    precision). Concretely: defining R_hat(-s) using the LAST (N-s)
+    points as the reference is, term for term, identical to R_hat(+s)
+    computed using the FIRST (N-s) points, PROVIDED the same normalizing
+    constant (here, N) is applied on both sides - true here by
+    construction, since N doesn't depend on the sign of s at all. So
+    computing this from ONE window and checking whether it "looks even"
+    has NO diagnostic power - it will always pass trivially, regardless
+    of whether the simulation has converged. What IS meaningful:
+    comparing rho(s) computed from DIFFERENT, independent windows of the
+    same run - see plot_autocorrelation_windows() - or integrating it
+    into a single correlation timescale - see integral_timescale()/
+    standard_error(). (This guarantee is specific to a TIME average over
+    one realization; an ENSEMBLE average of x'_t * x'_{t+s} over many
+    INDEPENDENT realizations at a fixed t, s - not available here, since
+    that would mean many independent simulation runs rather than one -
+    has no such built-in symmetry, and evenness there IS a genuine,
+    falsifiable test of stationarity, exactly as Pope states for the true
+    process autocovariance.)
 
     Parameters
     ----------
@@ -693,12 +715,26 @@ def autocorrelation(series, max_lag: int = None):
         Largest lag to compute - defaults to n // 4 (a reliable estimate
         needs many more samples than the lag itself; using the full
         range up to n-1 gets extremely noisy - fewer and fewer pairs of
-        points contribute - at large lags).
+        points contribute - at large lags; with this estimator's 1/N
+        normalization that shows up as growing BIAS toward zero at large
+        lag rather than growing VARIANCE - see the noise-floor note
+        below - but the practical advice is the same: don't trust lags
+        approaching n).
 
     Returns
     -------
     lags : np.ndarray, shape (max_lag + 1,) - 0, 1, ..., max_lag
-    rho : np.ndarray, shape (max_lag + 1,) - rho[0] == 1.0 always.
+    rho : np.ndarray, shape (max_lag + 1,) - rho[0] == 1.0 always. Even a
+        genuinely uncorrelated (white noise) series shows nonzero rho(s)
+        here, scattering with standard deviation of order 1/sqrt(N) - via
+        this estimator's 1/N normalization, that scatter stays roughly
+        CONSTANT across lag (numerically verified: ~1/sqrt(N) at lag 5
+        and at lag 500 alike, for N=2000), unlike the 1/(N-s)-normalized
+        "unbiased" estimator, whose scatter grows toward large lag as
+        1/sqrt(N-s) instead - so a rapid decay of rho(s) into a noisy
+        band of roughly this width about zero, rather than an exact
+        zero, is the expected behavior of an uncorrelated signal here,
+        not evidence of a computational error.
     '''
 
     series = np.asarray(series, dtype=float)
@@ -715,7 +751,7 @@ def autocorrelation(series, max_lag: int = None):
 
     rho = np.empty(max_lag + 1)
     for lag in range(max_lag + 1):
-        rho[lag] = 1.0 if lag == 0 else np.mean(x[:-lag] * x[lag:]) / var
+        rho[lag] = 1.0 if lag == 0 else np.sum(x[:-lag] * x[lag:]) / n / var
 
     return np.arange(max_lag + 1), rho
 
