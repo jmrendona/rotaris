@@ -32,7 +32,7 @@ axes:
   span: 0
   chord: 1
   thickness: 2
-  skip_validation: false # set True if you have a highly swept blade
+  skip_validation: true # set True if you have a highly swept blade
 
 crop:
   span_min: null
@@ -46,4 +46,4 @@ convergence:
 
 blade_figsize: null # null for ISAWE2 case
 
-frame_loop_step: 15
+frame_loop_step: 90

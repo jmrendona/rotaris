@@ -266,13 +266,16 @@ def build_parser():
                               'formula from this file\'s own start_time/lrf_constant_angular_vel_mag.')
     forces.add_argument('--blade-lrf-offset-deg', type=float, default=0.0,
                          help='Extra CONSTANT rotation [deg] added to every frame before rotating '
-                              'Surface_X/Y/Z-Force into the LRF - corrects a fixed LRF-vs-blade '
-                              'mounting misalignment neither rotation-angle source can know about on '
-                              'its own (see SNCReader.to_h5()\'s blade_lrf_offset_deg docstring). '
+                              'Surface_X/Y/Z-Force into the LRF, AND applied once to Geometry '
+                              '(positions, normals) too - corrects a fixed LRF-vs-blade mounting '
+                              'misalignment neither rotation-angle source can know about on its own, '
+                              'which affects the blade\'s shape in this frame just as much as force '
+                              'direction (see SNCReader.to_h5()\'s blade_lrf_offset_deg docstring). '
                               '0 (no offset) by default - set this only if you\'ve independently '
                               'determined this specific case has one (e.g. by comparing a known '
                               'physical feature\'s expected vs. observed azimuthal position after '
-                              'conversion).')
+                              'conversion, or by checking whether the blade sits flat along a raw '
+                              'Cartesian axis in Geometry/X,Y,Z before this correction).')
     forces.set_defaults(func=run_forces)
 
     pressure = subparsers.add_parser(

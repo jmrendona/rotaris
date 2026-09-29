@@ -651,25 +651,58 @@ class SNCReader:
         (Skin Friction, Static Pressure) is a scalar in this format, so
         it's written as-is, same as before.
 
+        Geometry (positions, normals) is ALREADY in the LRF (unlike
+        Surface X/Y/Z-Force, it never needed the per-frame global-to-LRF
+        correction above) - but it can still carry the SAME constant
+        blade_offset_rad misalignment, since that's a fixed mounting/
+        modeling offset between the LRF's own nominal zero-orientation
+        and the blade's actual geometric orientation, independent of
+        which quantity (force or position) you're looking at. So
+        blade_offset_rad != 0 rotates positions and normals about
+        lrf_axis_direction too - by -blade_offset_rad alone (no
+        _rotation_angle(frame) term, since that piece only corrects
+        force's separate global-vs-LRF issue), the SAME sign this offset
+        contributes to the force rotation below (angle = ... +
+        blade_offset_rad, then rotated by -angle) - keeping both
+        quantities consistent with a single physical correction rather
+        than two independently-signed ones. Positions are rotated about
+        lrf_axis_origin (translated there and back), since
+        _rotate_about_axis() itself only rotates about an axis through
+        the coordinate origin (0, 0, 0) - normals need no such
+        translation (they're directions, not anchored to a location).
+
         aligned_frame_meta : list, optional
             _aligned_frame_meta()'s output (already re-keyed to this
             file's own rows - NOT the raw parse_nc_stats() dict), if
             available - aligned_frame_meta[frame] is passed straight
             through to _rotation_angle() per frame.
         blade_offset_rad : float
-            Extra CONSTANT rotation [rad] added to every frame's angle
-            before rotating - see to_h5()'s blade_lrf_offset_deg for what
-            this corrects (a fixed LRF-vs-blade misalignment neither
-            rotation-angle source can know about on its own).
+            Extra CONSTANT rotation [rad] - see to_h5()'s
+            blade_lrf_offset_deg for what this corrects (a fixed
+            LRF-vs-blade misalignment neither rotation-angle source can
+            know about on its own). Applied to Surface X/Y/Z-Force (on
+            top of each frame's own rotation angle) AND to Geometry
+            (positions, normals) - see above for why both need it.
         '''
 
+        axis_direction = self.lrf_axis_direction / np.linalg.norm(self.lrf_axis_direction)
+
+        geo_coords = coords[mask]
+        geo_normals = normals[mask]
+
+        if blade_offset_rad != 0.0:
+            origin_scaled = self.lrf_axis_origin * self.lattice_scales['LatticeLength']
+            geo_coords = self._rotate_about_axis(
+                geo_coords - origin_scaled, axis_direction, -blade_offset_rad) + origin_scaled
+            geo_normals = self._rotate_about_axis(geo_normals, axis_direction, -blade_offset_rad)
+
         geo = h5f.create_group(geo_path)
-        geo.create_dataset('X', data=coords[mask, 0])
-        geo.create_dataset('Y', data=coords[mask, 1])
-        geo.create_dataset('Z', data=coords[mask, 2])
-        geo.create_dataset('Normal_X', data=normals[mask, 0])
-        geo.create_dataset('Normal_Y', data=normals[mask, 1])
-        geo.create_dataset('Normal_Z', data=normals[mask, 2])
+        geo.create_dataset('X', data=geo_coords[:, 0])
+        geo.create_dataset('Y', data=geo_coords[:, 1])
+        geo.create_dataset('Z', data=geo_coords[:, 2])
+        geo.create_dataset('Normal_X', data=geo_normals[:, 0])
+        geo.create_dataset('Normal_Y', data=geo_normals[:, 1])
+        geo.create_dataset('Normal_Z', data=geo_normals[:, 2])
         geo.create_dataset('Area', data=areas[mask])
 
         data = h5f.create_group(data_path)
@@ -687,8 +720,6 @@ class SNCReader:
                     "write potentially-wrong (still-global-frame) force data rather than "
                     "silently reproducing the bug this fixes."
                 )
-
-            axis_direction = self.lrf_axis_direction / np.linalg.norm(self.lrf_axis_direction)
 
             force_frames = []
             for frame in range(self.n_frames):
@@ -796,18 +827,30 @@ class SNCReader:
             without `nc_stats_path`; written for reference only, not as a
             `mid_s`-equivalent).
         blade_lrf_offset_deg : float
-            Extra CONSTANT angle [deg] added to every frame's rotation,
-            on top of whichever source above computed it. Neither source
-            can know about a fixed mounting/modeling misalignment between
-            the LRF's own nominal zero-orientation and the blade's actual
-            geometric orientation (e.g. if the blade was modeled with a
-            built-in pitch/lead-lag offset relative to the LRF's own
-            reference line) - that's a setup detail, not something
-            derivable from rotation rate or timestamps at all. 0 by
-            default (no offset assumed); set it only if you've
-            independently determined this case has one - e.g. by
-            comparing a known physical feature's expected vs. observed
-            azimuthal position after conversion.
+            Extra CONSTANT angle [deg] added to every frame's rotation
+            for Surface X/Y/Z-Force, on top of whichever source above
+            computed it, AND applied as a one-time rotation of Geometry
+            (positions, normals) - see _write_surfel_group()'s docstring
+            for why both need it and why the same sign/axis is used for
+            each. Neither force-rotation source above can know about a
+            fixed mounting/modeling misalignment between the LRF's own
+            nominal zero-orientation and the blade's actual geometric
+            orientation (e.g. if the blade was modeled with a built-in
+            pitch/lead-lag offset relative to the LRF's own reference
+            line) - that's a setup detail, not something derivable from
+            rotation rate or timestamps at all, and it affects the
+            blade's actual SHAPE in this frame just as much as it
+            affects force direction. 0 by default (no offset assumed);
+            set it only if you've independently determined this case has
+            one - e.g. by comparing a known physical feature's expected
+            vs. observed azimuthal position after conversion, or (for
+            geometry specifically) by checking whether span_axis/
+            chord_axis actually line up with the blade's own footprint
+            (e.g. via a quick PCA on Geometry/X,Y before committing to a
+            span_axis/chord_axis choice downstream - a genuinely
+            misaligned mounting shows up as a blade that doesn't sit
+            flat along any single raw Cartesian axis, however
+            span_axis/chord_axis/thickness_axis are permuted).
         '''
 
         length_scale = self.lattice_scales['LatticeLength']

@@ -235,11 +235,17 @@ determined:
   (see `HANDOFF.md`'s OPEN INVESTIGATION for the full evidence).
 
 `blade_lrf_offset_deg` (default `0.0`) adds an extra CONSTANT angle on
-top of whichever of the above computed the per-frame rotation - for a
-fixed mounting/modeling misalignment between the LRF's own
-zero-orientation and the blade's actual geometry, which neither source
-above can derive on its own (a setup detail). Only set this if
-independently confirmed for a given case.
+top of whichever of the above computed the per-frame rotation for
+Surface_X/Y/Z-Force, AND applies that same angle as a one-time rotation
+of Geometry (positions, normals) - for a fixed mounting/modeling
+misalignment between the LRF's own zero-orientation and the blade's
+actual geometry, which neither rotation-angle source above can derive on
+its own (a setup detail), and which shows up in the blade's SHAPE just as
+much as in force direction. Only set this if independently confirmed for
+a given case - e.g. a blade that doesn't sit flat along any single raw
+Cartesian axis in `Geometry/X,Y,Z` (no permutation of
+`span_axis`/`chord_axis`/`thickness_axis` fixes it, only an actual
+rotation does) is a sign this case needs it.
 
 Via `convert.py`/`run_conversion.sh` (both parameters are keyword-only
 on `SNCReader.to_h5()`, so they only apply to the `forces` subcommand -
