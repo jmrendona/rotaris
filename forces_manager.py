@@ -554,12 +554,12 @@ for span in span_pct:
    print('Plotting axial force autocorrelation, first half vs second half of the run')
    plot_autocorrelation_windows(
       result_inst['axial'][:, tip_idx], n_windows=2, dt=dt, labels=['First half', 'Second half'],
-      savepath=os.path.join(master_path, f'images/forces/convergence/global/axial_strip_autocorrelation_windows_s{span:03d}_{case}.png'),
+      savepath=os.path.join(master_path, f'images/forces/convergence/local/axial_strip_autocorrelation_windows_s{span:03d}_{case}.png'),
    )
 
    plot_integral_timescale(
       result_inst['axial'][:, tip_idx], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-      savepath=os.path.join(master_path, f'images/forces/convergence/global/axial_strip_integral_timescale_s{span:03d}_{case}.png'),
+      savepath=os.path.join(master_path, f'images/forces/convergence/local/axial_strip_integral_timescale_s{span:03d}_{case}.png'),
    )
 
    # tangential
@@ -581,12 +581,12 @@ for span in span_pct:
    print('Plotting tangential force autocorrelation, first half vs second half of the run')
    plot_autocorrelation_windows(
       result_inst['tangential'][:, tip_idx], n_windows=2, dt=dt, labels=['First half', 'Second half'],
-      savepath=os.path.join(master_path, f'images/forces/convergence/global/tangential_strip_autocorrelation_windows_s{span:03d}_{case}.png'),
+      savepath=os.path.join(master_path, f'images/forces/convergence/local/tangential_strip_autocorrelation_windows_s{span:03d}_{case}.png'),
    )
 
    plot_integral_timescale(
       result_inst['tangential'][:, tip_idx], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-      savepath=os.path.join(master_path, f'images/forces/convergence/global/tangential_strip_integral_timescale_s{span:03d}_{case}.png'),
+      savepath=os.path.join(master_path, f'images/forces/convergence/local/tangential_strip_integral_timescale_s{span:03d}_{case}.png'),
    )
 
 
@@ -609,10 +609,10 @@ for span in span_pct:
    print('Plotting radial force autocorrelation, first half vs second half of the run')
    plot_autocorrelation_windows(
       result_inst['radial'][:, tip_idx], n_windows=2, dt=dt, labels=['First half', 'Second half'],
-      savepath=os.path.join(master_path, f'images/forces/convergence/global/radial_strip_autocorrelation_windows_s{span:03d}_{case}.png'),
+      savepath=os.path.join(master_path, f'images/forces/convergence/local/radial_strip_autocorrelation_windows_s{span:03d}_{case}.png'),
    )
 
    plot_integral_timescale(
       result_inst['radial'][:, tip_idx], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-      savepath=os.path.join(master_path, f'images/forces/convergence/global/radial_strip_integral_timescale_s{span:03d}_{case}.png'),
+      savepath=os.path.join(master_path, f'images/forces/convergence/local/radial_strip_integral_timescale_s{span:03d}_{case}.png'),
    )

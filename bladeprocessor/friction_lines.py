@@ -1328,9 +1328,11 @@ class FrictionLines:
 
         '''
         Overlay separation_line()'s crossings on an existing Axes plotted
-        in (span, chord) coordinates - e.g. one of friction_lines()'s
+        in (r, chord) coordinates - e.g. one of friction_lines()'s
         per-surface axes (or pass show_separation_line=True to
-        friction_lines() instead of calling this directly).
+        friction_lines() instead of calling this directly). Uses each
+        point's 'r' (radius), not 'span', to match friction_lines()'s
+        primary axis - see that method's show_span_axis.
 
         Sized/colored to stay visible against friction_lines()'s dense
         background scatter (large markers, black edge, high-contrast
@@ -1369,14 +1371,14 @@ class FrictionLines:
                 if len(pair) != 2:
                     continue
                 a, b = pair
-                ax.plot([a['span'], b['span']], [a['chord'], b['chord']], color=line_color,
+                ax.plot([a['r'], b['r']], [a['chord'], b['chord']], color=line_color,
                         linewidth=linewidth, alpha=0.85, zorder=4)
 
         for kind, color in zip(('separation', 'reattachment'), colors):
             sel = [p for p in points if p['kind'] == kind]
             if not sel:
                 continue
-            ax.scatter([p['span'] for p in sel], [p['chord'] for p in sel], s=marker_size,
+            ax.scatter([p['r'] for p in sel], [p['chord'] for p in sel], s=marker_size,
                        color=color, label=kind if label else None, zorder=5,
                        edgecolors='k', linewidths=0.6)
 
@@ -1606,9 +1608,10 @@ class FrictionLines:
         '''
         Overlay migration_line()'s crossings - same visual convention as
         plot_separation_line() (large, black-edged, high-contrast
-        markers; connect_pairs off by default for the same reason), but
-        triangular markers (vs. plot_separation_line()'s circles) so the
-        two overlays stay visually distinct if shown together.
+        markers; connect_pairs off by default for the same reason; 'r'
+        not 'span' for the x-position, same reason), but triangular
+        markers (vs. plot_separation_line()'s circles) so the two
+        overlays stay visually distinct if shown together.
 
         Parameters
         ----------
@@ -1634,14 +1637,14 @@ class FrictionLines:
                 if len(pair) != 2:
                     continue
                 a, b = pair
-                ax.plot([a['span'], b['span']], [a['chord'], b['chord']], color=line_color,
+                ax.plot([a['r'], b['r']], [a['chord'], b['chord']], color=line_color,
                         linewidth=linewidth, alpha=0.85, zorder=4)
 
         for kind, color in zip(('outward', 'inward'), colors):
             sel = [p for p in points if p['kind'] == kind]
             if not sel:
                 continue
-            ax.scatter([p['span'] for p in sel], [p['chord'] for p in sel], s=marker_size,
+            ax.scatter([p['r'] for p in sel], [p['chord'] for p in sel], s=marker_size,
                        color=color, marker='^', label=kind if label else None, zorder=5,
                        edgecolors='k', linewidths=0.6)
 
@@ -1862,7 +1865,10 @@ class FrictionLines:
         Overlay critical_points()'s classified critical points - a
         distinct marker AND color per kind, so a vortex footprint
         ('focus') doesn't visually blend with an ordinary separation/
-        attachment 'node' or 'saddle'.
+        attachment 'node' or 'saddle'. Uses each point's 'r', not
+        'span', to match friction_lines()'s primary axis (see that
+        method's show_span_axis) - critical_points() itself works in
+        raw physical chord either way (no reverse_chord), unaffected.
 
         Parameters
         ----------
@@ -1887,7 +1893,7 @@ class FrictionLines:
             # 'x' has no fillable face - matplotlib warns (harmlessly) if an
             # edgecolor is passed for it, so only unfilled markers skip it.
             edge_kwargs = {} if marker_map[kind] == 'x' else {'edgecolors': 'white', 'linewidths': 0.8}
-            ax.scatter([p['span'] for p in sel], [p['chord'] for p in sel], s=marker_size,
+            ax.scatter([p['r'] for p in sel], [p['chord'] for p in sel], s=marker_size,
                        marker=marker_map[kind], color=colors[kind], label=kind if label else None,
                        zorder=6, **edge_kwargs)
 
@@ -1946,13 +1952,38 @@ class FrictionLines:
         ax.text(0.02, 0.02, f'$N+F-S = {index}${note}', transform=ax.transAxes, fontsize=11,
                 va='bottom', ha='left', bbox=dict(facecolor='white', edgecolor='black', alpha=0.85))
 
+    @staticmethod
+    def _add_span_secondary_axis(ax, radius_sel, span_sel):
+
+        '''
+        Secondary x-axis showing raw centered Cartesian span (see
+        _span_chord()) alongside a primary axis already plotted in
+        radius - see friction_lines()'s show_span_axis. A linear fit
+        (span = slope*r + intercept) to THIS call's own plotted points,
+        exact for an unswept blade (radius and span then differ by a
+        pure constant offset, slope=1), an approximation otherwise. A
+        no-op (skipped, not raised) for a degenerate (fewer than 2
+        points, or zero radius range) selection.
+        '''
+
+        if len(radius_sel) < 2 or np.ptp(radius_sel) == 0:
+            return
+
+        slope, intercept = np.polyfit(radius_sel, span_sel, 1)
+        if slope == 0:
+            return
+
+        secax = ax.secondary_xaxis(
+            'top', functions=(lambda r: slope * r + intercept, lambda s: (s - intercept) / slope))
+        secax.set_xlabel('span [m]')
+
     def friction_lines(self, surface=('Upper', 'Lower'), frame: int = None, stat: str = 'mean',
                         span_min: float = None, span_max: float = None, cf_clip_percentile: float = 99,
                         n_arrows: int = 2000, marker_size: float = 1, cmap: str = 'cividis',
                         cbar_label: str = None, show_separation_line: bool = False, separation_line_kwargs: dict = None,
                         show_migration_line: bool = False, migration_line_kwargs: dict = None,
                         show_critical_points: bool = False, critical_points_kwargs: dict = None,
-                        show_critical_points_index: bool = False,
+                        show_critical_points_index: bool = False, show_span_axis: bool = False,
                         figsize: tuple = None, savepath: str = None, dpi: int = 600):
 
         '''
@@ -1973,7 +2004,24 @@ class FrictionLines:
         ----------
         surface : str or tuple of str
             'Upper', 'Lower', or a tuple of both (default) for a stacked
-            two-row figure sharing the span (x) axis.
+            two-row figure sharing the radius (x) axis.
+        show_span_axis : bool
+            The primary (bottom) x-axis is physical radius from the
+            rotation axis (r [m], via _radius() - the same quantity
+            radii=[...]/span_min/span_max-adjacent radius-based
+            selections elsewhere use), not the raw centered Cartesian
+            span coordinate _span_chord() returns - reading a number off
+            this plot and using it directly as a radius (e.g. for
+            cf_at_radii()'s radii=[...]) now works, which it didn't when
+            the x-axis was raw span (span=0 is this SURFACE's own
+            geometric midpoint, not the rotation axis - the two only
+            coincide by coincidence). If True, also draws span as a
+            secondary axis on top, for reference against older
+            plots/span_min/span_max (still in raw span, unchanged) - the
+            span<->radius mapping shown there is a linear fit to this
+            call's own plotted points, exact for an unswept blade
+            (radius and span then differ by a pure constant offset),
+            approximate otherwise. False (default): omit it.
         stat : 'mean', 'rms', or 'raw_rms'
             Only used when frame is None - forwarded to cf() for the
             COLOR field (Cf magnitude) only, see cf()'s docstring ('rms'
@@ -2057,6 +2105,7 @@ class FrictionLines:
         for ax, surf in zip(axes, surfaces):
 
             span, chord = self._span_chord(surf)
+            radius = self._radius(surf)
             cf_mag = self.cf(surface=surf, frame=frame, component=None, stat=stat)
             # quiver direction always uses the MEAN flow, regardless of stat - see docstring
             tau_chord = self.cf(surface=surf, frame=frame, component='chordwise', stat='mean')
@@ -2068,21 +2117,24 @@ class FrictionLines:
             if span_max is not None:
                 mask &= span <= span_max
 
-            span_sel, chord_sel = span[mask], chord[mask]
+            span_sel, chord_sel, radius_sel = span[mask], chord[mask], radius[mask]
             cf_sel, tau_chord_sel, tau_span_sel = cf_mag[mask], tau_chord[mask], tau_span[mask]
 
             vmax = np.percentile(cf_sel, cf_clip_percentile)
             cf_clipped = np.clip(cf_sel, 0, vmax)
 
-            sc = ax.scatter(span_sel, chord_sel, c=cf_clipped, s=marker_size, cmap=cmap, vmin=0, vmax=vmax)
+            sc = ax.scatter(radius_sel, chord_sel, c=cf_clipped, s=marker_size, cmap=cmap, vmin=0, vmax=vmax)
             cbar = fig.colorbar(sc, ax=ax, pad=0.02)
             cbar.set_label(cbar_label)
 
-            idx = rng.choice(len(span_sel), size=min(n_arrows, len(span_sel)), replace=False)
+            idx = rng.choice(len(radius_sel), size=min(n_arrows, len(radius_sel)), replace=False)
             mag = np.hypot(tau_span_sel[idx], tau_chord_sel[idx])
             mag[mag == 0] = 1
-            ax.quiver(span_sel[idx], chord_sel[idx], tau_span_sel[idx] / mag, tau_chord_sel[idx] / mag,
+            ax.quiver(radius_sel[idx], chord_sel[idx], tau_span_sel[idx] / mag, tau_chord_sel[idx] / mag,
                       color='white', scale=60, width=0.002, alpha=0.8)
+
+            if show_span_axis:
+                self._add_span_secondary_axis(ax, radius_sel, span_sel)
 
             any_overlay = False
 
@@ -2113,7 +2165,7 @@ class FrictionLines:
             ax.set_ylabel('chord [m]')
             ax.set_aspect('equal')
 
-        axes[-1].set_xlabel('span [m]')
+        axes[-1].set_xlabel('$r$ [m]')
         fig.tight_layout()
 
         if savepath:

@@ -1330,13 +1330,39 @@ class SurfaceVariable:
 
         return fig, ax
 
+    @staticmethod
+    def _add_span_secondary_axis(ax, radius_sel, span_sel):
+
+        '''
+        Secondary x-axis showing raw centered Cartesian span (see
+        _span_chord()) alongside a primary axis already plotted in
+        radius - see plot_variable_surface()'s show_span_axis. Same
+        implementation as FrictionLines._add_span_secondary_axis()
+        (duplicated, not shared, matching this project's convention of
+        keeping the two classes self-contained - see FrictionLines'
+        class docstring) - a linear fit (span = slope*r + intercept) to
+        THIS call's own plotted points, exact for an unswept blade,
+        approximate otherwise. A no-op for a degenerate selection.
+        '''
+
+        if len(radius_sel) < 2 or np.ptp(radius_sel) == 0:
+            return
+
+        slope, intercept = np.polyfit(radius_sel, span_sel, 1)
+        if slope == 0:
+            return
+
+        secax = ax.secondary_xaxis(
+            'top', functions=(lambda r: slope * r + intercept, lambda s: (s - intercept) / slope))
+        secax.set_xlabel('span [m]')
+
     def plot_variable_surface(self, get_values, cbar_label: str, surface=('Upper', 'Lower'),
                                get_vector=None, span_min: float = None, span_max: float = None,
                                value_clip_percentile: float = 99, n_arrows: int = 2000,
                                marker_size: float = 1, cmap: str = 'cividis', figsize: tuple = None,
                                show_stagnation_line: bool = False, stagnation_kwargs: dict = None,
                                stagnation_color: str = 'red', stagnation_marker_size: float = 40,
-                               savepath: str = None, dpi: int = 600):
+                               show_span_axis: bool = False, savepath: str = None, dpi: int = 600):
 
         '''
         Scatter of an arbitrary scalar field over the blade surface (raw
@@ -1383,6 +1409,13 @@ class SurfaceVariable:
             (only used if get_vector is given).
         marker_size : float
             Scatter marker size (matplotlib's `s`, points^2).
+        show_span_axis : bool
+            The primary (bottom) x-axis is physical radius from the
+            rotation axis (r [m], via _radius()), not the raw centered
+            Cartesian span coordinate _span_chord() returns - see
+            FrictionLines.friction_lines()'s show_span_axis for the full
+            reasoning (identical here). If True, also draws span as a
+            secondary axis on top. False (default): omit it.
         show_stagnation_line : bool
             Overlay stagnation_line()'s per-span-bin leading-edge
             stagnation point (see that method) on whichever subplot
@@ -1431,6 +1464,7 @@ class SurfaceVariable:
         for ax, surf in zip(axes, surfaces):
 
             span, chord = self._span_chord(surf)
+            radius = self._radius(surf)
             values = get_values(surf)
 
             mask = np.ones(len(span), dtype=bool)
@@ -1439,26 +1473,29 @@ class SurfaceVariable:
             if span_max is not None:
                 mask &= span <= span_max
 
-            span_sel, chord_sel, v_sel = span[mask], chord[mask], values[mask]
+            span_sel, chord_sel, radius_sel, v_sel = span[mask], chord[mask], radius[mask], values[mask]
 
             vmin, vmax = np.percentile(v_sel, [100 - value_clip_percentile, value_clip_percentile])
             v_clipped = np.clip(v_sel, vmin, vmax)
 
-            sc = ax.scatter(span_sel, chord_sel, c=v_clipped, s=marker_size, cmap=cmap, vmin=vmin, vmax=vmax)
+            sc = ax.scatter(radius_sel, chord_sel, c=v_clipped, s=marker_size, cmap=cmap, vmin=vmin, vmax=vmax)
             cbar = fig.colorbar(sc, ax=ax, pad=0.02)
             cbar.set_label(cbar_label)
 
             if get_vector is not None:
                 vec_span, vec_chord = get_vector(surf)
                 vec_span_sel, vec_chord_sel = vec_span[mask], vec_chord[mask]
-                idx = rng.choice(len(span_sel), size=min(n_arrows, len(span_sel)), replace=False)
+                idx = rng.choice(len(radius_sel), size=min(n_arrows, len(radius_sel)), replace=False)
                 mag = np.hypot(vec_span_sel[idx], vec_chord_sel[idx])
                 mag[mag == 0] = 1
-                ax.quiver(span_sel[idx], chord_sel[idx], vec_span_sel[idx] / mag, vec_chord_sel[idx] / mag,
+                ax.quiver(radius_sel[idx], chord_sel[idx], vec_span_sel[idx] / mag, vec_chord_sel[idx] / mag,
                           color='white', scale=60, width=0.002, alpha=0.8)
 
             ax.set_ylabel('chord [m]')
             ax.set_aspect('equal')
+
+            if show_span_axis:
+                self._add_span_secondary_axis(ax, radius_sel, span_sel)
 
         if show_stagnation_line:
 
@@ -1470,7 +1507,7 @@ class SurfaceVariable:
 
             for p in stag_points:
                 ax = ax_by_surface[p['surface']]
-                ax.scatter([p['span']], [p['chord']], s=stagnation_marker_size,
+                ax.scatter([p['r']], [p['chord']], s=stagnation_marker_size,
                            color=stagnation_color, edgecolors='k', linewidths=0.6, zorder=6,
                            label='stagnation point' if not labeled[p['surface']] else None)
                 labeled[p['surface']] = True
@@ -1479,7 +1516,7 @@ class SurfaceVariable:
                 if labeled[surf]:
                     ax.legend()
 
-        axes[-1].set_xlabel('span [m]')
+        axes[-1].set_xlabel('$r$ [m]')
         fig.tight_layout()
 
         if savepath:
