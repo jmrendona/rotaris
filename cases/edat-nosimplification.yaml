@@ -12,7 +12,7 @@
 # everywhere they appear are pulled out here.
 
 master_path: /scratch/jmrendon/EDAT/Iteration2/no-simplifications-VR12
-case: EDAT-nosimplification
+case: EDAT-nosimplification_confidential
 
 files:
   inst_force: EDAT-nosimplification_forces_rotor.h5

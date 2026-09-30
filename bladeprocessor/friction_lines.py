@@ -2098,11 +2098,15 @@ class FrictionLines:
             where the blade's actual physical size shouldn't be shown or
             inferable (e.g. an NDA) - plotting a raw physical r [m]/
             chord [m] scatter would leak it regardless of what's colored.
-            Forces show_span_axis off regardless of what was passed (a
-            secondary span-in-meters axis would defeat the point).
-            Overlays (show_separation_line/show_migration_line/
-            show_critical_points) switch to the same r/R, chord/c_ref
-            coordinates automatically - no separate flag needed on them.
+            The blade's true displayed shape is still preserved (aspect
+            set to the numeric ratio c_ref/r_tip, not 'equal'/'auto' -
+            see the aspect-setting line below for why a bare 'equal'
+            would distort it here). Forces show_span_axis off regardless
+            of what was passed (a secondary span-in-meters axis would
+            defeat the point). Overlays (show_separation_line/
+            show_migration_line/show_critical_points) switch to the same
+            r/R, chord/c_ref coordinates automatically - no separate flag
+            needed on them.
         n_arrows : int
             Number of surfels randomly sampled for the direction quiver -
             one arrow per surfel would be illegible.
@@ -2227,13 +2231,15 @@ class FrictionLines:
             if any_overlay:
                 ax.legend(loc='upper right')
 
-            ax.set_ylabel('chord/$c_{ref}$ [-]' if normalize else 'chord [m]')
-            # 'equal' aspect only represents the blade's true physical
-            # shape when both axes share one scale (raw meters) - r/R
-            # and chord/c_ref are normalized by generally DIFFERENT
-            # references (r_tip vs c_ref), so forcing 'equal' there would
-            # distort the shape, not preserve it.
-            ax.set_aspect('auto' if normalize else 'equal')
+            ax.set_ylabel('$c/c_{ref}$ [-]' if normalize else 'chord [m]')
+            # r/R and c/c_ref are normalized by generally DIFFERENT
+            # references (r_tip vs c_ref), so a bare 'equal' aspect there
+            # would distort the blade's true shape (1 x-unit = r_tip
+            # meters, 1 y-unit = c_ref meters - not the same physical
+            # length). Passing the numeric ratio c_ref/r_tip instead (same
+            # convention as SurfaceField.physical_aspect()) rescales y/x
+            # so the displayed proportions still match the real blade.
+            ax.set_aspect(self.c_ref / self.r_tip if normalize else 'equal')
 
         axes[-1].set_xlabel('$r/R$ [-]' if normalize else '$r$ [m]')
         fig.tight_layout()

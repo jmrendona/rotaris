@@ -1585,11 +1585,13 @@ class SurfaceVariable:
                 ax.quiver(radius_sel[idx], chord_sel[idx], vec_span_sel[idx] / mag, vec_chord_sel[idx] / mag,
                           color='white', scale=60, width=0.002, alpha=0.8)
 
-            ax.set_ylabel('chord/$c_{ref}$ [-]' if normalize else 'chord [m]')
-            # 'equal' aspect only represents the blade's true physical
-            # shape when both axes share one scale (raw meters) - see
-            # FrictionLines.friction_lines()'s identical comment.
-            ax.set_aspect('auto' if normalize else 'equal')
+            ax.set_ylabel('$c/c_{ref}$ [-]' if normalize else 'chord [m]')
+            # r/R and c/c_ref are normalized by DIFFERENT references
+            # (r_tip vs c_ref) - see FrictionLines.friction_lines()'s
+            # identical comment for why the numeric ratio c_ref/r_tip
+            # (not 'auto'/'equal') is what actually preserves the blade's
+            # true displayed shape here.
+            ax.set_aspect(self.c_ref / self.r_tip if normalize else 'equal')
 
             if show_span_axis:
                 self._add_span_secondary_axis(ax, radius_sel, span_sel)
