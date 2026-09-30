@@ -1565,6 +1565,7 @@ class StripForces:
 
     def plot_harmonics_contour(self, result: dict, harmonics_result: dict, dt: float = None,
                                 component: str = 'axial', strips=None, ref: float = None, n_levels: int = 30,
+                                phase_locked: dict = None,
                                 cmap_time: str = 'RdBu_r', cmap_harmonics: str = 'viridis',
                                 normalize: bool = False, savepath: str = None, dpi: int = 600):
 
@@ -1596,6 +1597,26 @@ class StripForces:
         component, converted to a log-compressed scale for display -
         radius vs. harmonic order, color = magnitude.
 
+        Left panel, `phase_locked` given: the raw multi-revolution time
+        axis above can make a once-per-revolution feature hard to read -
+        every occurrence of it is spread out across the full record
+        instead of landing in one place, and a long record can pack many
+        of them into a visually busy trace (see the version of this plot
+        without `phase_locked`, generated during development, for
+        exactly this effect). Passing phase_lock()'s own result instead
+        folds every revolution in the record onto one shared azimuth
+        axis (0-360 deg) and ensemble-averages them together (see
+        phase_lock()'s own docstring) BEFORE contouring - the same
+        single-revolution, ensemble-averaged presentation Wu, Kingan, &
+        Go (2022) use for their own Fig. 20(a). A revolution-periodic
+        event becomes a single, clean feature at its own azimuth instead
+        of a blur of repeats across the whole time axis, and cycle-to-
+        cycle turbulent scatter (not repeatable revolution to revolution)
+        is suppressed by the same averaging, the same trade discussed for
+        cumulative_stats()/rolling_stats() elsewhere in this project:
+        clarity on the repeatable part, at the cost of no longer showing
+        genuine frame-to-frame variability.
+
         The log-compressed display, `10*log10(|F_n|)` by default (`ref`
         not given), reproduces Wu, Kingan, & Go's own Fig. 20 convention
         exactly - a data-compression device for showing several orders
@@ -1623,6 +1644,8 @@ class StripForces:
         dt : float, optional
             Physical timestep [s] - if omitted, the left panel's x-axis
             is frame index (dimensionless), matching plot_time_trace().
+            Ignored if `phase_locked` is given (its own 'azimuth_deg' is
+            used for the x-axis instead).
         component : 'axial', 'radial', or 'tangential'
         strips : sequence of int, optional
             Which strips to include - every valid (non-NaN-radius) strip
@@ -1634,6 +1657,17 @@ class StripForces:
             level in dB instead of a raw log-compressed magnitude.
         n_levels : int
             Number of contour levels/color steps in each panel.
+        phase_locked : dict, optional
+            phase_lock()'s return value, computed from this SAME `result`
+            and with the same strip layout (not checked). If given, the
+            LEFT panel is drawn from this ensemble-averaged, one-
+            revolution waveform (x-axis: azimuth, 0-360 deg) instead of
+            the raw multi-revolution time series - see above for why.
+            The RIGHT (harmonic) panel is unaffected either way - it
+            always comes from `harmonics_result`, which itself always
+            already runs on the raw signal, not a phase-locked one (see
+            harmonics()'s own docstring on why raw vs. phase-locked
+            harmonics are different, non-interchangeable quantities).
         normalize : bool
             If True, divide both panels' force values by the C_T/C_Q-
             style coefficient norm (see plot_bar_forces()'s normalize)
@@ -1654,6 +1688,8 @@ class StripForces:
             raise ValueError("plot_harmonics_contour() only supports a per-radial-strip compute() result.")
         if harmonics_result['chord'] is not None:
             raise ValueError("plot_harmonics_contour() only supports a per-radial-strip harmonics() result.")
+        if phase_locked is not None and phase_locked['chord'] is not None:
+            raise ValueError("plot_harmonics_contour() only supports a per-radial-strip phase_lock() result.")
         if normalize and ref is not None:
             raise ValueError("normalize=True requires ref=None - a raw-force ref doesn't match the coefficient scale.")
 
@@ -1662,10 +1698,16 @@ class StripForces:
         sel = valid if strips is None else np.asarray(strips)
         r_over_R = radius[sel] / self.r_tip
 
-        arr = result[component][:, sel]  # (n_frames, n_sel)
+        if phase_locked is not None:
+            arr = phase_locked[component][:, sel]  # (n_azimuth_bins, n_sel)
+            t = phase_locked['azimuth_deg']
+            time_xlabel = 'Azimuth [deg]'
+        else:
+            arr = result[component][:, sel]  # (n_frames, n_sel)
+            n_frames = arr.shape[0]
+            t = np.arange(n_frames) * dt if dt is not None else np.arange(n_frames)
+            time_xlabel = 'Time [s]' if dt is not None else 'Frame index'
         arr_fluct = arr - arr.mean(axis=0, keepdims=True)  # unsteady part only - see docstring
-        n_frames = arr.shape[0]
-        t = np.arange(n_frames) * dt if dt is not None else np.arange(n_frames)
 
         mag = harmonics_result['magnitude'][:, sel]  # (n_harmonics, n_sel)
         harmonic = harmonics_result['harmonic']
@@ -1696,7 +1738,7 @@ class StripForces:
         levels_time = np.linspace(-vmax, vmax, n_levels + 1)
         cf_time = ax_time.contourf(t, r_over_R, arr_fluct.T, levels=levels_time,
                                     cmap=cmap_time, extend='both')
-        ax_time.set_xlabel('Time [s]' if dt is not None else 'Frame index')
+        ax_time.set_xlabel(time_xlabel)
         ax_time.set_ylabel('$r/R$ [-]')
 
         levels_harm = np.linspace(level_display.min(), level_display.max(), n_levels + 1)

@@ -317,6 +317,37 @@ sf_inst.plot_harmonics_contour(
    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_contour_radial_{case}.png'),
 )
 
+# Same paired contour, but with the LEFT panel folded onto one revolution
+# via phase_lock() instead of the raw multi-revolution time axis (see
+# README.md, "Time + harmonic contour across the whole span:
+# plot_harmonics_contour()") - a once-per-revolution feature (e.g. a
+# blade-vortex-interaction-style impulse) then shows up as ONE clean
+# feature at its own azimuth, instead of being repeated - and visually
+# blurred together - across the whole raw time axis. Reuses the SAME
+# phase_locked computed above for plot_vs_angle().
+print(40*'-')
+print('Plotting paired phase-locked/harmonic contour for the axial component')
+sf_inst.plot_harmonics_contour(
+   result_inst, h_phase_axial, dt=dt, component='axial',
+   phase_locked=phase_locked, normalize=normalize,
+   savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_contour_phaselocked_axial_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting paired phase-locked/harmonic contour for the tangential component')
+sf_inst.plot_harmonics_contour(
+   result_inst, h_phase_axial, dt=dt, component='tangential',
+   phase_locked=phase_locked, normalize=normalize,
+   savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_contour_phaselocked_tangential_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting paired phase-locked/harmonic contour for the radial component')
+sf_inst.plot_harmonics_contour(
+   result_inst, h_phase_axial, dt=dt, component='radial',
+   phase_locked=phase_locked, normalize=normalize,
+   savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_contour_phaselocked_radial_{case}.png'),
+)
 
 # Reconstruction check against phase_lock()'s own empirical curve:
 #phase_locked = sf_inst.phase_lock(result_inst, dt=dt, n_azimuth_bins=72)

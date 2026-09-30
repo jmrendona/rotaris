@@ -1787,6 +1787,33 @@ Every valid (non-NaN-radius) strip is included by default (`strips=None`)
 whole span continuously is the point here. Needs `r_tip` set (in
 `__init__`) for the `r/R` axis.
 
+**Folding the left panel onto one revolution: `phase_locked=`.** The raw
+multi-revolution time axis above can make a once-per-revolution feature
+hard to read - every occurrence of it is spread out across the whole
+record, and a long record packs many repeats into a visually busy trace.
+Passing `phase_lock()`'s own result instead folds every revolution onto
+one shared azimuth axis (0-360 deg) and ensemble-averages them together
+BEFORE contouring - the same single-revolution presentation Wu, Kingan,
+& Go (2022) use for their own Fig. 20(a):
+
+```python
+phase_locked = sf.phase_lock(result, dt=0.000056, n_azimuth_bins=72)
+sf.plot_harmonics_contour(result, h, component='axial', phase_locked=phase_locked,
+                           savepath='strip_harmonics_contour_phaselocked_axial.png')
+```
+
+A revolution-periodic event (e.g. a blade-vortex-interaction-style
+impulse) becomes a single, clean feature at its own azimuth instead of a
+blur of repeats across the whole time axis - at the cost of no longer
+showing genuine frame-to-frame variability, the same clarity-vs-detail
+trade already discussed for `cumulative_stats()`/`rolling_stats()`
+elsewhere in this document. `dt` is ignored when `phase_locked` is given
+(the azimuth axis comes from `phase_locked` itself); the right
+(harmonic) panel is unaffected either way - it always comes from
+`harmonics_result`, which itself always runs on the raw signal, not a
+phase-locked one (see `harmonics()`'s own note on why those are
+different, non-interchangeable quantities).
+
 ### Convergence checking: phase portraits - `plot_phase_portrait()` / `plot_phase_portrait_by_strip()`
 
 One integrated force component plotted against another, over time (e.g.
