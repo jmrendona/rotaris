@@ -1,6 +1,7 @@
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 
 from bladeprocessor._axis_validation import validate_chord_span_thickness_axes
 
@@ -1745,12 +1746,32 @@ class StripForces:
         cf_harm = ax_harm.contourf(harmonic, r_over_R, level_display.T, levels=levels_harm,
                                     cmap=cmap_harmonics, extend='both')
         ax_harm.set_xlabel('Harmonic ($n$P)')
+        ax_harm.xaxis.set_major_locator(mticker.MaxNLocator(integer=True))  # a harmonic index is never fractional
 
         cax_harm = fig.add_axes([0.79, 0.12, 0.02, 0.83])
         cax_time = fig.add_axes([0.90, 0.12, 0.02, 0.83])
         time_label = (self._COMPONENT_COEFF_LABELS if normalize else self._COMPONENT_LABELS).get(component, component)
-        fig.colorbar(cf_harm, cax=cax_harm, label=level_label)
-        fig.colorbar(cf_time, cax=cax_time, label=time_label)
+        cbar_harm = fig.colorbar(cf_harm, cax=cax_harm, label=level_label)
+        cbar_time = fig.colorbar(cf_time, cax=cax_time, label=time_label)
+
+        # A compact, bounded-width tick format (a short mantissa plus a
+        # shared "x10^k" offset shown once) - NOT just cosmetic: with a
+        # plain fixed-decimal format, the tick labels' own width scales
+        # with the data (a raw force's "1.175" vs. normalize=True's own
+        # much smaller "0.000547"), and a wider tick label pushes the
+        # colorbar's rotated axis LABEL further right - far enough,
+        # for a small enough normalized scale, to be clipped off the
+        # canvas entirely (confirmed: normalize=True's own coefficient
+        # values are small enough to trigger exactly this). A bounded
+        # format keeps every tick label roughly the same width
+        # regardless of the data's actual magnitude, fixing this at the
+        # source rather than guessing a large-enough fixed margin for
+        # whatever scale happens to show up.
+        for cbar in (cbar_harm, cbar_time):
+            fmt = mticker.ScalarFormatter(useMathText=True)
+            fmt.set_powerlimits((-2, 2))
+            cbar.formatter = fmt
+            cbar.update_ticks()
 
         if savepath:
             fig.savefig(savepath, dpi=dpi)
