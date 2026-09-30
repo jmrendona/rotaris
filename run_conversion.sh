@@ -41,7 +41,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --time=15:00:00               # ADJUST ME - depends on file size / frame count
 #SBATCH --account=rrg-moreaust-ac
-#SBATCH --job-name=EDAT-nosimplification_avg-forces
+#SBATCH --job-name=EDAT-nosimplification_inst-pressure
 #SBATCH --output=%x_%j_out.txt
 #SBATCH --error=%x_%j_err.txt
 #SBATCH --mail-user=renj3003@usherbrooke.ca   # ADJUST ME if needed

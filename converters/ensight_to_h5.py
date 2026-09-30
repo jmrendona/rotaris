@@ -27,9 +27,28 @@ def raw_positions_to_ensight_frame(positions: np.ndarray) -> np.ndarray:
     case this was validated against, confirmed by comparing raw vs.
     pf2ens-reported bounding boxes directly.
 
+    "The mesh's own bounding-box midpoint" means whatever mesh pf2ens
+    actually OUTPUT for that run - i.e. `positions` here must already be
+    restricted to the same face_names convert_snc_to_h5() passed to
+    pf2ens, not the whole raw .snc file. Passing the whole file's
+    surfel cloud is only "correct" by coincidence, when the excluded
+    faces don't happen to shift the bbox - confirmed WRONG (~22cm
+    offset) on a real case that selected one single blade out of
+    several via face_names, where the whole file (many symmetric faces:
+    all the blades, casing, stator, walls, ...) is centered near the
+    rotation axis but that one asymmetric blade alone is not. This
+    function itself is never called directly in this module (the same
+    bbox_center math is duplicated inline in convert_snc_to_h5(), where
+    positions is already face_names-filtered before reaching it) - kept
+    here as the documented reference for what that inline block does
+    and why.
+
     Parameters
     ----------
     positions : np.ndarray, shape (N, 3)
+        Already restricted to the same faces pf2ens actually output for
+        this run (see above) - NOT necessarily every surfel in the raw
+        .snc file.
 
     Returns
     -------
@@ -411,7 +430,15 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
     Geometry/X,Y,Z already is (see raw_positions_to_ensight_frame() -
     lrf_axis_origin is NOT pf2ens's coordinate origin, so this re-centering
     is required, not optional, for radius-from-axis_origin to come out
-    correct downstream). This does read the full raw surfel cloud once
+    correct downstream). The bbox that re-centering is computed from is
+    restricted to include_faces (the same faces actually sent to pf2ens,
+    resolved from face_names above) BEFORE the bbox itself is computed -
+    using the whole raw .snc file's surfel cloud instead is only correct
+    when face_names selects a symmetric-about-the-axis subset (or
+    everything), and silently WRONG otherwise (confirmed: a ~22cm bbox
+    shift on a real one-blade-out-of-several selection, enough to corrupt
+    every nearest-neighbor surface_split() match downstream - see that
+    function's docstring). This does read the full raw surfel cloud once
     (surfel_centroids()) to compute that shift, even when
     surface_split=False - not free, but avoids silently writing an
     axis_origin inconsistent with this file's own geometry.
@@ -428,29 +455,17 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
     axis_direction = ref_reader.lrf_axis_direction
     axis_origin_raw = ref_reader.lrf_axis_origin * ref_reader.lattice_scales['LatticeLength']
 
-    # raw_positions_to_ensight_frame() re-centers positions on the mesh's own
-    # bounding-box midpoint (pf2ens's convention, NOT lrf_axis_origin - see
-    # that function's docstring). axis_origin needs the exact same shift to
-    # stay consistent with the (already re-centered) Geometry/X,Y,Z this
-    # writes - computed from the same raw surfel cloud either way, so this
-    # read isn't wasted even when surface_split=False also needs it.
-    raw_positions = ref_reader.surfel_centroids() * ref_reader.lattice_scales['LatticeLength']
-    bbox_center = (raw_positions.min(axis=0) + raw_positions.max(axis=0)) / 2
-    axis_origin = axis_origin_raw - bbox_center
-
-    if surface_split:
-        reference_positions = raw_positions - bbox_center
-        reference_upper = ref_reader.surface_split()
-    else:
-        reference_positions = reference_upper = None
-
     # Faces actually carrying surfel data in THIS .snc (not just every
     # face declared in the case's full geometry catalog - face_names has
     # entries, e.g. wind-tunnel walls/inlets, that never show up in the
     # raw per-surfel `face` tag array at all for a measurement file
     # scoped to just the rotor) - see face_names parameter docstring for
-    # why this can't just be left to pf2ens's own default.
-    present_face_ids = np.unique(ref_reader._f.variables['face'][:])
+    # why this can't just be left to pf2ens's own default. Resolved
+    # BEFORE bbox_center below (not after, as an earlier version of this
+    # function had it) - see that block's comment for why the order
+    # matters now.
+    face_tag = ref_reader._f.variables['face'][:]
+    present_face_ids = np.unique(face_tag)
     present_face_names = [ref_reader.face_names[i] for i in present_face_ids]
 
     if face_names is None:
@@ -469,6 +484,37 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
         f"in this file): {include_faces}. Pass face_names=[...] to convert_snc_to_h5() "
         "(or --face-names on the command line) to restrict to a subset instead."
     )
+
+    # raw_positions_to_ensight_frame() re-centers positions on the mesh's own
+    # bounding-box midpoint (pf2ens's convention, NOT lrf_axis_origin - see
+    # that function's docstring: pf2ens centers on whatever mesh it actually
+    # OUTPUT, i.e. only include_faces, not necessarily every face present in
+    # the raw .snc). Restricting raw_positions to include_faces BEFORE
+    # computing bbox_center is required, not optional, whenever face_names
+    # selects a proper subset that isn't itself symmetric about the rotation
+    # axis (e.g. one single blade out of several) - using the whole file's
+    # bbox there recovers a DIFFERENT point than pf2ens's own convention,
+    # silently "correct" only by coincidence on a case where the excluded
+    # faces don't shift the bbox. Confirmed wrong on a real single-blade
+    # face_names selection: ~22 cm offset between the whole-file bbox and
+    # the include_faces-only one, enough to corrupt every downstream
+    # nearest-neighbor surface_split() match (a KDTree match under a ~22 cm
+    # systematic offset routinely lands on the wrong side of a thin blade).
+    # axis_origin needs the exact same shift to stay consistent with the
+    # (already re-centered) Geometry/X,Y,Z this writes.
+    include_face_ids = [i for i, name in enumerate(ref_reader.face_names) if name in include_faces]
+    face_surfel_mask = np.isin(face_tag, include_face_ids)
+
+    raw_positions = ref_reader.surfel_centroids() * ref_reader.lattice_scales['LatticeLength']
+    raw_positions = raw_positions[face_surfel_mask]
+    bbox_center = (raw_positions.min(axis=0) + raw_positions.max(axis=0)) / 2
+    axis_origin = axis_origin_raw - bbox_center
+
+    if surface_split:
+        reference_positions = raw_positions - bbox_center
+        reference_upper = ref_reader.surface_split()[face_surfel_mask]
+    else:
+        reference_positions = reference_upper = None
 
     ref_reader.close()
 

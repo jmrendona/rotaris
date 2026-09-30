@@ -26,7 +26,7 @@ validate_axes = cfg.validate_axes
 span_min = cfg.span_min
 dt = cfg.dt
 
-for _sub in ('forces/convergence', 'forces/hanson'):
+for _sub in ('forces/convergence/global', 'forces/convergence/local', 'forces/hanson'):
 	os.makedirs(os.path.join(master_path, 'images', _sub), exist_ok=True)
 
 
@@ -286,7 +286,7 @@ print('Plotting whole-blade phase portrait (axial vs tangential)')
 totals_inst = sf_inst.total_loads(span_min=span_min)  # standalone total, same span as result_inst above
 sf_inst.plot_phase_portrait(
    totals_inst, component_pair=('axial', 'tangential'),
-   savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_axial_tangential_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/phase_portrait_axial_tangential_{case}.png'),
 )
 
 print(40*'-')
@@ -294,7 +294,7 @@ print('Plotting whole-blade phase portrait (axial vs radial)')
 totals_inst = sf_inst.total_loads(span_min=span_min)  # standalone total, same span as result_inst above
 sf_inst.plot_phase_portrait(
    totals_inst, component_pair=('axial', 'radial'),
-   savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_axial_radial_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/phase_portrait_axial_radial_{case}.png'),
 )
 
 print(40*'-')
@@ -302,28 +302,28 @@ print('Plotting whole-blade phase portrait (radial vs tangential)')
 totals_inst = sf_inst.total_loads(span_min=span_min)  # standalone total, same span as result_inst above
 sf_inst.plot_phase_portrait(
    totals_inst, component_pair=('tangential', 'radial'),
-   savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_tangential_radial_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/phase_portrait_tangential_radial_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting per-strip phase portraits (axial vs radial) - localizes convergence issues by span')
 sf_inst.plot_phase_portrait_by_strip(
    result_inst, component_pair=('axial', 'radial'), strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_by_strip_axial_radial_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/phase_portrait_by_strip_axial_radial_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting per-strip phase portraits (axial vs tangential) - localizes convergence issues by span')
 sf_inst.plot_phase_portrait_by_strip(
    result_inst, component_pair=('axial', 'tangential'), strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_by_strip_axial_tangential_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/phase_portrait_by_strip_axial_tangential_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting per-strip phase portraits (tangential vs radial) - localizes convergence issues by span')
 sf_inst.plot_phase_portrait_by_strip(
    result_inst, component_pair=('tangential', 'radial'), strips=[0, 2, 4, 6, 8, 9],
-   savepath=os.path.join(master_path, f'images/forces/convergence/phase_portrait_by_strip_tangential_radial_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/phase_portrait_by_strip_tangential_radial_{case}.png'),
 )
 
 # Convergence checking: cumulative (running) mean vs revolutions included
@@ -334,14 +334,14 @@ print(40*'-')
 print('Plotting cumulative mean of thrust vs revolutions included')
 plot_cumulative_mean(
    totals_inst['thrust'], dt=dt, rpm=rpm, ylabel='Thrust [N]',
-   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_mean_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/thrust_cumulative_mean_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting cumulative mean of thrust vs revolutions included')
 plot_cumulative_mean(
    totals_inst['torque'], dt=dt, rpm=rpm, ylabel='Torque [Nm]',
-   savepath=os.path.join(master_path, f'images/forces/convergence/torque_cumulative_mean_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/torque_cumulative_mean_{case}.png'),
 )
 
 # Mean AND variance together (Pope's <U>/<u'^2> pair). sync='none'
@@ -359,14 +359,14 @@ print(40*'-')
 print('Plotting cumulative mean+variance of thrust, synced to revolution boundaries')
 plot_cumulative_stats(
    totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', ylabel='Thrust [N]',
-   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_stats_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/thrust_cumulative_stats_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting cumulative mean+variance of thrust, synced to revolution boundaries')
 plot_cumulative_stats(
    totals_inst['torque'], dt=dt, rpm=rpm, sync='none', ylabel='Torque [Nm]',
-   savepath=os.path.join(master_path, f'images/forces/convergence/torque_cumulative_stats_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/torque_cumulative_stats_{case}.png'),
 )
 
 # Example for a rotor-stator case instead (NOT this project's isolated
@@ -376,7 +376,7 @@ plot_cumulative_stats(
 # plot_cumulative_stats(
 #   totals_inst['thrust'], dt=dt, rpm=rpm, sync='periodicity', period_deg=90.0,
 #   ylabel='Thrust [N]',
-#   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_stats_periodicity_{case}.png'),
+#   savepath=os.path.join(master_path, f'images/forces/convergence/global/thrust_cumulative_stats_periodicity_{case}.png'),
 # )
 
 # Convergence checking: 3rd/4th-order statistics (running skewness and
@@ -388,50 +388,28 @@ print(40*'-')
 print('Plotting cumulative skewness+flatness of thrust')
 plot_cumulative_moments(
    totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', label='Thrust',
-   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_moments_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/thrust_cumulative_moments_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting cumulative skewness+flatness of torque')
 plot_cumulative_moments(
    totals_inst['torque'], dt=dt, rpm=rpm, sync='none', label='Torque',
-   savepath=os.path.join(master_path, f'images/forces/convergence/torque_cumulative_moments_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/torque_cumulative_moments_{case}.png'),
 )
 
-# Rolling (fixed-size sliding window) overlay on the cumulative curve
-# above (see README.md, "Cross-checking the cumulative curve with a
-# fixed-size rolling window") - reveals a late-run drift a cumulative
-# curve's own shrinking (1/n) sensitivity can hide. window has no good
-# universal default - pick a few times integral_timescale()'s own
-# T_int (as a sample count) for this case, not a blindly reused number.
-print(40*'-')
-print('Plotting cumulative mean+variance of thrust with a rolling-window overlay')
-plot_cumulative_stats(
-   totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', window=200, ylabel='Thrust [N]',
-   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cumulative_stats_rolling_{case}.png'),
-)
-
-# Convergence at a SINGLE strip, not just the whole-blade total above
-# (see README.md, "Convergence checking at a single point, not just the
-# spatial mean") - a converged whole-blade total is necessary but not
-# sufficient for convergence at any given strip; nearest_strip() picks
-# one by r/R instead of an opaque strip index - 90% span (near the tip)
-# is a reasonable "hardest to converge" starting choice, adjust per case.
-print(40*'-')
-print('Plotting cumulative mean+variance of axial force at the strip nearest 90% span')
-tip_idx, tip_r_actual = sf_inst.nearest_strip(90, result_inst)
-print(f'Strip actually used: idx={tip_idx}, r={tip_r_actual:.4f} m')
-plot_cumulative_stats(
-   result_inst['axial'][:, tip_idx], dt=dt, rpm=rpm, sync='none', ylabel='Axial force [N]',
-   savepath=os.path.join(master_path, f'images/forces/convergence/axial_tip_strip_cumulative_stats_{case}.png'),
-)
-
-print(f'Strip actually used: idx={tip_idx}, r={tip_r_actual:.4f} m')
-plot_cumulative_moments(
-   result_inst['axial'][:, tip_idx], dt=dt, rpm=rpm, sync='none', ylabel='Axial force [N]',
-   savepath=os.path.join(master_path, f'images/forces/convergence/axial_tip_strip_cumulative_moments_{case}.png'),
-)
-
+# # Rolling (fixed-size sliding window) overlay on the cumulative curve
+# # above (see README.md, "Cross-checking the cumulative curve with a
+# # fixed-size rolling window") - reveals a late-run drift a cumulative
+# # curve's own shrinking (1/n) sensitivity can hide. window has no good
+# # universal default - pick a few times integral_timescale()'s own
+# # T_int (as a sample count) for this case, not a blindly reused number.
+# print(40*'-')
+# print('Plotting cumulative mean+variance of thrust with a rolling-window overlay')
+# plot_cumulative_stats(
+#    totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', window=200, ylabel='Thrust [N]',
+#    savepath=os.path.join(master_path, f'images/forces/convergence/global/thrust_cumulative_stats_rolling_{case}.png'),
+# 
 
 # Convergence checking: autocorrelation comparison between independent
 # windows (see README.md, "Convergence checking: autocorrelation" - NOT
@@ -443,14 +421,14 @@ print(40*'-')
 print('Plotting thrust autocorrelation, first half vs second half of the run')
 plot_autocorrelation_windows(
    totals_inst['thrust'], n_windows=2, dt=dt, labels=['First half', 'Second half'],
-   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_autocorrelation_windows_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/thrust_autocorrelation_windows_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting torque autocorrelation, first half vs second half of the run')
 plot_autocorrelation_windows(
    totals_inst['torque'], n_windows=2, dt=dt, labels=['First half', 'Second half'],
-   savepath=os.path.join(master_path, f'images/forces/convergence/torque_autocorrelation_windows_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/torque_autocorrelation_windows_{case}.png'),
 )
 
 # Convergence checking: statistical uncertainty of the mean (SEM), from
@@ -475,12 +453,12 @@ print(f"mean={stats['mean']:.4g} N, sigma={stats['sigma']:.4g} N, T_int={stats['
 # defaults to 0.01 (1% of the mean), override for a stricter/looser target:
 plot_integral_timescale(
    totals_inst['thrust'], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_integral_timescale_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/thrust_integral_timescale_{case}.png'),
 )
 
 plot_integral_timescale(
    totals_inst['torque'], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-   savepath=os.path.join(master_path, f'images/forces/convergence/torque_integral_timescale_{case}.png'),
+   savepath=os.path.join(master_path, f'images/forces/convergence/global/torque_integral_timescale_{case}.png'),
 )
 
 # How many MORE revolutions to reach a target precision (e.g. 0.1%
@@ -514,3 +492,99 @@ print(f"Need {req['revolutions_required']:.1f} total revolutions for 0.1% relati
 #   totals_inst['thrust'], dt=dt, rpm=rpm,,period_deg=90.0,
 #   savepath=os.path.join(master_path, f'images/forces/convergence/thrust_cycle_correlation_90deg_{case}.png'),
 # )
+
+
+# Convergence at a SINGLE strip, not just the whole-blade total above
+# (see README.md, "Convergence checking at a single point, not just the
+# spatial mean") - a converged whole-blade total is necessary but not
+# sufficient for convergence at any given strip; nearest_strip() picks
+# one by r/R instead of an opaque strip index - 90% span (near the tip)
+# is a reasonable "hardest to converge" starting choice, adjust per case.
+
+span_pct = [25, 50, 75, 90]
+
+for span in span_pct:
+   # axial
+   print(40*'-')
+   print('Plotting cumulative mean+variance of axial force at the strip nearest 90% span')
+   tip_idx, tip_r_actual = sf_inst.nearest_strip(span, result_inst)
+   print(f'Strip actually used: idx={tip_idx}, r={tip_r_actual:.4f} m')
+   plot_cumulative_stats(
+      result_inst['axial'][:, tip_idx], dt=dt, rpm=rpm, sync='none', ylabel='Axial force [N]',
+      savepath=os.path.join(master_path, f'images/forces/convergence/local/axial_tip_strip_cumulative_stats_s{span:03d}_{case}.png'),
+   )
+
+   print(f'Strip actually used: idx={tip_idx}, r={tip_r_actual:.4f} m')
+   plot_cumulative_moments(
+      result_inst['axial'][:, tip_idx], dt=dt, rpm=rpm, sync='none', ylabel='Axial force [N]',
+      savepath=os.path.join(master_path, f'images/forces/convergence/local/axial_tip_strip_cumulative_moments_s{span:03d}_{case}.png'),
+   )
+
+   print(40*'-')
+   print('Plotting axial force autocorrelation, first half vs second half of the run')
+   plot_autocorrelation_windows(
+      result_inst['axial'][:, tip_idx], n_windows=2, dt=dt, labels=['First half', 'Second half'],
+      savepath=os.path.join(master_path, f'images/forces/convergence/global/axial_tip_strip_autocorrelation_windows_s{span:03d}_{case}.png'),
+   )
+
+   plot_integral_timescale(
+      result_inst['axial'][:, tip_idx], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+      savepath=os.path.join(master_path, f'images/forces/convergence/global/axial_tip_strip_integral_timescale_s{span:03d}_{case}.png'),
+   )
+
+   # tangential
+   print(40*'-')
+   print('Plotting cumulative mean+variance of tangential force at the strip nearest 90% span')
+   tip_idx, tip_r_actual = sf_inst.nearest_strip(90, result_inst)
+   print(f'Strip actually used: idx={tip_idx}, r={tip_r_actual:.4f} m')
+   plot_cumulative_stats(
+      result_inst['tangential'][:, tip_idx], dt=dt, rpm=rpm, sync='none', ylabel='Tangential force [N]',
+      savepath=os.path.join(master_path, f'images/forces/convergence/local/tangential_tip_strip_cumulative_stats_s{span:03d}_{case}.png'),
+   )
+
+   print(f'Strip actually used: idx={tip_idx}, r={tip_r_actual:.4f} m')
+   plot_cumulative_moments(
+      result_inst['tangential'][:, tip_idx], dt=dt, rpm=rpm, sync='none', ylabel='Tangential force [N]',
+      savepath=os.path.join(master_path, f'images/forces/convergence/local/tangential_tip_strip_cumulative_moments_s{span:03d}_{case}.png'),
+   )
+
+   print(40*'-')
+   print('Plotting tangential force autocorrelation, first half vs second half of the run')
+   plot_autocorrelation_windows(
+      result_inst['tangential'][:, tip_idx], n_windows=2, dt=dt, labels=['First half', 'Second half'],
+      savepath=os.path.join(master_path, f'images/forces/convergence/global/tangential_tip_strip_autocorrelation_windows_s{span:03d}_{case}.png'),
+   )
+
+   plot_integral_timescale(
+      result_inst['tangential'][:, tip_idx], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+      savepath=os.path.join(master_path, f'images/forces/convergence/global/tangential_tip_strip_integral_timescale_s{span:03d}_{case}.png'),
+   )
+
+
+   # radial
+   print(40*'-')
+   print('Plotting cumulative mean+variance of radial force at the strip nearest 90% span')
+   tip_idx, tip_r_actual = sf_inst.nearest_strip(90, result_inst)
+   print(f'Strip actually used: idx={tip_idx}, r={tip_r_actual:.4f} m')
+   plot_cumulative_stats(
+      result_inst['radial'][:, tip_idx], dt=dt, rpm=rpm, sync='none', ylabel='Radial force [N]',
+      savepath=os.path.join(master_path, f'images/forces/convergence/local/radial_tip_strip_cumulative_stats_s{span:03d}_{case}.png'),
+   )
+
+   print(f'Strip actually used: idx={tip_idx}, r={tip_r_actual:.4f} m')
+   plot_cumulative_moments(
+      result_inst['radial'][:, tip_idx], dt=dt, rpm=rpm, sync='none', ylabel='Radial force [N]',
+      savepath=os.path.join(master_path, f'images/forces/convergence/local/radial_tip_strip_cumulative_moments_s{span:03d}_{case}.png'),
+   )
+
+   print(40*'-')
+   print('Plotting radial force autocorrelation, first half vs second half of the run')
+   plot_autocorrelation_windows(
+      result_inst['radial'][:, tip_idx], n_windows=2, dt=dt, labels=['First half', 'Second half'],
+      savepath=os.path.join(master_path, f'images/forces/convergence/global/radial_tip_strip_autocorrelation_windows_s{span:03d}_{case}.png'),
+   )
+
+   plot_integral_timescale(
+      result_inst['radial'][:, tip_idx], dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+      savepath=os.path.join(master_path, f'images/forces/convergence/global/radial_tip_strip_integral_timescale_s{span:03d}_{case}.png'),
+   )
