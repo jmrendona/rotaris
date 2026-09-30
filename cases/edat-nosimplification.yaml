@@ -17,8 +17,8 @@ case: EDAT-nosimplification
 files:
   inst_force: EDAT-nosimplification_forces_rotor.h5
   avg_force: RA-beam-no-interaction_avg_forces_rotor.h5
-  inst_pressure: 2025HF_pressure_rotor.h5
-  avg_pressure: RA-beam_avg_pressure_rotor.h5
+  inst_pressure: EDAT-nosimplification_pressure_rotor.h5
+  avg_pressure: EDAT-nosimplification_avg-pressure_rotor.h5
 
 rotor:
   r_tip: 0.39167

@@ -307,6 +307,48 @@ class SurfaceVariable:
 
         return (p - self.pref) / q_ref[None, :]
 
+    def variable_time_series_at_point(self, name: str, span_pct: float, chord_pct: float,
+                                       surface: str = 'Upper', tol: float = 0.0015,
+                                       chord_percentile: float = 0.1, reverse_chord: bool = False,
+                                       span_min: float = None, span_max: float = None):
+
+        '''
+        Raw Data/<surface>/<name> (e.g. 'static_pressure') at EVERY
+        frame, at the ONE raw surfel nearest a given (span_pct,
+        chord_pct) location (see _nearest_point()) - the single-point
+        counterpart to variable_time_series() (every point), same role
+        for a raw variable that FrictionLines.cf_time_series_at_point()
+        plays for Cf - see that method's docstring for why a single,
+        spatially-UNAVERAGED point series is the stronger convergence
+        check, not variable_time_series(...).mean(axis=1)'s spatial
+        mean.
+
+        Parameters
+        ----------
+        name : str
+            Dataset name under Data/<surface> - see variable().
+        span_pct, chord_pct : float
+            Target location as percentages (0-100) of r/R and x/c - see
+            _nearest_point() for exactly how these map to a raw point
+            (the nearest available surfel, NOT an interpolated value).
+
+        Returns
+        -------
+        series : np.ndarray, shape (n_frames,)
+        point_info : dict
+            {'idx', 'r', 'xc', 'surface'} - the ACTUAL point used (see
+            _nearest_point()), since the nearest raw surfel won't sit
+            exactly on the requested span_pct/chord_pct.
+        '''
+
+        idx, r_actual, xc_actual = self._nearest_point(
+            span_pct, chord_pct, surface=surface, tol=tol, chord_percentile=chord_percentile,
+            reverse_chord=reverse_chord, span_min=span_min, span_max=span_max)
+
+        series = self.variable_time_series(name, surface=surface)[:, idx]
+
+        return series, {'idx': idx, 'r': r_actual, 'xc': xc_actual, 'surface': surface}
+
     def at_radii(self, radii, get_values, surface=('Upper', 'Lower'), tol: float = 0.0015,
                  n_chord_bins: int = 75, span_min: float = None, span_max: float = None,
                  chord_percentile: float = 0.1, edge_crop: float = 0.0, reverse_chord: bool = False):
