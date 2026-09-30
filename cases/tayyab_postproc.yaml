@@ -25,6 +25,10 @@ rotor:
   rho_ref: 1.22523
   rpm: 3555
   pref: 101325
+  c_ref: null # reference chord [m] - set this before using normalize: true
+
+# No NDA on this case - plots show actual physical radius/chord/units.
+normalize: false
 
 # Raw Cartesian axis (0=X, 1=Y, 2=Z) for each blade direction. Rotation axis
 # is X here, radius correlates -0.98 with Z, and X has the highest mean

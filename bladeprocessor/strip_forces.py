@@ -120,13 +120,14 @@ class StripForces:
         before this parameter existed.
     '''
 
-    def __init__(self, filename: str, r_tip: float = None, rpm: float = None, span_axis: int = 0,
-                 chord_axis: int = 2, thickness_axis: int = 1,
+    def __init__(self, filename: str, r_tip: float = None, rpm: float = None, rho_ref: float = None,
+                 span_axis: int = 0, chord_axis: int = 2, thickness_axis: int = 1,
                  span_min: float = None, span_max: float = None, validate_axes: bool = True):
 
         self.filename = filename
         self.r_tip = r_tip
         self.rpm = rpm
+        self.rho_ref = rho_ref
         self.span_axis = span_axis
         self.chord_axis = chord_axis
         self.thickness_axis = thickness_axis
@@ -136,6 +137,30 @@ class StripForces:
 
         if validate_axes:
             validate_chord_span_thickness_axes(self.normals, self.span_axis, self.chord_axis, self.thickness_axis)
+
+    def _coefficient_norms(self):
+
+        '''
+        (norm_force, norm_torque) for the standard propeller-convention
+        coefficients plot_bar_forces() already defines - see that
+        method's own docstring for the exact equations
+        (C_T = force/norm_force, C_Q = torque/norm_torque). Computed
+        from rho_ref/rpm/r_tip (all set in __init__) - the single
+        source every normalize=True plotting method in this class pulls
+        from, so a case only has to supply these three once, not per
+        plot call.
+        '''
+
+        if self.rho_ref is None or self.rpm is None or self.r_tip is None:
+            raise ValueError(
+                "rho_ref, rpm, and r_tip must all be set (in __init__) to normalize into force/torque "
+                "coefficients."
+            )
+
+        n_rot = self.rpm / 60.0
+        diameter = 2 * self.r_tip
+
+        return self.rho_ref * n_rot ** 2 * diameter ** 4, self.rho_ref * n_rot ** 2 * diameter ** 5
 
     def _load(self):
 
@@ -591,8 +616,8 @@ class StripForces:
 
     def plot_bar_forces(self, result: dict, frame: int = None, ax=None, bar_width: float = None,
                          colors=('tab:blue', 'tab:orange', 'tab:green'), show_totals: bool = False,
-                         normalize_radius: bool = True, rho: float = None, n_rot: float = None,
-                         diameter: float = None, savepath: str = None, dpi: int = 600):
+                         normalize_radius: bool = True, normalize: bool = False, rho: float = None,
+                         n_rot: float = None, diameter: float = None, savepath: str = None, dpi: int = 600):
 
         '''
         Bar chart of per-strip force plus its running cumulative sum
@@ -638,12 +663,21 @@ class StripForces:
         normalize_radius : bool
             If True (default), the x-axis is r/R (needs r_tip - see
             __init__). If False, physical radius [m].
+        normalize : bool
+            If True, coefficients are computed automatically from
+            rho_ref/rpm/r_tip (all set in __init__ - see
+            _coefficient_norms()), without needing rho/n_rot/diameter
+            passed here too. rho/n_rot/diameter below still work as an
+            explicit override (e.g. a reference density/diameter
+            different from this case's own) and take precedence if any
+            is given.
         rho, n_rot, diameter : float, optional
             Density [kg/m^3], rotation rate [rev/s - NOT rad/s], and
-            rotor diameter [m]. If all three are given, the y-axis
-            (bars AND the cumulative curve) is non-dimensionalized as a
-            standard propeller-convention force coefficient, the SAME
-            equation applied to all three force components:
+            rotor diameter [m]. If all three are given (or normalize=True
+            provides them automatically), the y-axis (bars AND the
+            cumulative curve) is non-dimensionalized as a standard
+            propeller-convention force coefficient, the SAME equation
+            applied to all three force components:
 
                 C_T,axial      = thrust           / (rho * n_rot^2 * diameter^4)
                 C_T,radial     = radial_force     / (rho * n_rot^2 * diameter^4)
@@ -681,9 +715,15 @@ class StripForces:
         if normalize_radius and self.r_tip is None:
             raise ValueError("r_tip must be set (in __init__) to plot the x-axis as r/R (normalize_radius=True).")
 
-        coefficients = rho is not None and n_rot is not None and diameter is not None
-        norm_force = rho * n_rot ** 2 * diameter ** 4 if coefficients else 1.0
-        norm_torque = rho * n_rot ** 2 * diameter ** 5 if coefficients else 1.0
+        explicit = rho is not None and n_rot is not None and diameter is not None
+        coefficients = explicit or normalize
+
+        if explicit:
+            norm_force, norm_torque = rho * n_rot ** 2 * diameter ** 4, rho * n_rot ** 2 * diameter ** 5
+        elif normalize:
+            norm_force, norm_torque = self._coefficient_norms()
+        else:
+            norm_force, norm_torque = 1.0, 1.0
 
         radius = result['radius']
         valid = ~np.isnan(radius)
@@ -775,8 +815,19 @@ class StripForces:
         'tangential': r'$F_{tangential}$ [N]',
     }
 
+    # Same components, coefficient form - see _coefficient_norms()/
+    # plot_bar_forces()'s docstring for why all three use the FORCE
+    # normalization (not a separate torque one - these are strip
+    # forces, not the integrated torque total_loads() computes).
+    _COMPONENT_COEFF_LABELS = {
+        'axial': r'$C_{F,axial}$ [-]',
+        'radial': r'$C_{F,radial}$ [-]',
+        'tangential': r'$C_{F,tangential}$ [-]',
+    }
+
     def plot_time_trace(self, result: dict, dt: float, component: str = 'axial', strips=None,
-                         ax=None, cmap: str = 'cividis', savepath: str = None, dpi: int = 600):
+                         normalize: bool = False, ax=None, cmap: str = 'cividis', savepath: str = None,
+                         dpi: int = 600):
 
         '''
         Raw per-strip force vs time - one line per strip (color-coded),
@@ -801,6 +852,11 @@ class StripForces:
             can have far more strips than are legible on one plot at
             once - use this to pick a representative subset, matching
             the reference's 8-strip example.
+        normalize : bool
+            If True, plot C_F = force / (rho_ref*n_rot^2*diameter^4)
+            instead of raw N - same coefficient plot_bar_forces()'s
+            normalize=True/rho,n_rot,diameter mode uses, computed the
+            same way from rho_ref/rpm/r_tip (see _coefficient_norms()).
 
         Returns
         -------
@@ -822,7 +878,8 @@ class StripForces:
         valid = np.flatnonzero(~np.isnan(radius))
         sel = valid if strips is None else np.asarray(strips)
 
-        vals = result[component]  # (n_frames, n_span_bins)
+        norm_force, _ = self._coefficient_norms() if normalize else (1.0, 1.0)
+        vals = result[component] / norm_force  # (n_frames, n_span_bins)
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 6))
@@ -834,7 +891,7 @@ class StripForces:
             ax.plot(t, vals[:, i], color=color, label=f'Strip {i + 1}')
 
         ax.set_xlabel('Time [s]')
-        ax.set_ylabel(self._COMPONENT_LABELS[component])
+        ax.set_ylabel(self._COMPONENT_COEFF_LABELS[component] if normalize else self._COMPONENT_LABELS[component])
         ax.grid(True)
         ax.legend()
         fig.tight_layout()
@@ -925,7 +982,8 @@ class StripForces:
         return out
 
     def plot_vs_angle(self, phase_locked: dict, component: str = 'axial', strips=None, polar: bool = True,
-                       ax=None, cmap: str = 'cividis', savepath: str = None, dpi: int = 600):
+                       normalize: bool = False, ax=None, cmap: str = 'cividis', savepath: str = None,
+                       dpi: int = 600):
 
         '''
         Phase-locked force vs rotor azimuth - matches this project's
@@ -941,6 +999,9 @@ class StripForces:
             axis = azimuth, 0deg at 3 o'clock/east, matching the
             reference). False: a plain Cartesian plot (force vs azimuth
             in degrees, 0-360).
+        normalize : bool
+            See plot_time_trace()'s parameter of the same name - same
+            C_F coefficient, same _coefficient_norms() source.
 
         Returns
         -------
@@ -955,7 +1016,8 @@ class StripForces:
         sel = valid if strips is None else np.asarray(strips)
 
         azimuth_deg = phase_locked['azimuth_deg']
-        vals = phase_locked[component]  # (n_azimuth_bins, n_span_bins)
+        norm_force, _ = self._coefficient_norms() if normalize else (1.0, 1.0)
+        vals = phase_locked[component] / norm_force  # (n_azimuth_bins, n_span_bins)
 
         if ax is None:
             fig = plt.figure(figsize=(8, 8))
@@ -978,7 +1040,7 @@ class StripForces:
             else:
                 ax.plot(azimuth_deg, y, color=color, label=f'Strip {i + 1}')
 
-        ylabel = self._COMPONENT_LABELS[component]
+        ylabel = self._COMPONENT_COEFF_LABELS[component] if normalize else self._COMPONENT_LABELS[component]
 
         if polar:
             ax.set_theta_zero_location('E')
@@ -1256,7 +1318,7 @@ class StripForces:
                 data.create_dataset('mean', data=harmonics_result['mean'])
 
     def plot_harmonics(self, harmonics_result: dict, strips=None, show_phase: bool = False,
-                        show_mean: bool = True, ax=None,
+                        show_mean: bool = True, normalize: bool = False, ax=None,
                         cmap: str = 'cividis', savepath: str = None, dpi: int = 600):
 
         '''
@@ -1284,6 +1346,10 @@ class StripForces:
             'mean' docstring entry). Not drawn in the phase panel: a
             constant term has no periodic phase. Set False to reproduce
             the old (harmonic-only) bar chart.
+        normalize : bool
+            See plot_time_trace()'s parameter of the same name - same
+            C_F coefficient (applied to both 'magnitude' and, if shown,
+            the 0P/mean bar), same _coefficient_norms() source.
 
         Returns
         -------
@@ -1303,14 +1369,15 @@ class StripForces:
         sel = valid if strips is None else np.asarray(strips)
 
         harmonic_ac = harmonics_result['harmonic']
-        mag = harmonics_result['magnitude']  # (n_harmonics, n_span_bins)
+        norm_force, _ = self._coefficient_norms() if normalize else (1.0, 1.0)
+        mag = harmonics_result['magnitude'] / norm_force  # (n_harmonics, n_span_bins)
 
         if show_mean:
             # Only the magnitude panel gets a 0P/mean bar - the phase
             # panel (below) keeps using harmonic_ac unchanged, since a
             # constant term has no periodic phase to show.
             harmonic = np.concatenate([[0], harmonic_ac])
-            mag = np.vstack([np.abs(harmonics_result['mean'])[None, :], mag])
+            mag = np.vstack([(np.abs(harmonics_result['mean']) / norm_force)[None, :], mag])
         else:
             harmonic = harmonic_ac
 
@@ -1333,7 +1400,8 @@ class StripForces:
             ax.bar(harmonic + offset, mag[:, i], width=width, color=color, label=f'Strip {i + 1}')
 
         ax.set_yscale('log')
-        ax.set_ylabel(r'$|F_n|$ [N]' + (r' (0P $=|$mean$|$)' if show_mean else ''))
+        base_label = r'$C_{F,n}$ [-]' if normalize else r'$|F_n|$ [N]'
+        ax.set_ylabel(base_label + (r' (0P $=|$mean$|$)' if show_mean else ''))
         ax.set_xticks(harmonic)
         ax.set_xticklabels(['Mean' if h == 0 else f'{int(h)}' for h in harmonic] if show_mean
                             else [f'{int(h)}' for h in harmonic])
@@ -1360,8 +1428,9 @@ class StripForces:
         return (fig, (ax, ax_phase)) if show_phase else (fig, ax)
 
     def plot_harmonic_polar(self, harmonics_result: dict, harmonic: int, strips=None, include_mean: bool = True,
-                             mark_peaks: bool = True, n_azimuth: int = 361, ylabel: str = r'$F$ [N]',
-                             ax=None, cmap: str = 'cividis', savepath: str = None, dpi: int = 600):
+                             mark_peaks: bool = True, n_azimuth: int = 361, normalize: bool = False,
+                             ylabel: str = None, ax=None, cmap: str = 'cividis', savepath: str = None,
+                             dpi: int = 600):
 
         '''
         ONE chosen harmonic's own contribution, spelled out around a
@@ -1419,6 +1488,12 @@ class StripForces:
             361, i.e. one per degree) - this is a closed-form
             reconstruction (a single cosine), not raw data, so a dense
             default costs nothing.
+        normalize : bool
+            See plot_time_trace()'s parameter of the same name - same
+            C_F coefficient (applied to both the magnitude and, if
+            include_mean, F_0), same _coefficient_norms() source. Also
+            switches the default ylabel to $C_F$ [-] - pass ylabel
+            explicitly to override either way.
 
         Needs harmonics_result['phase'] - call harmonics(...,
         return_phase=True) first.
@@ -1448,10 +1523,12 @@ class StripForces:
         valid = np.flatnonzero(~np.isnan(radius))
         sel = valid if strips is None else np.atleast_1d(strips)
 
-        mag = harmonics_result['magnitude'][n_idx]  # (n_span_bins,)
+        norm_force, _ = self._coefficient_norms() if normalize else (1.0, 1.0)
+        mag = harmonics_result['magnitude'][n_idx] / norm_force  # (n_span_bins,)
         phase = harmonics_result['phase'][n_idx]  # (n_span_bins,)
-        mean = harmonics_result['mean'] if (include_mean and 'mean' in harmonics_result) \
+        mean = harmonics_result['mean'] / norm_force if (include_mean and 'mean' in harmonics_result) \
             else np.zeros_like(mag)
+        ylabel = ylabel or (r'$C_F$ [-]' if normalize else r'$F$ [N]')
 
         azimuth_deg = np.linspace(0, 360, n_azimuth)
         theta = np.deg2rad(azimuth_deg)
@@ -1489,7 +1566,7 @@ class StripForces:
     def plot_harmonics_contour(self, result: dict, harmonics_result: dict, dt: float = None,
                                 component: str = 'axial', strips=None, ref: float = None, n_levels: int = 30,
                                 cmap_time: str = 'RdBu_r', cmap_harmonics: str = 'viridis',
-                                savepath: str = None, dpi: int = 600):
+                                normalize: bool = False, savepath: str = None, dpi: int = 600):
 
         '''
         Paired time-domain / harmonic-domain contour of the unsteady
@@ -1557,6 +1634,14 @@ class StripForces:
             level in dB instead of a raw log-compressed magnitude.
         n_levels : int
             Number of contour levels/color steps in each panel.
+        normalize : bool
+            If True, divide both panels' force values by the C_T/C_Q-
+            style coefficient norm (see plot_bar_forces()'s normalize)
+            instead of plotting raw force units - for a case where the
+            blade's actual loading scale shouldn't be shown/inferable
+            (e.g. an NDA). Requires rho_ref/rpm/r_tip (in __init__) and
+            ref=None (a raw-force reference level wouldn't match the
+            coefficient scale).
 
         Returns
         -------
@@ -1569,6 +1654,8 @@ class StripForces:
             raise ValueError("plot_harmonics_contour() only supports a per-radial-strip compute() result.")
         if harmonics_result['chord'] is not None:
             raise ValueError("plot_harmonics_contour() only supports a per-radial-strip harmonics() result.")
+        if normalize and ref is not None:
+            raise ValueError("normalize=True requires ref=None - a raw-force ref doesn't match the coefficient scale.")
 
         radius = result['radius']
         valid = np.flatnonzero(~np.isnan(radius))
@@ -1582,6 +1669,11 @@ class StripForces:
 
         mag = harmonics_result['magnitude'][:, sel]  # (n_harmonics, n_sel)
         harmonic = harmonics_result['harmonic']
+
+        if normalize:
+            norm_force, _ = self._coefficient_norms()
+            arr_fluct = arr_fluct / norm_force
+            mag = mag / norm_force
         if ref is None:
             level_display = 10 * np.log10(mag)
             level_label = r'$10\log_{10}(|F_n|)$'
@@ -1614,8 +1706,9 @@ class StripForces:
 
         cax_harm = fig.add_axes([0.79, 0.12, 0.02, 0.83])
         cax_time = fig.add_axes([0.90, 0.12, 0.02, 0.83])
+        time_label = (self._COMPONENT_COEFF_LABELS if normalize else self._COMPONENT_LABELS).get(component, component)
         fig.colorbar(cf_harm, cax=cax_harm, label=level_label)
-        fig.colorbar(cf_time, cax=cax_time, label=self._COMPONENT_LABELS.get(component, component))
+        fig.colorbar(cf_time, cax=cax_time, label=time_label)
 
         if savepath:
             fig.savefig(savepath, dpi=dpi)
@@ -1819,7 +1912,7 @@ class StripForces:
     def plot_phase_portrait_by_strip(self, result: dict, component_pair=('axial', 'radial'), strips=None,
                                       n_cols: int = 4, cmap: str = 'cividis', aspect='auto',
                                       standardize: bool = False, color_by: str = 'frame', dt: float = None,
-                                      sync: str = 'none', period_deg: float = None,
+                                      sync: str = 'none', period_deg: float = None, normalize: bool = False,
                                       savepath: str = None, dpi: int = 600):
 
         '''
@@ -1857,6 +1950,12 @@ class StripForces:
         sync, period_deg : see plot_phase_portrait() - the same
             revolution reduced to one point per revolution applies
             identically to every strip's own subplot.
+        normalize : bool
+            If True, each subplot's title reports r/R (needs r_tip, set
+            in __init__) instead of the raw physical radius in meters -
+            independent of standardize (which controls the AXES, not
+            the title): for a case where the blade's actual size
+            shouldn't be shown/inferable (e.g. an NDA), set both.
 
         Returns
         -------
@@ -1865,6 +1964,9 @@ class StripForces:
             trailing axes (if the strip count doesn't fill the last row)
             are turned off, not left blank-but-visible.
         '''
+
+        if normalize and self.r_tip is None:
+            raise ValueError("r_tip must be set (in __init__) to use normalize=True.")
 
         from matplotlib.collections import LineCollection
         from bladeprocessor.convergence import _sync_indices
@@ -1939,7 +2041,10 @@ class StripForces:
             ax.set_xlim(x.min() - xpad, x.max() + xpad)
             ax.set_ylim(y.min() - ypad, y.max() + ypad)
             ax.set_aspect(aspect)
-            ax.set_title(f'Strip {i + 1} (r={radius[i]:.3f} m)', fontsize=10)
+            if normalize:
+                ax.set_title(f'Strip {i + 1} ($r/R$={radius[i] / self.r_tip:.3f})', fontsize=10)
+            else:
+                ax.set_title(f'Strip {i + 1} (r={radius[i]:.3f} m)', fontsize=10)
             ax.grid(True, alpha=0.3)
             ax.locator_params(axis='x', nbins=3)
             ax.locator_params(axis='y', nbins=4)

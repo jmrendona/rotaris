@@ -56,16 +56,23 @@ class SurfaceVariable:
     span_axis, chord_axis, thickness_axis : int
         Which raw position column (0=X, 1=Y, 2=Z) is spanwise, chordwise,
         thickness-wise - see FrictionLines' docstring.
+    c_ref : float, optional
+        Reference chord [m] - only needed for plot_variable_surface()'s
+        normalize=True (chord/c_ref instead of raw physical chord [m],
+        e.g. for an NDA case where the blade's actual size shouldn't be
+        shown/inferable). Not needed for anything else.
     '''
 
     def __init__(self, filename: str, r_tip: float = None, rho_ref: float = None, rpm: float = None,
-                 pref: float = None, span_axis: int = 0, chord_axis: int = 2, thickness_axis: int = 1):
+                 pref: float = None, c_ref: float = None, span_axis: int = 0, chord_axis: int = 2,
+                 thickness_axis: int = 1):
 
         self.filename = filename
         self.r_tip = r_tip
         self.rho_ref = rho_ref
         self.rpm = rpm
         self.pref = pref
+        self.c_ref = c_ref
         self.span_axis = span_axis
         self.chord_axis = chord_axis
         self.thickness_axis = thickness_axis
@@ -522,7 +529,7 @@ class SurfaceVariable:
                        tol: float = 0.0015, n_chord_bins: int = 75, span_min: float = None,
                        span_max: float = None, chord_percentile: float = 0.1, edge_crop: float = 0.0,
                        reverse_chord: bool = False, marker_size: float = 12, cmap: str = 'cividis',
-                       ax=None, savepath: str = None, dpi: int = 600):
+                       normalize: bool = False, ax=None, savepath: str = None, dpi: int = 600):
 
         '''
         Plot of an arbitrary field vs local x/c at several radii, BOTH
@@ -544,10 +551,21 @@ class SurfaceVariable:
         every blade's chord into the same x/c range and produces a
         garbled curve.
 
+        normalize : bool
+            If True, the legend reports each curve's r/R (needs r_tip)
+            instead of the raw physical radius in meters - for a case
+            where the blade's actual size shouldn't be shown/inferable
+            (e.g. an NDA). x/c on the axes is already dimensionless
+            regardless of this flag (ylabel is whatever the caller
+            passed - plot_cp_radii() already gives a dimensionless one).
+
         Returns
         -------
         (fig, ax)
         '''
+
+        if normalize and self.r_tip is None:
+            raise ValueError("r_tip must be set (in __init__) to use normalize=True.")
 
         curves = self.at_radii(radii, get_values, surface=surface, tol=tol, n_chord_bins=n_chord_bins,
                                 span_min=span_min, span_max=span_max, chord_percentile=chord_percentile,
@@ -563,7 +581,8 @@ class SurfaceVariable:
         for color, r_target in zip(colors, radii):
             first = True
             for surf, (xc, v) in curves[r_target].items():
-                label = f'r={r_target:.3f} m' if first else None
+                label = (f'$r/R$={r_target / self.r_tip:.3f}' if normalize else f'r={r_target:.3f} m') if first \
+                    else None
                 ax.scatter(xc, v, s=marker_size, color=color, label=label)
                 first = False
 
@@ -583,7 +602,7 @@ class SurfaceVariable:
                        tol: float = 0.0015, n_chord_bins: int = 75, span_min: float = None,
                        span_max: float = None, chord_percentile: float = 0.1, edge_crop: float = 0.0,
                        reverse_chord: bool = False, marker_size: float = 12, cmap: str = 'cividis',
-                       ax=None, savepath: str = None, dpi: int = 600):
+                       normalize: bool = False, ax=None, savepath: str = None, dpi: int = 600):
 
         '''
         Convenience wrapper: plot_at_radii() for Cp (see cp()).
@@ -628,8 +647,8 @@ class SurfaceVariable:
         return self.plot_at_radii(radii, get_values, ylabel, surface=surface, tol=tol,
                                    n_chord_bins=n_chord_bins, span_min=span_min, span_max=span_max,
                                    chord_percentile=chord_percentile, edge_crop=edge_crop,
-                                   reverse_chord=reverse_chord, marker_size=marker_size, cmap=cmap, ax=ax,
-                                   savepath=savepath, dpi=dpi)
+                                   reverse_chord=reverse_chord, marker_size=marker_size, cmap=cmap,
+                                   normalize=normalize, ax=ax, savepath=savepath, dpi=dpi)
 
     def pressure_fluctuation(self, frame: int, surface: str = 'Upper',
                               pressure_variable: str = 'static_pressure'):
@@ -668,7 +687,7 @@ class SurfaceVariable:
                                    pressure_variable: str = 'static_pressure', span_min: float = None,
                                    span_max: float = None, value_clip_percentile: float = 99,
                                    marker_size: float = 1, cmap: str = 'cividis', figsize: tuple = None,
-                                   savepath: str = None, dpi: int = 600):
+                                   normalize: bool = False, savepath: str = None, dpi: int = 600):
 
         '''
         Convenience wrapper: plot_variable_surface() for one frame's
@@ -676,19 +695,34 @@ class SurfaceVariable:
         frame, call once per frame of interest (e.g. in a loop over
         range(sv.n_frames) to build an animation's frames).
 
+        Parameters
+        ----------
+        normalize : bool
+            If True, also divide p' by the local q_ref (same normalization
+            as cp()) to get a dimensionless Cp' - like normalize elsewhere,
+            this additionally hides the blade's actual radius/chord (via
+            plot_variable_surface()'s own normalize handling).
+
         Returns
         -------
         (fig, axes)
         '''
 
-        get_values = lambda s: self.pressure_fluctuation(frame, surface=s,
-                                                           pressure_variable=pressure_variable)
+        if normalize:
+            get_values = lambda s: (self.pressure_fluctuation(frame, surface=s,
+                                                                pressure_variable=pressure_variable)
+                                     / self._q_ref(s))
+            cbar_label = r"$C_p'$ [-]"
+        else:
+            get_values = lambda s: self.pressure_fluctuation(frame, surface=s,
+                                                               pressure_variable=pressure_variable)
+            cbar_label = r"$p'$ [Pa]"
 
-        return self.plot_variable_surface(get_values, cbar_label=r"$p'$ [Pa]", surface=surface,
+        return self.plot_variable_surface(get_values, cbar_label=cbar_label, surface=surface,
                                            span_min=span_min, span_max=span_max,
                                            value_clip_percentile=value_clip_percentile,
                                            marker_size=marker_size, cmap=cmap, figsize=figsize,
-                                           savepath=savepath, dpi=dpi)
+                                           normalize=normalize, savepath=savepath, dpi=dpi)
 
     def stagnation_line(self, frame: int = None, stat: str = 'mean',
                          pressure_variable: str = 'static_pressure',
@@ -886,9 +920,11 @@ class SurfaceVariable:
         ----------
         points_by_label : dict[str, list[dict]]
             label -> stagnation_line()'s return value.
-        x_axis : 'r' or 'span'
-            Horizontal axis - physical radius [m] (default) or raw
-            centered span [m] (see _span_chord()).
+        x_axis : 'r', 'span', or 'r_over_r_tip'
+            Horizontal axis - physical radius [m] (default), raw
+            centered span [m] (see _span_chord()), or r/R (needs r_tip)
+            - use 'r_over_r_tip' for a case whose actual radius
+            shouldn't be shown/inferable (e.g. an NDA).
         colors : dict[str, str], optional
             label -> matplotlib color. Defaults to a cividis-sampled
             color per label if not given.
@@ -897,6 +933,9 @@ class SurfaceVariable:
         -------
         (fig, ax)
         '''
+
+        if x_axis == 'r_over_r_tip' and self.r_tip is None:
+            raise ValueError("r_tip must be set (in __init__) to use x_axis='r_over_r_tip'.")
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 5))
@@ -914,14 +953,17 @@ class SurfaceVariable:
             if not pts:
                 continue
 
-            x = np.array([p[x_axis] for p in pts])
+            if x_axis == 'r_over_r_tip':
+                x = np.array([p['r'] / self.r_tip for p in pts])
+            else:
+                x = np.array([p[x_axis] for p in pts])
             y = np.array([p['signed_xc'] for p in pts])
             order = np.argsort(x)
             ax.plot(x[order], y[order], marker='o', markersize=np.sqrt(marker_size), linewidth=1.2,
                     color=colors[label], label=label)
 
         ax.axhline(0, color='k', linewidth=0.8, linestyle='--', alpha=0.6)
-        ax.set_xlabel('$r$ [m]' if x_axis == 'r' else 'span [m]')
+        ax.set_xlabel({'r': '$r$ [m]', 'span': 'span [m]', 'r_over_r_tip': '$r/R$ [-]'}[x_axis])
         ax.set_ylabel(r'signed $x/c$ (+Lower / -Upper) [-]')
         ax.grid(True)
         ax.legend()
@@ -1082,8 +1124,8 @@ class SurfaceVariable:
     def plot_timetrace(self, name: str, span_pct: float, chord_pct: float, surface: str = 'Upper',
                         tol: float = 0.0015, chord_percentile: float = 0.1, reverse_chord: bool = False,
                         span_min: float = None, span_max: float = None, dt: float = None,
-                        ylabel: str = None, ylim: tuple = None, ax=None, savepath: str = None,
-                        dpi: int = 600):
+                        normalize: bool = False, ylabel: str = None, ylim: tuple = None, ax=None,
+                        savepath: str = None, dpi: int = 600):
 
         '''
         Plot timetrace() as a connected line vs time (or frame index if
@@ -1094,6 +1136,16 @@ class SurfaceVariable:
         IS the signal, not an interpolation artifact papering over a
         cropped/percentile-cut end (see plot_at_radii()'s docstring for
         why THAT case is different).
+
+        normalize : bool
+            If True, divide `values` by the local q_ref (same
+            normalization as cp()) at the actual point used - only
+            physically meaningful if `name` is a pressure-like variable
+            (e.g. static_pressure), yielding a dimensionless Cp-style
+            trace. Requires rho_ref and rpm (in __init__). ylabel
+            defaults to name when not normalized, but MUST be passed
+            explicitly when normalize=True (there's no generic
+            dimensionless label to fall back to for an arbitrary name).
 
         ylim : tuple, optional
             Explicit (ymin, ymax) - overrides the default below.
@@ -1110,9 +1162,17 @@ class SurfaceVariable:
         (fig, ax)
         '''
 
+        if normalize and (self.rho_ref is None or self.rpm is None):
+            raise ValueError("rho_ref and rpm must both be set (in __init__) to use normalize=True.")
+
         t, values, point_info = self.timetrace(
             name, span_pct, chord_pct, surface=surface, tol=tol, chord_percentile=chord_percentile,
             reverse_chord=reverse_chord, span_min=span_min, span_max=span_max, dt=dt)
+
+        if normalize:
+            omega = self.rpm * 2 * np.pi / 60
+            q_ref_point = 0.5 * self.rho_ref * (omega * point_info['r']) ** 2
+            values = values / q_ref_point
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 4))
@@ -1276,7 +1336,7 @@ class SurfaceVariable:
                           nfft: int = None, detrend='constant',
                           tol: float = 0.0015, chord_percentile: float = 0.1, reverse_chord: bool = False,
                           span_min: float = None, span_max: float = None, db: bool = True,
-                          p_ref: float = 2e-5, ylabel: str = None, ax=None,
+                          p_ref: float = 2e-5, normalize: bool = False, ylabel: str = None, ax=None,
                           savepath: str = None, dpi: int = 600, **welch_kwargs):
 
         '''
@@ -1289,21 +1349,41 @@ class SurfaceVariable:
             Plot 10*log10(psd / p_ref**2) [dB/Hz], the standard
             aeroacoustics convention, instead of the raw Pa^2/Hz PSD.
             periodogram() itself is unaffected - always returns the raw
-            psd - this only changes what's plotted here.
+            psd - this only changes what's plotted here. Incompatible
+            with normalize=True (a dB scale assumes a raw Pa signal) -
+            pass db=False alongside normalize=True.
         p_ref : float
             Reference pressure [Pa] for the dB conversion above, only
             used if db=True. Default 2e-5 Pa (20 uPa), the standard
             acoustic reference (p_ref**2 = 4e-10 Pa^2).
+        normalize : bool
+            If True, divide the PSD by the local q_ref**2 (same
+            normalization as cp(), squared since PSD has units of
+            value^2/Hz) at the actual point used - only physically
+            meaningful if `name` is a pressure-like variable, yielding a
+            dimensionless Cp-based PSD. Requires rho_ref and rpm (in
+            __init__), and db=False (see above).
 
         Returns
         -------
         (fig, ax)
         '''
 
+        if normalize:
+            if self.rho_ref is None or self.rpm is None:
+                raise ValueError("rho_ref and rpm must both be set (in __init__) to use normalize=True.")
+            if db:
+                raise ValueError("normalize=True requires db=False - a dB scale assumes a raw Pa signal.")
+
         freq, psd, point_info = self.periodogram(
             name, span_pct, chord_pct, surface=surface, fs=fs, dt=dt, n_chunk=n_chunk, nperseg=nperseg,
             nfft=nfft, detrend=detrend, tol=tol, chord_percentile=chord_percentile,
             reverse_chord=reverse_chord, span_min=span_min, span_max=span_max, **welch_kwargs)
+
+        if normalize:
+            omega = self.rpm * 2 * np.pi / 60
+            q_ref_point = 0.5 * self.rho_ref * (omega * point_info['r']) ** 2
+            psd = psd / q_ref_point ** 2
 
         if ax is None:
             fig, ax = plt.subplots(figsize=(8, 5))
@@ -1318,7 +1398,7 @@ class SurfaceVariable:
 
         ax.semilogx(freq[start:], y, color='k', linewidth=1.2)
         ax.set_xlabel('Frequency [Hz]')
-        ax.set_ylabel(ylabel or ('PSD [dB/Hz]' if db else 'PSD'))
+        ax.set_ylabel(ylabel or ('PSD [dB/Hz]' if db else ('$C_p$ PSD [1/Hz]' if normalize else 'PSD')))
         ax.ticklabel_format(style='plain', axis='y')
         ax.set_title(f"{point_info['surface']}, $r/R={point_info['r'] / self.r_tip:.3f}$, "
                      f"$x/c={point_info['xc']:.3f}$")
@@ -1362,7 +1442,8 @@ class SurfaceVariable:
                                marker_size: float = 1, cmap: str = 'cividis', figsize: tuple = None,
                                show_stagnation_line: bool = False, stagnation_kwargs: dict = None,
                                stagnation_color: str = 'red', stagnation_marker_size: float = 40,
-                               show_span_axis: bool = False, savepath: str = None, dpi: int = 600):
+                               show_span_axis: bool = False, normalize: bool = False,
+                               savepath: str = None, dpi: int = 600):
 
         '''
         Scatter of an arbitrary scalar field over the blade surface (raw
@@ -1416,6 +1497,12 @@ class SurfaceVariable:
             FrictionLines.friction_lines()'s show_span_axis for the full
             reasoning (identical here). If True, also draws span as a
             secondary axis on top. False (default): omit it.
+        normalize : bool
+            See FrictionLines.friction_lines()'s parameter of the same
+            name - identical here: x = r/R (needs r_tip), y =
+            chord/c_ref (needs c_ref, see __init__), forces
+            show_span_axis off, and the stagnation-point overlay (if
+            shown) switches to the same coordinates automatically.
         show_stagnation_line : bool
             Overlay stagnation_line()'s per-span-bin leading-edge
             stagnation point (see that method) on whichever subplot
@@ -1444,6 +1531,10 @@ class SurfaceVariable:
             axes is a single Axes if surface is a single string, otherwise
             a list of Axes in the same order as surface.
         '''
+
+        if normalize and (self.r_tip is None or self.c_ref is None):
+            raise ValueError("r_tip and c_ref must both be set (in __init__) to use normalize=True.")
+        show_span_axis = show_span_axis and not normalize
 
         surfaces = (surface,) if isinstance(surface, str) else tuple(surface)
         rng = np.random.default_rng(0)
@@ -1475,6 +1566,9 @@ class SurfaceVariable:
 
             span_sel, chord_sel, radius_sel, v_sel = span[mask], chord[mask], radius[mask], values[mask]
 
+            if normalize:
+                radius_sel, chord_sel = radius_sel / self.r_tip, chord_sel / self.c_ref
+
             vmin, vmax = np.percentile(v_sel, [100 - value_clip_percentile, value_clip_percentile])
             v_clipped = np.clip(v_sel, vmin, vmax)
 
@@ -1491,8 +1585,11 @@ class SurfaceVariable:
                 ax.quiver(radius_sel[idx], chord_sel[idx], vec_span_sel[idx] / mag, vec_chord_sel[idx] / mag,
                           color='white', scale=60, width=0.002, alpha=0.8)
 
-            ax.set_ylabel('chord [m]')
-            ax.set_aspect('equal')
+            ax.set_ylabel('chord/$c_{ref}$ [-]' if normalize else 'chord [m]')
+            # 'equal' aspect only represents the blade's true physical
+            # shape when both axes share one scale (raw meters) - see
+            # FrictionLines.friction_lines()'s identical comment.
+            ax.set_aspect('auto' if normalize else 'equal')
 
             if show_span_axis:
                 self._add_span_secondary_axis(ax, radius_sel, span_sel)
@@ -1507,7 +1604,9 @@ class SurfaceVariable:
 
             for p in stag_points:
                 ax = ax_by_surface[p['surface']]
-                ax.scatter([p['r']], [p['chord']], s=stagnation_marker_size,
+                x_stag = p['r'] / self.r_tip if normalize else p['r']
+                y_stag = p['chord'] / self.c_ref if normalize else p['chord']
+                ax.scatter([x_stag], [y_stag], s=stagnation_marker_size,
                            color=stagnation_color, edgecolors='k', linewidths=0.6, zorder=6,
                            label='stagnation point' if not labeled[p['surface']] else None)
                 labeled[p['surface']] = True
@@ -1516,7 +1615,7 @@ class SurfaceVariable:
                 if labeled[surf]:
                     ax.legend()
 
-        axes[-1].set_xlabel('$r$ [m]')
+        axes[-1].set_xlabel('$r/R$ [-]' if normalize else '$r$ [m]')
         fig.tight_layout()
 
         if savepath:

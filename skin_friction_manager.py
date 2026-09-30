@@ -30,6 +30,8 @@ avg_force_file = cfg.avg_force_file
 r_tip = cfg.r_tip
 rho_ref = cfg.rho_ref
 rpm = cfg.rpm
+c_ref = cfg.c_ref
+normalize = cfg.normalize
 span_axis = cfg.span_axis
 chord_axis = cfg.chord_axis
 thickness_axis = cfg.thickness_axis
@@ -61,6 +63,7 @@ fl = FrictionLines(
    r_tip=r_tip,
    rho_ref=rho_ref,
    rpm=rpm,
+   c_ref=c_ref,
    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
    span_min=span_min, validate_axes=validate_axes
 )
@@ -94,6 +97,7 @@ print('Plotting Cf vs x/c magnitude')
 fl.plot_cf_radii(
    radii=radii,#[0.045, 0.072, 0.100, 0.117, 0.122],
    frame=None, component=None, span_min=span_min, reverse_chord=reverse_chord,
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_mag_avg_{case}.png'),
 )
 print(40*'-')
@@ -101,6 +105,7 @@ print('Plotting Cf vs x/c chordwise component')
 fl.plot_cf_radii(
    radii=radii,
    frame=None, component='chordwise', span_min=span_min, reverse_chord=reverse_chord,
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_chordwise_avg_{case}.png'),
 )
 print(40*'-')
@@ -108,6 +113,7 @@ print('Plotting Cf vs x/c spanwise component')
 fl.plot_cf_radii(
    radii=radii,
    frame=None, component='spanwise', span_min=span_min, reverse_chord=reverse_chord,
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_spanwise_avg_{case}.png'),
 )
 
@@ -119,6 +125,7 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 	fl.plot_cf_radii(
 	radii=radii,
 	frame=frame, component=None, span_min=span_min, reverse_chord=reverse_chord,
+	normalize=normalize,
 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_mag_frame{frame:03d}_{case}.png'),
 	)
 	print(40*'-')
@@ -126,6 +133,7 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 	fl.plot_cf_radii(
 	radii=radii,
 	frame=frame, component='chordwise', span_min=span_min, reverse_chord=reverse_chord,
+	normalize=normalize,
 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_chordwise_frame{frame:03d}_{case}.png'),
 	)
 	print(40*'-')
@@ -133,6 +141,7 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 	fl.plot_cf_radii(
 	radii=radii,
 	frame=frame, component='spanwise', span_min=span_min, reverse_chord=reverse_chord,
+	normalize=normalize,
 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_spanwise_frame{frame:03d}_{case}.png'),
 	)
 
@@ -146,6 +155,7 @@ print('Plotting Cf RMS vs x/c magnitude')
 fl.plot_cf_radii(
    radii=radii,
    surface='Upper', frame=None, stat='rms', span_min=span_min, reverse_chord=reverse_chord,
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/rms/cf_rms_radii_avg_{case}.png'),
 )
 print(40*'-')
@@ -153,6 +163,7 @@ print('Plotting Cf RMS vs x/c color map')
 fl.friction_lines(
    surface='Upper', frame=None, stat='rms', span_min=span_min,
    figsize=blade_figsize,
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/rms/cf_rms_map_{case}.png'),
 )
 
@@ -165,6 +176,7 @@ print('Plotting Friction Lines, Upper surface, average over all frames')
 fl.friction_lines(
    frame=None, span_min=span_min, surface='Upper',
    figsize=blade_figsize,
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_avg_{case}.png'),
 )
 
@@ -174,6 +186,7 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 	fl.friction_lines(
 	   frame=frame, span_min=span_min, surface='Upper',
 	   figsize=blade_figsize,
+	   normalize=normalize,
 	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_frame{frame:03d}_{case}.png'),
 	)
 
@@ -191,6 +204,7 @@ fl.friction_lines(
    surface='Upper', frame=None, span_min=span_min, show_separation_line=True,
    separation_line_kwargs={'reverse_chord': reverse_chord},
    figsize=blade_figsize,
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_separation_{case}.png'),
 )
 
@@ -201,6 +215,7 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 	   surface='Upper', frame=frame, span_min=span_min, show_separation_line=True,
 	   separation_line_kwargs={'reverse_chord': reverse_chord},
 	   figsize=blade_figsize,
+	   normalize=normalize,
 	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_separation_frame{frame:03d}_{case}.png'),
 	)
 
@@ -236,6 +251,7 @@ print('Plotting Friction Lines with critical points, Upper surface, average over
 fl.friction_lines(
    surface='Upper', frame=None, span_min=span_min, show_critical_points=True, show_critical_points_index=False,
    figsize=blade_figsize,
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_critical_points_{case}.png'),
 )
 
@@ -245,6 +261,7 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 	fl.friction_lines(
 	surface='Upper', frame=frame, span_min=span_min, show_critical_points=True, show_critical_points_index=False,
 	figsize=blade_figsize,
+	normalize=normalize,
 	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_critical_points_frame{frame:03d}_{case}.png'),
 	)
 
@@ -263,6 +280,7 @@ sv_inst_forces = SurfaceVariable(
    r_tip=r_tip,
    rho_ref=rho_ref,
    rpm=rpm,
+   c_ref=c_ref,
    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
 )
 
@@ -272,6 +290,7 @@ sv_inst_forces.plot_variable_surface(
    lambda s: sv_inst_forces.variable('Skin_Friction', surface=s, stat='mean'),
    cbar_label='Skin Friction [Pa]', span_min=span_min, surface='Upper',
    figsize=blade_figsize,
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/avg/cf_surface_avg_upper_{case}.png'),
 )
 
@@ -281,6 +300,7 @@ sv_inst_forces.plot_variable_surface(
    lambda s: sv_inst_forces.variable('Skin_Friction', surface=s, stat='rms'),
    cbar_label='Skin Friction [Pa]', span_min=span_min, surface='Upper',
    figsize=blade_figsize,
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/rms/cf_surface_rms_upper_{case}.png'),
 )
 
@@ -292,6 +312,7 @@ for frame in range(0,sv_inst_forces.n_frames,frame_loop_step):
       lambda s: sv_inst_forces.variable('Skin_Friction', surface=s, frame=frame),
       cbar_label='Skin Friction [Pa]', span_min=span_min, surface='Upper',
       figsize=blade_figsize,
+      normalize=normalize,
       savepath=os.path.join(master_path, f'images/cf/inst/cf_surface_inst_upper_frame{frame:03d}_{case}.png'),
    )
 
@@ -325,6 +346,7 @@ print(40*'-')
 print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
 fl.plot_cf_phase_portrait_by_strip(
    component_pair=(None, 'chordwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_mag_chordwise_by_strip_{case}.png'),
 )
 
@@ -332,6 +354,7 @@ print(40*'-')
 print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
 fl.plot_cf_phase_portrait_by_strip(
    component_pair=(None, 'spanwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_mag_spanwise_by_strip_{case}.png'),
 )
 
@@ -339,6 +362,7 @@ print(40*'-')
 print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
 fl.plot_cf_phase_portrait_by_strip(
    component_pair=('spanwise', 'chordwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_spanwise_chordwise_by_strip_{case}.png'),
 )
 

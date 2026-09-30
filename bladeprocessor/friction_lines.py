@@ -84,6 +84,11 @@ class FrictionLines:
         Cf = tau / (0.5 rho (omega r)^2) - see "Cf normalization" above.
         Required by cf() / cf_at_radii() / plot_cf_radii() /
         friction_lines(), not by wall_shear() (dimensional wall shear).
+    c_ref : float, optional
+        Reference chord [m] - only needed for friction_lines()'s
+        normalize=True (chord/c_ref instead of raw physical chord [m],
+        e.g. for an NDA case where the blade's actual size shouldn't be
+        shown/inferable). Not needed for anything else.
     span_axis, chord_axis, thickness_axis : int
         Which raw position column (0=X, 1=Y, 2=Z) is spanwise, chordwise,
         and thickness-wise for this case's mesh. Defaults (0, 2, 1) match
@@ -128,13 +133,14 @@ class FrictionLines:
     '''
 
     def __init__(self, filename: str, r_tip: float = None, rho_ref: float = None, rpm: float = None,
-                 span_axis: int = 0, chord_axis: int = 2, thickness_axis: int = 1,
+                 c_ref: float = None, span_axis: int = 0, chord_axis: int = 2, thickness_axis: int = 1,
                  span_min: float = None, span_max: float = None, validate_axes: bool = True):
 
         self.filename = filename
         self.r_tip = r_tip
         self.rho_ref = rho_ref
         self.rpm = rpm
+        self.c_ref = c_ref
         self.span_axis = span_axis
         self.chord_axis = chord_axis
         self.thickness_axis = thickness_axis
@@ -713,7 +719,7 @@ class FrictionLines:
     def plot_cf_radii(self, radii, surface: str = 'Upper', frame: int = None, component: str = None,
                        stat: str = 'mean', tol: float = 0.0015, n_chord_bins: int = 150, span_min: float = None,
                        span_max: float = None, reverse_chord: bool = False, cmap: str = 'cividis',
-                       ax=None, savepath: str = None, dpi: int = 600):
+                       normalize: bool = False, ax=None, savepath: str = None, dpi: int = 600):
 
         '''
         Plot Cf vs. local chordwise position for several radii on one set
@@ -747,10 +753,20 @@ class FrictionLines:
         match this project's other radius-colored plots (SurfaceVariable's
         plot_at_radii()/plot_cp_radii()).
 
+        normalize : bool
+            If True, the legend reports each curve's r/R (needs r_tip)
+            instead of the raw physical radius in meters - for a case
+            where the blade's actual size shouldn't be shown/inferable
+            (e.g. an NDA). x/c and Cf on the axes themselves are already
+            dimensionless regardless of this flag.
+
         Returns
         -------
         (fig, ax)
         '''
+
+        if normalize and self.r_tip is None:
+            raise ValueError("r_tip must be set (in __init__) to use normalize=True.")
 
         curves = self.cf_at_radii(radii, surface=surface, frame=frame, component=component, stat=stat, tol=tol,
                                    n_chord_bins=n_chord_bins, span_min=span_min, span_max=span_max,
@@ -764,10 +780,11 @@ class FrictionLines:
         colors = plt.cm.get_cmap(cmap)(np.linspace(0, 1, len(curves)))
 
         for color, (r_target, (xc, cf_curve)) in zip(colors, curves.items()):
+            label = f'$r/R$ = {r_target / self.r_tip:.3f}' if normalize else f'r = {r_target:g} m'
             if n_chord_bins is None:
-                ax.scatter(xc, cf_curve, s=4, alpha=0.5, color=color, label=f'r = {r_target:g} m')
+                ax.scatter(xc, cf_curve, s=4, alpha=0.5, color=color, label=label)
             else:
-                ax.plot(xc, cf_curve, color=color, label=f'r = {r_target:g} m')
+                ax.plot(xc, cf_curve, color=color, label=label)
 
         if component is not None:
             ax.axhline(0, color='k', linewidth=0.8, zorder=0)
@@ -1011,7 +1028,7 @@ class FrictionLines:
                                          n_span_bins: int = 10, min_count: int = 10, strips=None,
                                          n_cols: int = 4, cmap: str = 'cividis', aspect='auto',
                                          standardize: bool = False, color_by: str = 'frame', dt: float = None,
-                                         sync: str = 'none', period_deg: float = None,
+                                         sync: str = 'none', period_deg: float = None, normalize: bool = False,
                                          savepath: str = None, dpi: int = 600):
 
         '''
@@ -1038,11 +1055,18 @@ class FrictionLines:
             blade-wide one), so every panel is independently readable.
         sync, period_deg : see plot_cf_phase_portrait() - reduces to one
             point per revolution, identically for every strip's subplot.
+        normalize : bool
+            If True, each subplot's title reports r/R (needs r_tip)
+            instead of the raw physical radius in meters - the axes
+            themselves (Cf) are already dimensionless regardless.
 
         Returns
         -------
         (fig, axes)
         '''
+
+        if normalize and self.r_tip is None:
+            raise ValueError("r_tip must be set (in __init__) to use normalize=True.")
 
         from matplotlib.collections import LineCollection
         from bladeprocessor.convergence import _sync_indices
@@ -1114,7 +1138,10 @@ class FrictionLines:
             ax.set_xlim(x.min() - xpad, x.max() + xpad)
             ax.set_ylim(y.min() - ypad, y.max() + ypad)
             ax.set_aspect(aspect)
-            ax.set_title(f'Strip {i + 1} (r={radius[i]:.3f} m)', fontsize=10)
+            if normalize and self.r_tip is not None:
+                ax.set_title(f'Strip {i + 1} ($r/R$={radius[i] / self.r_tip:.3f})', fontsize=10)
+            else:
+                ax.set_title(f'Strip {i + 1} (r={radius[i]:.3f} m)', fontsize=10)
             ax.grid(True, alpha=0.3)
             ax.locator_params(axis='x', nbins=3)
             ax.locator_params(axis='y', nbins=4)
@@ -1324,7 +1351,8 @@ class FrictionLines:
 
     def plot_separation_line(self, ax, points, colors=('red', 'cyan'), marker_size: float = 45,
                               connect_pairs: bool = False, line_color: str = 'black',
-                              linewidth: float = 1.8, label: bool = True):
+                              linewidth: float = 1.8, label: bool = True,
+                              r_tip: float = None, c_ref: float = None):
 
         '''
         Overlay separation_line()'s crossings on an existing Axes plotted
@@ -1359,7 +1387,14 @@ class FrictionLines:
             Add a legend entry for each kind present (skipped if ax
             already has a legend you're managing yourself - call
             ax.legend() again after this to pick up the new entries).
+        r_tip, c_ref : float, optional
+            If given, plot r/r_tip and chord/c_ref instead of raw
+            physical r [m]/chord [m] - pass the SAME values
+            friction_lines(normalize=True) used, so this overlay lands
+            on the same (r/R, chord/c_ref) axes as its background.
         '''
+
+        r_scale, c_scale = r_tip or 1.0, c_ref or 1.0
 
         if connect_pairs:
             by_pair = {}
@@ -1371,14 +1406,14 @@ class FrictionLines:
                 if len(pair) != 2:
                     continue
                 a, b = pair
-                ax.plot([a['r'], b['r']], [a['chord'], b['chord']], color=line_color,
-                        linewidth=linewidth, alpha=0.85, zorder=4)
+                ax.plot([a['r'] / r_scale, b['r'] / r_scale], [a['chord'] / c_scale, b['chord'] / c_scale],
+                        color=line_color, linewidth=linewidth, alpha=0.85, zorder=4)
 
         for kind, color in zip(('separation', 'reattachment'), colors):
             sel = [p for p in points if p['kind'] == kind]
             if not sel:
                 continue
-            ax.scatter([p['r'] for p in sel], [p['chord'] for p in sel], s=marker_size,
+            ax.scatter([p['r'] / r_scale for p in sel], [p['chord'] / c_scale for p in sel], s=marker_size,
                        color=color, label=kind if label else None, zorder=5,
                        edgecolors='k', linewidths=0.6)
 
@@ -1603,7 +1638,8 @@ class FrictionLines:
 
     def plot_migration_line(self, ax, points, colors=('orange', 'purple'), marker_size: float = 45,
                              connect_pairs: bool = False, line_color: str = 'black',
-                             linewidth: float = 1.8, label: bool = True):
+                             linewidth: float = 1.8, label: bool = True,
+                             r_tip: float = None, c_ref: float = None):
 
         '''
         Overlay migration_line()'s crossings - same visual convention as
@@ -1625,7 +1661,12 @@ class FrictionLines:
             default reasoning.
         label : bool
             Add a legend entry for each kind present.
+        r_tip, c_ref : float, optional
+            See plot_separation_line()'s parameters of the same name -
+            identical meaning here.
         '''
+
+        r_scale, c_scale = r_tip or 1.0, c_ref or 1.0
 
         if connect_pairs:
             by_pair = {}
@@ -1637,14 +1678,14 @@ class FrictionLines:
                 if len(pair) != 2:
                     continue
                 a, b = pair
-                ax.plot([a['r'], b['r']], [a['chord'], b['chord']], color=line_color,
-                        linewidth=linewidth, alpha=0.85, zorder=4)
+                ax.plot([a['r'] / r_scale, b['r'] / r_scale], [a['chord'] / c_scale, b['chord'] / c_scale],
+                        color=line_color, linewidth=linewidth, alpha=0.85, zorder=4)
 
         for kind, color in zip(('outward', 'inward'), colors):
             sel = [p for p in points if p['kind'] == kind]
             if not sel:
                 continue
-            ax.scatter([p['r'] for p in sel], [p['chord'] for p in sel], s=marker_size,
+            ax.scatter([p['r'] / r_scale for p in sel], [p['chord'] / c_scale for p in sel], s=marker_size,
                        color=color, marker='^', label=kind if label else None, zorder=5,
                        edgecolors='k', linewidths=0.6)
 
@@ -1859,7 +1900,8 @@ class FrictionLines:
         return points
 
     def plot_critical_points(self, ax, points, marker_map=None, colors=None,
-                              marker_size: float = 110, label: bool = True):
+                              marker_size: float = 110, label: bool = True,
+                              r_tip: float = None, c_ref: float = None):
 
         '''
         Overlay critical_points()'s classified critical points - a
@@ -1881,10 +1923,14 @@ class FrictionLines:
             blue/black/magenta.
         label : bool
             Add a legend entry for each kind present.
+        r_tip, c_ref : float, optional
+            See plot_separation_line()'s parameters of the same name -
+            identical meaning here.
         '''
 
         marker_map = marker_map or {'node': 'o', 'saddle': 'x', 'focus': '*'}
         colors = colors or {'node': 'blue', 'saddle': 'black', 'focus': 'magenta'}
+        r_scale, c_scale = r_tip or 1.0, c_ref or 1.0
 
         for kind in ('node', 'saddle', 'focus'):
             sel = [p for p in points if p['kind'] == kind]
@@ -1893,7 +1939,7 @@ class FrictionLines:
             # 'x' has no fillable face - matplotlib warns (harmlessly) if an
             # edgecolor is passed for it, so only unfilled markers skip it.
             edge_kwargs = {} if marker_map[kind] == 'x' else {'edgecolors': 'white', 'linewidths': 0.8}
-            ax.scatter([p['r'] for p in sel], [p['chord'] for p in sel], s=marker_size,
+            ax.scatter([p['r'] / r_scale for p in sel], [p['chord'] / c_scale for p in sel], s=marker_size,
                        marker=marker_map[kind], color=colors[kind], label=kind if label else None,
                        zorder=6, **edge_kwargs)
 
@@ -1984,7 +2030,7 @@ class FrictionLines:
                         show_migration_line: bool = False, migration_line_kwargs: dict = None,
                         show_critical_points: bool = False, critical_points_kwargs: dict = None,
                         show_critical_points_index: bool = False, show_span_axis: bool = False,
-                        figsize: tuple = None, savepath: str = None, dpi: int = 600):
+                        normalize: bool = False, figsize: tuple = None, savepath: str = None, dpi: int = 600):
 
         '''
         Friction lines: a dense scatter of Cf magnitude over the blade
@@ -2046,6 +2092,17 @@ class FrictionLines:
             before plotting, since without clipping a handful of extreme
             surfels (e.g. right at a sharp edge) wash out the entire color
             scale. Set to 100 to disable.
+        normalize : bool
+            If True, both axes are dimensionless: x = r/R (needs r_tip),
+            y = chord/c_ref (needs c_ref - see __init__). For a case
+            where the blade's actual physical size shouldn't be shown or
+            inferable (e.g. an NDA) - plotting a raw physical r [m]/
+            chord [m] scatter would leak it regardless of what's colored.
+            Forces show_span_axis off regardless of what was passed (a
+            secondary span-in-meters axis would defeat the point).
+            Overlays (show_separation_line/show_migration_line/
+            show_critical_points) switch to the same r/R, chord/c_ref
+            coordinates automatically - no separate flag needed on them.
         n_arrows : int
             Number of surfels randomly sampled for the direction quiver -
             one arrow per surfel would be illegible.
@@ -2088,6 +2145,9 @@ class FrictionLines:
 
         if self.rho_ref is None or self.rpm is None:
             raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cf.")
+        if normalize and (self.r_tip is None or self.c_ref is None):
+            raise ValueError("r_tip and c_ref must both be set (in __init__) to use normalize=True.")
+        show_span_axis = show_span_axis and not normalize
 
         surfaces = (surface,) if isinstance(surface, str) else tuple(surface)
         rng = np.random.default_rng(0)
@@ -2120,6 +2180,9 @@ class FrictionLines:
             span_sel, chord_sel, radius_sel = span[mask], chord[mask], radius[mask]
             cf_sel, tau_chord_sel, tau_span_sel = cf_mag[mask], tau_chord[mask], tau_span[mask]
 
+            if normalize:
+                radius_sel, chord_sel = radius_sel / self.r_tip, chord_sel / self.c_ref
+
             vmax = np.percentile(cf_sel, cf_clip_percentile)
             cf_clipped = np.clip(cf_sel, 0, vmax)
 
@@ -2138,22 +2201,24 @@ class FrictionLines:
 
             any_overlay = False
 
+            overlay_norm = {'r_tip': self.r_tip, 'c_ref': self.c_ref} if normalize else {}
+
             if show_separation_line:
                 sep_points = self.separation_line(surface=surf, frame=frame, span_min=span_min,
                                                    span_max=span_max, **(separation_line_kwargs or {}))
-                self.plot_separation_line(ax, sep_points)
+                self.plot_separation_line(ax, sep_points, **overlay_norm)
                 any_overlay = any_overlay or bool(sep_points)
 
             if show_migration_line:
                 mig_points = self.migration_line(surface=surf, frame=frame, span_min=span_min,
                                                   span_max=span_max, **(migration_line_kwargs or {}))
-                self.plot_migration_line(ax, mig_points)
+                self.plot_migration_line(ax, mig_points, **overlay_norm)
                 any_overlay = any_overlay or bool(mig_points)
 
             if show_critical_points:
                 crit_points = self.critical_points(surface=surf, frame=frame, span_min=span_min,
                                                     span_max=span_max, **(critical_points_kwargs or {}))
-                self.plot_critical_points(ax, crit_points)
+                self.plot_critical_points(ax, crit_points, **overlay_norm)
                 any_overlay = any_overlay or bool(crit_points)
 
                 if show_critical_points_index:
@@ -2162,10 +2227,15 @@ class FrictionLines:
             if any_overlay:
                 ax.legend(loc='upper right')
 
-            ax.set_ylabel('chord [m]')
-            ax.set_aspect('equal')
+            ax.set_ylabel('chord/$c_{ref}$ [-]' if normalize else 'chord [m]')
+            # 'equal' aspect only represents the blade's true physical
+            # shape when both axes share one scale (raw meters) - r/R
+            # and chord/c_ref are normalized by generally DIFFERENT
+            # references (r_tip vs c_ref), so forcing 'equal' there would
+            # distort the shape, not preserve it.
+            ax.set_aspect('auto' if normalize else 'equal')
 
-        axes[-1].set_xlabel('$r$ [m]')
+        axes[-1].set_xlabel('$r/R$ [-]' if normalize else '$r$ [m]')
         fig.tight_layout()
 
         if savepath:

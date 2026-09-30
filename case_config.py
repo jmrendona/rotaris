@@ -58,6 +58,9 @@ def load_case_config():
         rho_ref=cfg['rotor']['rho_ref'],
         rpm=cfg['rotor']['rpm'],
         pref=cfg['rotor']['pref'],
+        c_ref=cfg['rotor'].get('c_ref'),
+
+        normalize=cfg.get('normalize', False),
 
         span_axis=cfg['axes']['span'],
         chord_axis=cfg['axes']['chord'],

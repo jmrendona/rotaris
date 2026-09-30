@@ -21,6 +21,8 @@ r_tip = cfg.r_tip
 rho_ref = cfg.rho_ref
 rpm = cfg.rpm
 pref = cfg.pref
+c_ref = cfg.c_ref
+normalize = cfg.normalize
 span_axis = cfg.span_axis
 chord_axis = cfg.chord_axis
 thickness_axis = cfg.thickness_axis
@@ -54,6 +56,7 @@ sv_pressure = SurfaceVariable(
    rho_ref=rho_ref,
    rpm=rpm,
    pref=pref,
+   c_ref=c_ref,
    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
 )
 
@@ -64,7 +67,7 @@ print(40*'-')
 print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_file))
 sv_pressure_inst = SurfaceVariable(
   os.path.join(master_path, inst_pressure_file),
-  r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref,
+  r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref, c_ref=c_ref,
   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
 )
 
@@ -84,12 +87,21 @@ sv_pressure_inst = SurfaceVariable(
 # # plot_cf_phase_portrait() uses on cf_time_series() in skin_friction_manager.py -
 # # every convergence.py function takes this plain 1D per-frame series, exactly
 # # like thrust/torque in forces_manager.py:
-p_series = sv_pressure_inst.variable_time_series('static_pressure', surface='Upper').mean(axis=1)[:-2]  # drop corrupted last frame(s)
+if normalize:
+   # Cp-based series (pref subtracted, divided by LOCAL q_ref per point -
+   # see cp_time_series()) instead of raw pressure - hides the actual
+   # dynamic pressure scale (tied to r_tip/rpm) the same way normalize
+   # hides radius/chord elsewhere.
+   p_series = sv_pressure_inst.cp_time_series(surface='Upper').mean(axis=1)[:-2]  # drop corrupted last frame(s)
+   p_ylabel, p_label = '$C_p$ [-]', '$C_p$'
+else:
+   p_series = sv_pressure_inst.variable_time_series('static_pressure', surface='Upper').mean(axis=1)[:-2]  # drop corrupted last frame(s)
+   p_ylabel, p_label = 'Pressure [Pa]', 'Pressure'
 
 print(40*'-')
 print('Plotting cumulative mean+variance of pressure')
 plot_cumulative_stats(
-  p_series, dt=dt, rpm=rpm, sync='none', ylabel='Pressure [Pa]',
+  p_series, dt=dt, rpm=rpm, sync='none', ylabel=p_ylabel,
   savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_cumulative_stats_{case}.png'),
 )
 
@@ -103,14 +115,14 @@ plot_integral_timescale(
 print(40*'-')
 print('Plotting cumulative mean of pressure vs revolutions included')
 plot_cumulative_mean(
-  p_series, dt=dt, rpm=rpm, ylabel='Pressure [Pa]',
+  p_series, dt=dt, rpm=rpm, ylabel=p_ylabel,
   savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_cumulative_mean_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting cumulative skewness+flatness of pressure')
 plot_cumulative_moments(
-  p_series, dt=dt, rpm=rpm, sync='none', label='Pressure',
+  p_series, dt=dt, rpm=rpm, sync='none', label=p_label,
   savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_cumulative_moments_{case}.png'),
 )
 
@@ -221,15 +233,17 @@ sv_pressure.plot_variable_surface(
    lambda s: -sv_pressure.cp(surface=s, stat='mean'),
    cbar_label='-Cp', span_min=span_min, surface='Upper',
    figsize=blade_figsize,
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/cp/avg/cp_surface_avg_upper_{case}.png'),
 )
 
 print(40*'-')
 print('Plotting -Cp surface scatter rms value')
 sv_pressure_inst.plot_variable_surface(
-lambda s: -sv_pressure_inst.cp(surface=s, frame=frame, stat='rms'),
+lambda s: -sv_pressure_inst.cp(surface=s, stat='rms'),
 cbar_label='-Cp', span_min=span_min, surface='Upper',
 figsize=blade_figsize,
+normalize=normalize,
 savepath=os.path.join(master_path, f'images/cp/rms/cp_surface_rms_upper_{case}.png'),
 )
 
@@ -240,6 +254,7 @@ for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
     lambda s: -sv_pressure_inst.cp(surface=s, frame=frame),
     cbar_label='-Cp', span_min=span_min, surface='Upper',
     figsize=blade_figsize,
+    normalize=normalize,
     savepath=os.path.join(master_path, f'images/cp/inst/cp_surface_upper_frame{frame:03d}_{case}.png'),
   )
 
@@ -254,16 +269,27 @@ for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
   sv_pressure_inst.plot_pressure_fluctuation(
       frame, span_min=span_min, surface='Upper',
       figsize=blade_figsize,
+      normalize=normalize,
       savepath=os.path.join(master_path, f'images/pfluct/p_fluct_upper_frame{frame:03d}_{case}.png'),
    )
 
-# Prms needs no new method - it's already variable(stat='rms'):
+# Prms needs no new method - it's already variable(stat='rms'). Normalized,
+# this switches to Cp's own rms (Cp_rms = Prms / q_ref, LOCAL per-point
+# normalization - same as cp()) instead of raw Prms, so the value itself
+# is dimensionless too, not just the axes.
 print(40*'-')
 print('Plotting pressure RMS surface scatter, average over all frames')
+if normalize:
+   prms_get_values = lambda s: sv_pressure_inst.cp(surface=s, stat='rms')
+   prms_cbar_label = '$C_{p,rms}$ [-]'
+else:
+   prms_get_values = lambda s: sv_pressure_inst.variable('static_pressure', surface=s, stat='rms')
+   prms_cbar_label = '$P_{rms}$ [Pa]'
 sv_pressure_inst.plot_variable_surface(
-   lambda s: sv_pressure_inst.variable('static_pressure', surface=s, stat='rms'),
-   cbar_label='$P_{rms}$ [Pa]', span_min=span_min, surface='Upper',
+   prms_get_values,
+   cbar_label=prms_cbar_label, span_min=span_min, surface='Upper',
    figsize=blade_figsize,
+   normalize=normalize,
    savepath=os.path.join(master_path, f'images/pfluct/p_rms_surface_upper_{case}.png'),
 )
 
@@ -281,13 +307,15 @@ for span in span_pcts:
     print(f'Plotting pressure time trace at span {span}% and chord {chord}%')
     sv_pressure_inst.plot_timetrace(
       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
-      ylabel='Static pressure [Pa]', dt=dt,
+      ylabel='$C_p$ [-]' if normalize else 'Static pressure [Pa]', dt=dt,
+      normalize=normalize,
       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_timetrace_s{span:03d}_c{chord:03d}_{case}.png'),
     )
     print(40*'-')
     print(f'Plotting pressure periodogram at span {span}% and chord {chord}%')
     sv_pressure_inst.plot_periodogram(
       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
+      normalize=normalize, db=not normalize,
       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_periodogram_s{span:03d}_c{chord:03d}_{case}.png'),
     )
     print(40*'-')

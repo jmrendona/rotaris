@@ -25,6 +25,12 @@ rotor:
   rho_ref: 1.22523
   rpm: 3500
   pref: 101325
+  c_ref: 0.05 # reference chord [m], used only when normalize is true below
+
+# NDA case: hide the blade's actual size in plots - radii become r/R,
+# chord becomes chord/c_ref, forces become C_T/C_Q-style coefficients,
+# pressure becomes Cp - see each manager's normalize=normalize calls.
+normalize: true
 
 # Raw Cartesian axis (0=X, 1=Y, 2=Z) for each blade direction (this
 # project's original isolated-rotor convention).
@@ -44,6 +50,6 @@ friction:
 convergence:
   dt: 0.00009524
 
-blade_figsize: null # null for ISAWE2 case
+blade_figsize: null # null for ISAE2 case
 
 frame_loop_step: 90
