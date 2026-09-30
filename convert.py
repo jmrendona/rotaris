@@ -74,12 +74,20 @@ def run_forces(args):
 
 
 def run_pressure(args):
+    # nc_stats_path is required by convert_snc_to_h5() (see its docstring -
+    # the per-frame LRF rotation angle needed to de-rotate pf2ens's
+    # per-frame, global-frame Geometry back into the LRF) - auto-run it on
+    # this same snc_path if the user didn't already save one, same pattern
+    # _resolve_nc_stats() already uses for the fnc-* subcommands below, so
+    # the user doesn't need a separate manual exaritool step first. Cheap
+    # relative to the pf2ens-per-frame work this function does right after.
+    nc_stats_path = _resolve_nc_stats(args.snc_path, args.nc_stats, args.work_dir)
     convert_snc_to_h5(
         args.snc_path,
         args.output,
         args.first,
         args.last,
-        nc_stats_path=args.nc_stats,
+        nc_stats_path=nc_stats_path,
         reference_frame=args.reference_frame,
         work_dir=args.work_dir,
         surface_split=args.surface_split,
@@ -287,7 +295,11 @@ def build_parser():
     pressure.add_argument('--first', type=int, required=True, help='First frame to convert')
     pressure.add_argument('--last', type=int, required=True, help='Last frame to convert (inclusive)')
     pressure.add_argument('--nc-stats', default=None,
-                           help='Path to saved `exaritool nc-stats.ri -detail` output')
+                           help='Path to already-saved `exaritool nc-stats.ri -detail` output '
+                                '(default: run fresh, on this same snc_path) - needed for the '
+                                'per-frame LRF rotation angle that de-rotates pf2ens\'s per-frame '
+                                '(global-frame) Geometry back into the LRF (see '
+                                'ensight_to_h5.convert_snc_to_h5\'s nc_stats_path docstring).')
     pressure.add_argument('--reference-frame', type=int, default=None,
                            help='Frame whose geometry is stored (default: --first)')
     pressure.add_argument('--work-dir', default=None,
