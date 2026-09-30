@@ -1486,6 +1486,142 @@ class StripForces:
 
         return fig, ax
 
+    def plot_harmonics_contour(self, result: dict, harmonics_result: dict, dt: float = None,
+                                component: str = 'axial', strips=None, ref: float = None, n_levels: int = 30,
+                                cmap_time: str = 'RdBu_r', cmap_harmonics: str = 'viridis',
+                                savepath: str = None, dpi: int = 600):
+
+        '''
+        Paired time-domain / harmonic-domain contour of the unsteady
+        loading across the WHOLE span at once - radius on a SHARED
+        y-axis for both panels, so a feature visible in one panel (e.g.
+        an impulsive event concentrated near the tip) can be read off
+        directly against its harmonic-domain counterpart. Styled after
+        Wu, Kingan, & Go's own Fig. 20 pairing of an unsteady-loading
+        contour with its harmonic-magnitude contour (Wu, Y., Kingan, M.
+        J., & Go, S. T. (2022). Propeller-strut interaction tone noise.
+        Physics of Fluids, 34(5), 055116) - the natural companion
+        to plot_harmonics()'s bar chart, not a replacement for it: the
+        bar chart is the one to reach for when comparing a handful of
+        strips' spectra directly against each other bar-by-bar; this is
+        the one to reach for when the question is about the whole span's
+        behavior at once, in both time and frequency, and WHY a
+        particular harmonic dominates (visible directly in the time
+        domain, e.g. an impulsive blade-vortex-interaction-style event),
+        not just that it does.
+
+        Left panel: the RAW per-frame load, mean-removed per strip (this
+        is a plot of the UNSTEADY loading specifically, matching the
+        right panel's own k != 0/AC-only scope - see harmonics()'s 'mean'
+        entry and plot_harmonics()'s show_mean for the steady/DC part,
+        deliberately excluded here) - radius vs. time, color = force.
+        Right panel: harmonics()'s own |F_n(r)| for the SAME result and
+        component, converted to a log-compressed scale for display -
+        radius vs. harmonic order, color = magnitude.
+
+        The log-compressed display, `10*log10(|F_n|)` by default (`ref`
+        not given), reproduces Wu, Kingan, & Go's own Fig. 20 convention
+        exactly - a data-compression device for showing several orders
+        of magnitude on one linear colorbar, NOT a properly-referenced
+        acoustic decibel level (there is no standard reference force to
+        divide by first, unlike an SPL's reference pressure). Passing
+        `ref` (e.g. the case's own mean thrust, or any other physically
+        meaningful force scale) instead computes a genuine relative
+        level, `20*log10(|F_n|/ref)`, dimensionless and independent of
+        the force unit used - preferred whenever a specific reference is
+        available and a rigorously comparable level (e.g. across cases)
+        matters more than exactly reproducing the cited figure's own
+        convention.
+
+        Parameters
+        ----------
+        result : dict
+            compute()'s return value - per-radial-strip only
+            (n_chord_bins=None), same restriction as plot_time_trace().
+        harmonics_result : dict
+            harmonics()'s return value, computed from this SAME `result`
+            and `component` (not checked - a harmonics_result computed
+            from a different result/component will silently mislabel the
+            right panel).
+        dt : float, optional
+            Physical timestep [s] - if omitted, the left panel's x-axis
+            is frame index (dimensionless), matching plot_time_trace().
+        component : 'axial', 'radial', or 'tangential'
+        strips : sequence of int, optional
+            Which strips to include - every valid (non-NaN-radius) strip
+            by default, unlike plot_harmonics()'s handful-at-a-time
+            convention: showing the WHOLE span at once, continuously
+            across radius, is the whole point of this plot.
+        ref : float, optional
+            See above - if given, the right panel is a proper relative
+            level in dB instead of a raw log-compressed magnitude.
+        n_levels : int
+            Number of contour levels/color steps in each panel.
+
+        Returns
+        -------
+        (fig, (ax_time, ax_harmonics))
+        '''
+
+        if self.r_tip is None:
+            raise ValueError("r_tip must be set (in __init__) for plot_harmonics_contour()'s r/R y-axis.")
+        if result['chord'] is not None:
+            raise ValueError("plot_harmonics_contour() only supports a per-radial-strip compute() result.")
+        if harmonics_result['chord'] is not None:
+            raise ValueError("plot_harmonics_contour() only supports a per-radial-strip harmonics() result.")
+
+        radius = result['radius']
+        valid = np.flatnonzero(~np.isnan(radius))
+        sel = valid if strips is None else np.asarray(strips)
+        r_over_R = radius[sel] / self.r_tip
+
+        arr = result[component][:, sel]  # (n_frames, n_sel)
+        arr_fluct = arr - arr.mean(axis=0, keepdims=True)  # unsteady part only - see docstring
+        n_frames = arr.shape[0]
+        t = np.arange(n_frames) * dt if dt is not None else np.arange(n_frames)
+
+        mag = harmonics_result['magnitude'][:, sel]  # (n_harmonics, n_sel)
+        harmonic = harmonics_result['harmonic']
+        if ref is None:
+            level_display = 10 * np.log10(mag)
+            level_label = r'$10\log_{10}(|F_n|)$'
+        else:
+            level_display = 20 * np.log10(mag / ref)
+            level_label = r'$20\log_{10}(|F_n|/\mathrm{ref})$ [dB]'
+
+        # Both data panels are given explicitly EQUAL widths (a fixed
+        # right-hand margin is reserved up front for the two colorbars,
+        # via subplots_adjust, rather than letting fig.colorbar()'s own
+        # ax= auto-shrink only ax_harm - that approach left ax_time and
+        # ax_harm at visibly different widths). The two colorbars are
+        # then placed as their own explicit axes inside that reserved
+        # margin, with enough of a gap between them that their labels
+        # don't collide.
+        fig, (ax_time, ax_harm) = plt.subplots(1, 2, figsize=(15, 6), sharey=True)
+        fig.subplots_adjust(left=0.07, right=0.76, wspace=0.08, top=0.95, bottom=0.12)
+
+        vmax = np.max(np.abs(arr_fluct)) if arr_fluct.size else 1.0
+        levels_time = np.linspace(-vmax, vmax, n_levels + 1)
+        cf_time = ax_time.contourf(t, r_over_R, arr_fluct.T, levels=levels_time,
+                                    cmap=cmap_time, extend='both')
+        ax_time.set_xlabel('Time [s]' if dt is not None else 'Frame index')
+        ax_time.set_ylabel('$r/R$ [-]')
+
+        levels_harm = np.linspace(level_display.min(), level_display.max(), n_levels + 1)
+        cf_harm = ax_harm.contourf(harmonic, r_over_R, level_display.T, levels=levels_harm,
+                                    cmap=cmap_harmonics, extend='both')
+        ax_harm.set_xlabel('Harmonic ($n$P)')
+
+        cax_harm = fig.add_axes([0.79, 0.12, 0.02, 0.83])
+        cax_time = fig.add_axes([0.90, 0.12, 0.02, 0.83])
+        fig.colorbar(cf_harm, cax=cax_harm, label=level_label)
+        fig.colorbar(cf_time, cax=cax_time, label=self._COMPONENT_LABELS.get(component, component))
+
+        if savepath:
+            fig.savefig(savepath, dpi=dpi)
+
+        return fig, (ax_time, ax_harm)
+
     _TOTALS_KEY_MAP = {'axial': 'thrust', 'radial': 'radial_force', 'tangential': 'tangential_force'}
 
     def plot_phase_portrait(self, loads: dict, component_pair=('axial', 'radial'), ax=None,

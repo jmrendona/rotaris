@@ -263,6 +263,36 @@ sf_inst.plot_harmonic_polar(
    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonic_polar_1P_overlay_axial_{case}.png'),
 )
 
+# Paired time-domain / harmonic-domain contour across the WHOLE span at
+# once (see README.md, "Time + harmonic contour across the whole span:
+# plot_harmonics_contour()") - a companion to the bar charts above, not a
+# replacement: shows every strip at once instead of a handful, and pairs
+# the raw unsteady-loading contour directly against its own harmonic
+# content on a shared radius axis, so a feature visible in one (e.g. an
+# impulsive event concentrated near the tip) can be read off directly
+# against the other. Styled after Wu, Kingan, & Go (2022)'s own Fig. 20
+# pairing - reuses the SAME h_phase_axial computed just above.
+print(40*'-')
+print('Plotting paired time/harmonic contour for the axial component')
+sf_inst.plot_harmonics_contour(
+   result_inst, h_phase_axial, dt=dt, component='axial',
+   savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_contour_axial_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting paired time/harmonic contour for the tangential component')
+sf_inst.plot_harmonics_contour(
+   result_inst, h_phase_axial, dt=dt, component='tangential',
+   savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_contour_tangential_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting paired time/harmonic contour for the radial component')
+sf_inst.plot_harmonics_contour(
+   result_inst, h_phase_axial, dt=dt, component='radial',
+   savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_contour_radial_{case}.png'),
+)
+
 
 # Reconstruction check against phase_lock()'s own empirical curve:
 #phase_locked = sf_inst.phase_lock(result_inst, dt=dt, n_azimuth_bins=72)

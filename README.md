@@ -1749,6 +1749,44 @@ a strip; this plots exactly ONE harmonic in isolation (plus, optionally,
 the mean), to see that one harmonic's own shape and peak location
 without the others superimposed on top of it.
 
+#### Time + harmonic contour across the whole span: `plot_harmonics_contour()`
+
+Another companion to `plot_harmonics()`, for a different limitation of
+the bar chart: it only ever shows a handful of strips at once
+(`strips=[...]`), never the WHOLE span continuously, and it never shows
+*why* a harmonic dominates - only that it does. `plot_harmonics_contour()`
+is a PAIRED, two-panel contour, styled directly after Wu, Kingan, & Go
+(2022, "Propeller-strut interaction tone noise", *Physics of Fluids*
+34(5), 055116)'s own Fig. 20: left panel is the raw, mean-removed
+(unsteady-only) loading across every strip at once, radius vs. time;
+right panel is `harmonics()`'s own `|F_n(r)|`, log-compressed for
+display, radius vs. harmonic order - both panels share the same `r/R`
+y-axis, so a feature visible in one (e.g. an impulsive,
+blade-vortex-interaction-style event concentrated near the tip) can be
+read off directly against its harmonic-domain signature right next to
+it, rather than needing to cross-reference two separately-scaled plots.
+
+```python
+h = sf.harmonics(result, dt=0.000056, component='axial', n_harmonics=17)
+sf.plot_harmonics_contour(result, h, dt=0.000056, component='axial',
+                           savepath='strip_harmonics_contour_axial.png')
+```
+
+The right panel's color scale, `10*log10(|F_n|)` by default, reproduces
+Wu, Kingan, & Go's own convention exactly - a data-compression device
+for showing several orders of magnitude on one linear colorbar, NOT a
+properly-referenced acoustic decibel level (there's no standard
+reference force to divide by first, unlike an SPL's reference pressure).
+Passing `ref` (e.g. the case's own mean thrust) instead computes a
+genuine relative level, `20*log10(|F_n|/ref)` - dimensionless, and the
+one to prefer whenever a rigorous, referenced comparison (e.g. across
+cases) matters more than matching the cited figure exactly.
+
+Every valid (non-NaN-radius) strip is included by default (`strips=None`)
+- unlike `plot_harmonics()`'s handful-at-a-time convention, showing the
+whole span continuously is the point here. Needs `r_tip` set (in
+`__init__`) for the `r/R` axis.
+
 ### Convergence checking: phase portraits - `plot_phase_portrait()` / `plot_phase_portrait_by_strip()`
 
 One integrated force component plotted against another, over time (e.g.
