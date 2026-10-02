@@ -68,16 +68,18 @@ docstring for the working module-load recipe).
 def run_forces(args):
     reader = SNCReader(args.snc_path)
     reader.to_h5(args.output, face_name=args.face_name, surface_split=args.surface_split,
-                 nc_stats_path=args.nc_stats, blade_lrf_offset_deg=args.blade_lrf_offset_deg)
+                 nc_stats_path=args.nc_stats, blade_lrf_offset_deg=args.blade_lrf_offset_deg,
+                 span_min=args.span_min, span_max=args.span_max, span_axis=args.span_axis)
     reader.close()
     print(f'wrote {args.output}')
 
 
 def run_pressure(args):
-    # nc_stats_path is required by convert_snc_to_h5() (see its docstring -
-    # the per-frame LRF rotation angle needed to de-rotate pf2ens's
-    # per-frame, global-frame Geometry back into the LRF) - auto-run it on
-    # this same snc_path if the user didn't already save one, same pattern
+    # nc_stats_path is optional for convert_snc_to_h5() (only used for
+    # Metadata/mid_s + lrf_position_rad, which SurfaceVariable.timetrace()/
+    # periodogram() want for a real sampling rate - NOT needed for Geometry
+    # correctness, see that function's docstring) - auto-run it on this same
+    # snc_path if the user didn't already save one, same pattern
     # _resolve_nc_stats() already uses for the fnc-* subcommands below, so
     # the user doesn't need a separate manual exaritool step first. Cheap
     # relative to the pf2ens-per-frame work this function does right after.
@@ -92,6 +94,7 @@ def run_pressure(args):
         work_dir=args.work_dir,
         surface_split=args.surface_split,
         face_names=args.face_names.split(',') if args.face_names else None,
+        blade_lrf_offset_deg=args.blade_lrf_offset_deg,
     )
     print(f'wrote {args.output}')
 
@@ -284,6 +287,17 @@ def build_parser():
                               'physical feature\'s expected vs. observed azimuthal position after '
                               'conversion, or by checking whether the blade sits flat along a raw '
                               'Cartesian axis in Geometry/X,Y,Z before this correction).')
+    forces.add_argument('--span-min', type=float, default=None,
+                         help='Keep only surfels with span-axis coordinate >= this (meters, RAW/'
+                              'uncentered - NOT the same convention as FrictionLines/StripForces\' '
+                              'own span_min) - an OOM-prevention crop for a DNS-resolution .snc with '
+                              'too many surfels to hold every frame in memory at once (see '
+                              'SNCReader.to_h5()\'s span_min docstring). None (default): no crop.')
+    forces.add_argument('--span-max', type=float, default=None,
+                         help='Keep only surfels with span-axis coordinate <= this - see --span-min.')
+    forces.add_argument('--span-axis', type=int, default=0, choices=[0, 1, 2],
+                         help='Which raw coordinate column (0=X, 1=Y, 2=Z) --span-min/--span-max '
+                              'apply to - match this case\'s own span_axis convention (default: 0).')
     forces.set_defaults(func=run_forces)
 
     pressure = subparsers.add_parser(
@@ -296,10 +310,11 @@ def build_parser():
     pressure.add_argument('--last', type=int, required=True, help='Last frame to convert (inclusive)')
     pressure.add_argument('--nc-stats', default=None,
                            help='Path to already-saved `exaritool nc-stats.ri -detail` output '
-                                '(default: run fresh, on this same snc_path) - needed for the '
-                                'per-frame LRF rotation angle that de-rotates pf2ens\'s per-frame '
-                                '(global-frame) Geometry back into the LRF (see '
-                                'ensight_to_h5.convert_snc_to_h5\'s nc_stats_path docstring).')
+                                '(default: run fresh, on this same snc_path) - per-frame timing/'
+                                'LRF_position metadata, used by SurfaceVariable.timetrace()/'
+                                'periodogram() for a real sampling rate (see '
+                                'ensight_to_h5.convert_snc_to_h5\'s nc_stats_path docstring). '
+                                'NOT needed for Geometry correctness.')
     pressure.add_argument('--reference-frame', type=int, default=None,
                            help='Frame whose geometry is stored (default: --first)')
     pressure.add_argument('--work-dir', default=None,
@@ -316,6 +331,14 @@ def build_parser():
                                 'this is explicit rather than left to pf2ens\'s own default, which '
                                 'was confirmed to silently include only one of two same-kind '
                                 'faces on a real multi-blade-face case).')
+    pressure.add_argument('--blade-lrf-offset-deg', type=float, default=0.0,
+                           help='Extra CONSTANT rotation [deg] applied to the stored Geometry - '
+                                'SAME parameter/meaning as the forces subcommand\'s own '
+                                '--blade-lrf-offset-deg (a fixed LRF-vs-blade mounting misalignment, '
+                                'a property of the BLADE itself, not of which branch is reading it) '
+                                '- use the SAME value here as was used for this case\'s forces-branch '
+                                'conversion (see ensight_to_h5.convert_snc_to_h5\'s '
+                                'blade_lrf_offset_deg docstring). 0 (no rotation) by default.')
     pressure.set_defaults(func=run_pressure)
 
     fnc_meridional = subparsers.add_parser(

@@ -488,7 +488,7 @@ plot_integral_timescale(
 # is a reasonable "hardest case" choice on this project's own geometry -
 # adjust per case).
 chord_pts = np.arange(0, 101, 10)
-span_pts = [25, 50, 75, 90, 95]
+span_pts = [50, 70, 80, 90]
 
 for chord in chord_pts:
    for span in span_pts:

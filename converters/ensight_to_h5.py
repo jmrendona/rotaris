@@ -11,52 +11,67 @@ from scipy.spatial import cKDTree
 from converters.snc_reader import SNCReader, parse_nc_stats
 
 
-def raw_positions_to_ensight_frame(positions: np.ndarray) -> np.ndarray:
+def raw_positions_to_ensight_frame(positions: np.ndarray, axis_origin_raw: np.ndarray) -> np.ndarray:
 
     '''
-    Re-center raw .snc surfel positions (already scaled to meters, e.g.
+    Shift raw .snc surfel positions (already scaled to meters, e.g.
     SNCReader.surfel_centroids() * lattice_scales['LatticeLength']) onto
     pf2ens's own coordinate convention, so the two can be matched
     point-for-point.
 
-    pf2ens centers each axis independently on the mesh's own bounding-box
-    midpoint - NOT on lrf_axis_origin. The two only coincide for the two
-    axes perpendicular to the rotation axis, and only because this rotor's
-    geometry happens to be symmetric about that axis; the axis-aligned
-    coordinate is offset by a further ~1cm relative to axis_origin on the
-    case this was validated against, confirmed by comparing raw vs.
-    pf2ens-reported bounding boxes directly.
+    pf2ens centers every face it's asked to export on lrf_axis_origin
+    (the rotation axis's own point, in the .snc's raw/absolute
+    coordinates) - i.e. pf2ens_position = raw_position - axis_origin_raw.
+    An EARLIER version of this function instead subtracted the SELECTED
+    mesh's own bounding-box midpoint ("pf2ens centers each axis
+    independently on the mesh's own bounding-box midpoint") - that was
+    wrong, just not detectably so on the single case it was validated
+    against: a rotationally-symmetric (multi-blade/whole-rotor) face
+    selection happens to have its own bbox center coincide with
+    axis_origin almost exactly, so the two conventions were numerically
+    indistinguishable there. They diverge for an ASYMMETRIC selection
+    (e.g. one single blade out of several) - confirmed directly on a
+    real one-blade case: EnsightFrame.positions() + axis_origin_raw
+    reproduces the raw .snc's own absolute coordinates (matching to 5
+    significant figures in the plane perpendicular to the rotation
+    axis), while the blade's own bbox center sits about 0.2 m away from
+    axis_origin_raw there - small in absolute terms, but enough to blow
+    a ~0.17 m-radius blade's computed radius out to 50% past its actual
+    tip when used as the reference point instead (and, since computed
+    radius then mixes in the point's own chordwise offset too - see
+    convert_snc_to_h5()'s Note - distorts the whole blade into a
+    diagonal sliver rather than just shifting it). This function itself
+    is never called directly in this module (the same shift is
+    duplicated inline in convert_snc_to_h5()) - kept here as the
+    documented reference for what that inline code does and why.
 
-    "The mesh's own bounding-box midpoint" means whatever mesh pf2ens
-    actually OUTPUT for that run - i.e. `positions` here must already be
-    restricted to the same face_names convert_snc_to_h5() passed to
-    pf2ens, not the whole raw .snc file. Passing the whole file's
-    surfel cloud is only "correct" by coincidence, when the excluded
-    faces don't happen to shift the bbox - confirmed WRONG (~22cm
-    offset) on a real case that selected one single blade out of
-    several via face_names, where the whole file (many symmetric faces:
-    all the blades, casing, stator, walls, ...) is centered near the
-    rotation axis but that one asymmetric blade alone is not. This
-    function itself is never called directly in this module (the same
-    bbox_center math is duplicated inline in convert_snc_to_h5(), where
-    positions is already face_names-filtered before reaching it) - kept
-    here as the documented reference for what that inline block does
-    and why.
+    Also confirmed on that same case: pf2ens's per-frame Geometry export
+    does NOT rotate with the blade (two frames ~180 degrees of real LRF
+    rotation apart produced byte-identical positions) - it's already in
+    the same frame-independent convention the raw .snc's own Geometry
+    uses, same as SNCReader.to_h5() never needing to rotate ITS Geometry
+    either (only Surface_X/Y/Z-Force does, being a genuinely different,
+    per-frame-measured global-frame quantity - see SNCReader's own "NOTE
+    on reference frames"). No rotation correction of any kind is needed
+    or applied here.
 
     Parameters
     ----------
     positions : np.ndarray, shape (N, 3)
-        Already restricted to the same faces pf2ens actually output for
-        this run (see above) - NOT necessarily every surfel in the raw
-        .snc file.
+        Raw .snc positions, in the SAME absolute/raw coordinates
+        SNCReader.surfel_centroids() (scaled to meters) returns - NOT
+        yet shifted onto pf2ens's own convention.
+    axis_origin_raw : np.ndarray, shape (3,)
+        SNCReader.lrf_axis_origin, scaled to meters (lrf_axis_origin *
+        lattice_scales['LatticeLength']) - the SAME point pf2ens itself
+        subtracts internally.
 
     Returns
     -------
     np.ndarray, shape (N, 3)
     '''
 
-    bbox_center = (positions.min(axis=0) + positions.max(axis=0)) / 2
-    return positions - bbox_center
+    return positions - axis_origin_raw
 
 
 class EnsightFrame:
@@ -68,14 +83,15 @@ class EnsightFrame:
 
     All variables come out already in real MKS units (pf2ens's default),
     and positions/normals are exact for this specific frame (no rotation
-    reconstruction involved) - meaning positions() is the blade's REAL
-    position at that instant, in the GLOBAL (lab, rotating) frame, NOT
-    the LRF (co-rotating) frame the raw .snc's own Geometry is always
-    stored in (see SNCReader's class docstring, "NOTE on reference
-    frames") - the mesh genuinely moves frame to frame here, the same
-    way Surface_X/Y/Z-Force does. See EnsightSeriesWriter.add_frame's
-    rotation_angle for the correction this needs before being trusted as
-    "the" blade geometry.
+    reconstruction involved - this describes DATA like pressure, which
+    genuinely is specific to that frame's own instant). positions()
+    itself does NOT rotate between frames - confirmed directly (two
+    frames ~180 degrees of real LRF rotation apart produced byte-
+    identical positions): it's in the same frame-independent convention
+    the raw .snc's own Geometry uses, just shifted onto pf2ens's own
+    lrf_axis_origin-relative coordinate convention (see
+    raw_positions_to_ensight_frame()) - no rotation correction needed or
+    applied anywhere in this module.
     '''
 
     def __init__(self, case_path: str):
@@ -179,15 +195,16 @@ class EnsightFrame:
         positions : np.ndarray, shape (N, 3)
             This frame's OWN positions to classify - passed in explicitly
             (rather than calling self.positions() here) so the caller can
-            pass the LRF-rotated version (see EnsightSeriesWriter.add_frame's
-            rotation_angle) instead of this frame's raw global-frame
-            positions - both reference_positions (already LRF, from the
-            raw .snc) and this array need to be in the SAME frame for the
-            nearest-neighbor match to land on the right points.
+            pass the axis_origin-shifted version (see
+            EnsightSeriesWriter.add_frame()) instead of this frame's raw
+            pf2ens-convention positions - both reference_positions and
+            this array need to be in the SAME (absolute, unshifted)
+            coordinates for the nearest-neighbor match to land on the
+            right points.
         reference_positions : np.ndarray, shape (M, 3)
-            Raw .snc surfel positions, in pf2ens's coordinate convention
-            - i.e. raw_positions_to_ensight_frame(SNCReader.surfel_centroids()
-            * lattice_scales['LatticeLength']).
+            Raw .snc surfel positions, absolute/unshifted (SNCReader.
+            surfel_centroids() * lattice_scales['LatticeLength']) - the
+            SAME convention `positions` above must already be in.
         reference_upper : np.ndarray of bool, shape (M,)
             SNCReader.surface_split() on that same file.
         '''
@@ -238,7 +255,8 @@ class EnsightSeriesWriter:
     '''
 
     def __init__(self, output_path: str, variables: list = None, surface_split: bool = False,
-                 reference_positions=None, reference_upper=None, axis_origin=None, axis_direction=None):
+                 reference_positions=None, reference_upper=None, axis_origin=None, axis_direction=None,
+                 blade_lrf_offset_deg: float = 0.0):
 
         if surface_split and (reference_positions is None or reference_upper is None):
             raise ValueError(
@@ -254,6 +272,7 @@ class EnsightSeriesWriter:
         self.reference_upper = reference_upper
         self.axis_origin = axis_origin
         self.axis_direction = axis_direction
+        self.blade_lrf_offset_deg = blade_lrf_offset_deg
         self._h5f = h5py.File(output_path, 'w')
         self._data_groups = None
         self._masks = None
@@ -309,13 +328,14 @@ class EnsightSeriesWriter:
             self._meta_group.create_dataset('lrf_axis_origin', data=self.axis_origin)
         if self.axis_direction is not None:
             self._meta_group.create_dataset('lrf_axis_direction', data=self.axis_direction)
+        self._meta_group.attrs['blade_lrf_offset_deg'] = self.blade_lrf_offset_deg
 
     def _append_row(self, dataset, value):
         dataset.resize(dataset.shape[0] + 1, axis=0)
         dataset[-1] = value
 
     def add_frame(self, frame: EnsightFrame, frame_index: int, frame_meta: dict = None,
-                  is_reference: bool = False, rotation_angle: float = 0.0):
+                  is_reference: bool = False):
 
         '''
         Append one frame's variables (and, if is_reference, the geometry)
@@ -336,47 +356,36 @@ class EnsightSeriesWriter:
             Geometry (only meaningful the first time it's called).
             Normals are deliberately not written here - see
             EnsightFrame.normals().
-        rotation_angle : float
-            Angle [rad] to de-rotate this frame's positions by, about
-            lrf_axis_direction through lrf_axis_origin (self.axis_origin/
-            self.axis_direction - both required if this is non-zero),
-            BEFORE they're used for is_reference's Geometry and/or
-            surface_split's nearest-neighbor match. 0.0 (no-op) by
-            default.
 
-            WHY: unlike the raw .snc's own Geometry (which PowerFLOW
-            always stores already de-rotated into the LRF, frame-
-            independent - see SNCReader's class docstring, "NOTE on
-            reference frames"), pf2ens's per-frame EnsightFrame.positions()
-            is the blade's EXACT position at that SPECIFIC frame, in the
-            GLOBAL (lab, rotating) frame - the mesh genuinely moves frame
-            to frame, the same way Surface_X/Y/Z-Force does (and needs
-            the identical correction - see convert_snc_to_h5()). Passing
-            0.0 here (the default) silently reproduces that same bug for
-            this branch: the stored Geometry ends up frozen at whatever
-            arbitrary azimuth is_reference's frame happened to be at,
-            instead of the LRF's canonical orientation - confirmed on a
-            real case (EDAT-nosimplification) as a blade that doesn't
-            look rotated/doesn't line up with span_axis/chord_axis at
-            all. convert_snc_to_h5() always computes and passes this
-            correctly; pass it yourself if constructing/driving this
-            class directly.
+        frame.positions() is shifted by +self.axis_origin before use
+        (undoing pf2ens's own internal lrf_axis_origin-centering - see
+        raw_positions_to_ensight_frame()), whenever self.axis_origin is
+        given - so Geometry/surface_split both end up in the SAME
+        absolute coordinates self.axis_origin/self.axis_direction (and
+        the raw .snc's own Geometry) are expressed in. No per-frame
+        rotation correction - pf2ens's Geometry doesn't rotate between
+        frames (confirmed empirically - see
+        raw_positions_to_ensight_frame()'s docstring), unlike
+        Surface_X/Y/Z-Force in the forces branch.
+
+        self.blade_lrf_offset_deg, if nonzero, additionally rotates ONLY
+        the stored Geometry (is_reference, below) about
+        self.axis_direction through self.axis_origin, by the SAME
+        constant angle/sign convention as SNCReader.to_h5()'s own
+        blade_lrf_offset_deg - a FIXED mounting/modeling misalignment
+        between the LRF's own nominal zero-orientation and the blade's
+        actual geometric orientation, independent of which branch
+        (forces or pressure) is doing the reading. Applied AFTER
+        surface_split's own nearest-neighbor match (which uses the
+        UNROTATED positions - rotating first would only misalign it
+        against reference_positions, which come from the SAME, still-
+        unrotated raw .snc convention), so classification is unaffected
+        by this purely cosmetic/orientation correction.
         '''
 
         positions = frame.positions()
-
-        if rotation_angle != 0.0:
-            if self.axis_origin is None or self.axis_direction is None:
-                raise ValueError(
-                    "axis_origin and axis_direction (constructor args) are required to use "
-                    "rotation_angle != 0.0."
-                )
-            axis = self.axis_direction / np.linalg.norm(self.axis_direction)
-            # Same sign convention as SNCReader's own global-to-LRF force/geometry
-            # correction (rotate by -angle to undo the LRF's own accumulated
-            # rotation relative to the global frame this position was measured in).
-            positions = SNCReader._rotate_about_axis(
-                positions - self.axis_origin, axis, -rotation_angle) + self.axis_origin
+        if self.axis_origin is not None:
+            positions = positions + self.axis_origin
 
         n_points = positions.shape[0]
 
@@ -384,11 +393,17 @@ class EnsightSeriesWriter:
             self._init_datasets(frame, n_points, positions)
 
         if is_reference:
+            geo_positions = positions
+            if self.blade_lrf_offset_deg != 0.0:
+                axis = self.axis_direction / np.linalg.norm(self.axis_direction)
+                blade_offset_rad = np.radians(self.blade_lrf_offset_deg)
+                geo_positions = SNCReader._rotate_about_axis(
+                    geo_positions - self.axis_origin, axis, -blade_offset_rad) + self.axis_origin
             for label, mask in self._masks.items():
                 geo = self._h5f.create_group(f'Geometry/{label}' if label else 'Geometry')
-                geo.create_dataset('X', data=positions[mask, 0].astype('f4'))
-                geo.create_dataset('Y', data=positions[mask, 1].astype('f4'))
-                geo.create_dataset('Z', data=positions[mask, 2].astype('f4'))
+                geo.create_dataset('X', data=geo_positions[mask, 0].astype('f4'))
+                geo.create_dataset('Y', data=geo_positions[mask, 1].astype('f4'))
+                geo.create_dataset('Z', data=geo_positions[mask, 2].astype('f4'))
                 geo.attrs['reference_frame_index'] = frame_index
 
         for name in self.variables:
@@ -422,7 +437,8 @@ class EnsightSeriesWriter:
 def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_frame: int,
                        nc_stats_path: str = None, variables: list = None,
                        reference_frame: int = None, work_dir: str = None,
-                       surface_split: bool = False, face_names: list = None):
+                       surface_split: bool = False, face_names: list = None,
+                       blade_lrf_offset_deg: float = 0.0):
 
     '''
     Run the full pipeline for a range of frames within a single process:
@@ -440,16 +456,14 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
         Path to the combined HDF5 file to create.
     first_frame, last_frame : int
         Inclusive frame range to convert.
-    nc_stats_path : str
+    nc_stats_path : str, optional
         Path to saved `exaritool nc-stats.ri <snc_path> -detail` output,
-        for per-frame LRF_position/timing metadata. REQUIRED (despite
-        the default of None, kept only so a missing value raises this
-        function's own clear error instead of a generic TypeError) -
-        pf2ens's per-frame Geometry is the blade's EXACT position at
-        that specific frame, in the GLOBAL (rotating) frame, and needs
-        this table's own lrf_position_rad to be rotated back into the
-        LRF before being trusted as "the" blade geometry - see
-        EnsightSeriesWriter.add_frame's rotation_angle parameter.
+        for per-frame LRF_position/timing metadata (mid_s/lrf_position_rad,
+        written into Metadata - used by SurfaceVariable.timetrace()/
+        periodogram() for a real sampling rate). NOT needed for Geometry
+        correctness - pf2ens's Geometry doesn't rotate between frames and
+        needs no rotation correction (see raw_positions_to_ensight_frame()).
+        If omitted, those Metadata fields are left blank.
     variables : list of str, optional
         Which cell-data variables to keep (default: all present).
     reference_frame : int, optional
@@ -481,56 +495,45 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
         default) correctly captured both. Pass an explicit subset here if
         you only want specific face(s) (e.g. just one blade) instead of
         everything merged.
+    blade_lrf_offset_deg : float
+        Extra CONSTANT rotation [deg], about lrf_axis_direction through
+        lrf_axis_origin, applied to the stored Geometry only - SAME
+        parameter, same sign convention, same physical meaning as
+        SNCReader.to_h5()'s own blade_lrf_offset_deg (a fixed mounting/
+        modeling misalignment between the LRF's own nominal zero-
+        orientation and the blade's actual geometric orientation - a
+        property of the BLADE, not of which branch/tool is reading it,
+        so use the SAME value here as whatever was used for this case's
+        forces-branch conversion). 0 (no rotation) by default. See
+        EnsightSeriesWriter.add_frame()'s docstring for exactly what
+        this does and why it's applied after, not before,
+        surface_split's own matching.
 
     Note
     ----
     Opens snc_path a second time (via SNCReader) regardless of
-    surface_split, to copy lrf_axis_origin/lrf_axis_direction into the
-    output's Metadata (see EnsightSeriesWriter's docstring), re-centered
-    onto pf2ens's own bounding-box-midpoint convention the same way
-    Geometry/X,Y,Z already is (see raw_positions_to_ensight_frame() -
-    lrf_axis_origin is NOT pf2ens's coordinate origin, so this re-centering
-    is required, not optional, for radius-from-axis_origin to come out
-    correct downstream). The bbox that re-centering is computed from is
-    restricted to include_faces (the same faces actually sent to pf2ens,
-    resolved from face_names above) BEFORE the bbox itself is computed -
-    using the whole raw .snc file's surfel cloud instead is only correct
-    when face_names selects a symmetric-about-the-axis subset (or
-    everything), and silently WRONG otherwise (confirmed: a ~22cm bbox
-    shift on a real one-blade-out-of-several selection, enough to corrupt
-    every nearest-neighbor surface_split() match downstream - see that
-    function's docstring). This does read the full raw surfel cloud once
-    (surfel_centroids()) to compute that shift, even when
-    surface_split=False - not free, but avoids silently writing an
-    axis_origin inconsistent with this file's own geometry.
+    surface_split, to get lrf_axis_origin/lrf_axis_direction for the
+    output's Metadata, and to shift pf2ens's own output back onto the
+    raw .snc's absolute coordinate convention (both branches then agree
+    - see raw_positions_to_ensight_frame()). The shift used (written to
+    Metadata as axis_origin) is a HYBRID: lrf_axis_origin's own
+    component PERPENDICULAR to the rotation axis, but the selected
+    faces' own bounding-box midpoint's component ALONG the rotation
+    axis - confirmed directly against a real pf2ens export that pf2ens
+    uses exactly this mix, not a single uniform convention (two earlier
+    versions of this function each used ONE of the two uniformly for
+    all 3 components - lrf_axis_origin alone got radius right but left
+    the along-axis component off by several cm, corrupting
+    surface_split's Upper/Lower match; the selected faces' own bbox
+    center alone only happens to coincide with lrf_axis_origin for a
+    symmetric, e.g. whole-rotor, face selection, and was measurably
+    wrong - a ~22cm perpendicular offset - for an asymmetric one like a
+    single blade).
     '''
 
     reference_frame = first_frame if reference_frame is None else reference_frame
 
     frame_meta_by_index = parse_nc_stats(nc_stats_path) if nc_stats_path else {}
-
-    if not frame_meta_by_index:
-        raise ValueError(
-            "nc_stats_path is required - pf2ens's per-frame Geometry is the blade's EXACT "
-            "position at that SPECIFIC frame, in the GLOBAL (lab, rotating) frame, unlike the "
-            "raw .snc's own Geometry (which PowerFLOW always stores already de-rotated into the "
-            "LRF - see SNCReader's class docstring, 'NOTE on reference frames'). Without "
-            "rotating it back into the LRF using each frame's own angle (see "
-            "EnsightSeriesWriter.add_frame's rotation_angle), the stored Geometry ends up frozen "
-            "at whatever arbitrary azimuth the reference frame happened to be at instead of the "
-            "LRF's canonical orientation - confirmed on a real case (EDAT-nosimplification) as a "
-            "blade that doesn't look rotated at all / doesn't line up with span_axis/chord_axis. "
-            "nc_stats_path gives PowerFLOW's own authoritative per-frame angle "
-            "(lrf_position_rad) for this - pass `exaritool nc-stats.ri <snc_path> -detail` "
-            "output here (see parse_nc_stats())."
-        )
-    missing = [f for f in range(first_frame, last_frame + 1) if f not in frame_meta_by_index]
-    if missing:
-        raise ValueError(
-            f"nc_stats_path has no entry for frame(s) {missing[:5]}{'...' if len(missing) > 5 else ''} "
-            f"- it must cover every frame in [{first_frame},{last_frame}] for the Geometry "
-            "rotation correction (see above)."
-        )
 
     cleanup_work_dir = work_dir is None
     work_dir = work_dir or tempfile.mkdtemp(prefix='ensight_to_h5_')
@@ -538,17 +541,6 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
     ref_reader = SNCReader(snc_path)
     axis_direction = ref_reader.lrf_axis_direction
     axis_origin_raw = ref_reader.lrf_axis_origin * ref_reader.lattice_scales['LatticeLength']
-
-    # Each frame's own LRF rotation angle [rad], via PowerFLOW's authoritative
-    # nc_stats table (frame_meta_entry is given for every frame - guaranteed by
-    # the check above, so _rotation_angle()'s self-derived-formula fallback,
-    # which would need a row-vs-absolute-frame-number resolution this function
-    # has no safe way to do, is never actually reached here) - see
-    # EnsightSeriesWriter.add_frame's rotation_angle for what this corrects.
-    rotation_angles = {
-        f: ref_reader._rotation_angle(f, frame_meta_entry=frame_meta_by_index[f])
-        for f in range(first_frame, last_frame + 1)
-    }
 
     # Faces actually carrying surfel data in THIS .snc (not just every
     # face declared in the case's full geometry catalog - face_names has
@@ -580,33 +572,39 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
         "(or --face-names on the command line) to restrict to a subset instead."
     )
 
-    # raw_positions_to_ensight_frame() re-centers positions on the mesh's own
-    # bounding-box midpoint (pf2ens's convention, NOT lrf_axis_origin - see
-    # that function's docstring: pf2ens centers on whatever mesh it actually
-    # OUTPUT, i.e. only include_faces, not necessarily every face present in
-    # the raw .snc). Restricting raw_positions to include_faces BEFORE
-    # computing bbox_center is required, not optional, whenever face_names
-    # selects a proper subset that isn't itself symmetric about the rotation
-    # axis (e.g. one single blade out of several) - using the whole file's
-    # bbox there recovers a DIFFERENT point than pf2ens's own convention,
-    # silently "correct" only by coincidence on a case where the excluded
-    # faces don't shift the bbox. Confirmed wrong on a real single-blade
-    # face_names selection: ~22 cm offset between the whole-file bbox and
-    # the include_faces-only one, enough to corrupt every downstream
-    # nearest-neighbor surface_split() match (a KDTree match under a ~22 cm
-    # systematic offset routinely lands on the wrong side of a thin blade).
-    # axis_origin needs the exact same shift to stay consistent with the
-    # (already re-centered) Geometry/X,Y,Z this writes.
+    # reference_positions (for surface_split's nearest-neighbor match) are
+    # the raw .snc's own ABSOLUTE positions, unshifted - the SAME
+    # convention EnsightSeriesWriter.add_frame() brings pf2ens's own
+    # positions back into (frame.positions() + axis_origin - see that
+    # method and raw_positions_to_ensight_frame()), so the two point
+    # clouds being matched are expressed consistently.
     include_face_ids = [i for i, name in enumerate(ref_reader.face_names) if name in include_faces]
     face_surfel_mask = np.isin(face_tag, include_face_ids)
 
     raw_positions = ref_reader.surfel_centroids() * ref_reader.lattice_scales['LatticeLength']
     raw_positions = raw_positions[face_surfel_mask]
+
+    # axis_origin is a HYBRID of two different references, confirmed by
+    # direct comparison against a real pf2ens export (see
+    # raw_positions_to_ensight_frame()'s docstring): pf2ens centers the
+    # PERPENDICULAR-to-axis components on lrf_axis_origin, but the
+    # ALONG-axis component on the selected face's OWN bounding-box
+    # midpoint - using axis_origin_raw uniformly for all 3 components
+    # (an earlier version of this code) gets the perpendicular components
+    # right (so radius comes out correct) but leaves the along-axis
+    # component off by several cm, which is larger than a thin blade's
+    # own thickness and corrupts surface_split's Upper/Lower nearest-
+    # neighbor match (confirmed: collapsed a ~50/50 split down to a
+    # a few hundred stray points on a real case).
+    axis_direction_unit = axis_direction / np.linalg.norm(axis_direction)
     bbox_center = (raw_positions.min(axis=0) + raw_positions.max(axis=0)) / 2
-    axis_origin = axis_origin_raw - bbox_center
+    origin_along = (axis_origin_raw @ axis_direction_unit) * axis_direction_unit
+    origin_perp = axis_origin_raw - origin_along
+    bbox_along = (bbox_center @ axis_direction_unit) * axis_direction_unit
+    axis_origin = origin_perp + bbox_along
 
     if surface_split:
-        reference_positions = raw_positions - bbox_center
+        reference_positions = raw_positions
         reference_upper = ref_reader.surface_split()[face_surfel_mask]
     else:
         reference_positions = reference_upper = None
@@ -617,6 +615,7 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
         output_path, variables=variables, surface_split=surface_split,
         reference_positions=reference_positions, reference_upper=reference_upper,
         axis_origin=axis_origin, axis_direction=axis_direction,
+        blade_lrf_offset_deg=blade_lrf_offset_deg,
     )
 
     # Absolute, resolved BEFORE the loop below starts running pf2ens with
@@ -653,7 +652,6 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
                 frame_index=frame,
                 frame_meta=frame_meta_by_index.get(frame),
                 is_reference=(frame == reference_frame),
-                rotation_angle=rotation_angles[frame],
             )
 
             for fname in os.listdir(work_dir):

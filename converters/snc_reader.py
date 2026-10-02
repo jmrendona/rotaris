@@ -706,6 +706,7 @@ class SNCReader:
         geo.create_dataset('Area', data=areas[mask])
 
         data = h5f.create_group(data_path)
+        n_selected = int(mask.sum())
 
         has_force = all(name in self.variable_index for name in self._FORCE_VARIABLE_NAMES)
 
@@ -721,7 +722,21 @@ class SNCReader:
                     "silently reproducing the bug this fixes."
                 )
 
-            force_frames = []
+            # Pre-sized datasets, written one frame at a time below - see
+            # to_h5()'s "Memory" docstring note for why (an earlier version
+            # accumulated every frame's rotated force in a Python list
+            # first, i.e. the whole (n_frames, n_selected, 3) array in RAM
+            # before writing any of it - confirmed to OOM on a real
+            # DNS-resolution case).
+            force_dsets = {}
+            for name in self._FORCE_VARIABLE_NAMES:
+                key = name.replace(' ', '_')
+                dset = data.create_dataset(key, shape=(self.n_frames, n_selected), dtype='f4')
+                dset.attrs['lattice_unit_class'] = self.variable_lattice_units.get(name, '')
+                dset.attrs['physical_units'] = True
+                dset.attrs['rotated_to_lrf'] = True
+                force_dsets[name] = dset
+
             for frame in range(self.n_frames):
                 raw = np.stack(
                     [self.variable(name, frame=frame)[mask] for name in self._FORCE_VARIABLE_NAMES],
@@ -729,16 +744,9 @@ class SNCReader:
                 )  # (n_selected, 3) - still global frame, raw lattice units
                 entry = aligned_frame_meta[frame] if aligned_frame_meta is not None else None
                 angle = self._rotation_angle(frame, frame_meta_entry=entry) + blade_offset_rad
-                force_frames.append(self._rotate_about_axis(raw, axis_direction, -angle))
-
-            force_all = np.stack(force_frames, axis=0) * force_scale  # (n_frames, n_selected, 3)
-
-            for i, name in enumerate(self._FORCE_VARIABLE_NAMES):
-                key = name.replace(' ', '_')
-                dset = data.create_dataset(key, data=force_all[..., i])
-                dset.attrs['lattice_unit_class'] = self.variable_lattice_units.get(name, '')
-                dset.attrs['physical_units'] = True
-                dset.attrs['rotated_to_lrf'] = True
+                rotated = self._rotate_about_axis(raw, axis_direction, -angle) * force_scale
+                for i, name in enumerate(self._FORCE_VARIABLE_NAMES):
+                    force_dsets[name][frame, :] = rotated[:, i]
 
         for name in self.variable_names:
 
@@ -757,19 +765,21 @@ class SNCReader:
                     "translation; use pf2ens for that instead)."
                 )
 
-            values = np.stack(
-                [self.variable(name, frame=frame)[mask] for frame in range(self.n_frames)],
-                axis=0,
-            )
-            if is_physical:
-                values = values * force_scale
-
-            dset = data.create_dataset(key, data=values)
+            # Same frame-by-frame streaming as the force block above, and
+            # for the same reason (see to_h5()'s "Memory" docstring note).
+            dset = data.create_dataset(key, shape=(self.n_frames, n_selected), dtype='f4')
             dset.attrs['lattice_unit_class'] = unit_class
             dset.attrs['physical_units'] = is_physical
 
+            for frame in range(self.n_frames):
+                vals = self.variable(name, frame=frame)[mask]
+                if is_physical:
+                    vals = vals * force_scale
+                dset[frame, :] = vals
+
     def to_h5(self, output_path: str, face_name: str = None, surface_split: bool = False,
-              nc_stats_path: str = None, blade_lrf_offset_deg: float = 0.0):
+              nc_stats_path: str = None, blade_lrf_offset_deg: float = 0.0,
+              span_min: float = None, span_max: float = None, span_axis: int = 0):
 
         '''
         Write coordinates (centroids), normals, areas, all variables (for
@@ -851,6 +861,53 @@ class SNCReader:
             misaligned mounting shows up as a blade that doesn't sit
             flat along any single raw Cartesian axis, however
             span_axis/chord_axis/thickness_axis are permuted).
+        span_min, span_max : float, optional
+            Keep only surfels with span_min <= coords[:, span_axis] <=
+            span_max - an OOM-prevention crop at conversion time, for a
+            DNS-resolution .snc with too many surfels to hold every
+            frame's selected data in memory at once (see the Memory
+            note below), the same way FrictionLines/StripForces/
+            SurfaceVariable's own span_min/span_max already crop at
+            THEIR load time (for the same reason - see their
+            docstrings). NOT the same coordinate convention as those
+            classes' span_min/span_max, though: this operates on the
+            RAW coords[:, span_axis] value (meters, uncentered, this
+            file's own coordinate system) rather than any centered
+            convention - there's no "whole blade" extent known yet at
+            this point to center against (face_name's own selection IS
+            the only context available here), so pick a raw cutoff
+            directly (e.g. by a quick look at coords[:, span_axis].min()/
+            .max() for face_name's own mask first, outside this call, if
+            unsure where the hub/root actually sits in this file's raw
+            coordinates). None (default, either one): no crop on that
+            end - matches this class's existing behavior exactly.
+        span_axis : int
+            Which raw coordinate column (0=X, 1=Y, 2=Z) span_min/
+            span_max above apply to - same per-case axis convention as
+            every other span_axis in this project (see e.g.
+            FrictionLines.__init__). Only used if span_min/span_max is
+            given; default 0 (X) matches this project's most common
+            convention but isn't universal - set it to match this
+            specific case before relying on the default.
+
+        Memory
+        ------
+        Every Data/<variable> dataset is written FRAME BY FRAME, directly
+        into its own pre-sized HDF5 dataset, as float32 - NOT accumulated
+        into one big (n_frames, n_selected) array in RAM first (an
+        earlier version of this method did exactly that, for both
+        Surface_X/Y/Z-Force and every other variable - confirmed to OOM
+        on a real DNS-resolution case with a large surfel count: that
+        in-RAM accumulation scales as O(n_frames * n_selected), the same
+        total size as the FULL output file, held all at once, on top of
+        whatever the OS/h5py themselves need). Peak RAM for this part
+        now scales as O(n_selected) instead - one frame's own selected
+        surfels, not every frame's. Combined with span_min/span_max
+        above (shrinking n_selected itself, independent of this), the
+        two together are the direct equivalent of FrictionLines/
+        StripForces' own span_min-at-load-time fix for the SAME real
+        OOM-on-a-huge-case problem (see those classes' docstrings),
+        applied one step earlier, at conversion time.
         '''
 
         length_scale = self.lattice_scales['LatticeLength']
@@ -859,6 +916,10 @@ class SNCReader:
         areas = self.surfel_areas() * length_scale ** 2
 
         base_mask = self.face_mask(face_name) if face_name is not None else np.ones(len(areas), dtype=bool)
+        if span_min is not None:
+            base_mask = base_mask & (coords[:, span_axis] >= span_min)
+        if span_max is not None:
+            base_mask = base_mask & (coords[:, span_axis] <= span_max)
 
         frame_meta = parse_nc_stats(nc_stats_path) if nc_stats_path else None
         aligned_frame_meta = self._aligned_frame_meta(frame_meta) if frame_meta else None

@@ -11,11 +11,11 @@
 # routed through this file - only the values that are genuinely the same
 # everywhere they appear are pulled out here.
 
-master_path: /scratch/jmrendon/Rotor-alone/6e-5_6000rpm_HF
-case: 2025HF
+master_path: /scratch/jmrendon/Rotor-alone/15e-6_6000rpm
+case: 2025T
 
 files:
-  inst_force: 2025HF_forces_rotor.h5
+  inst_force: 2026_forces_rotor.h5
   avg_force: RA-beam-no-interaction_avg_forces_rotor.h5
   inst_pressure: 2025HF_pressure_rotor.h5
   avg_pressure: RA-beam_avg_pressure_rotor.h5
@@ -36,7 +36,7 @@ axes:
   span: 0
   chord: 2
   thickness: 1
-  skip_validation: false # set True if you have a highly swept blade
+  skip_validation: true # set True if you have a highly swept blade
 
 crop:
   span_min: 0.02

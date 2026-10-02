@@ -11,21 +11,21 @@
 # routed through this file - only the values that are genuinely the same
 # everywhere they appear are pulled out here.
 
-master_path: /scratch/jmrendon/EDAT/Iteration2/no-simplifications-VR12
-case: EDAT-nosimplification
+master_path: /scratch/jmrendon/DuctedFan/ductedfan_12e-5_vr12
+case: SAGE
 
 files:
-  inst_force: EDAT-nosimplification_forces_rotor.h5
+  inst_force: SAGE_forces_rotor.h5
   avg_force: RA-beam-no-interaction_avg_forces_rotor.h5
-  inst_pressure: EDAT-nosimplification_pressure_rotor.h5
+  inst_pressure: SAGE_pressure_rotor.h5
   avg_pressure: EDAT-nosimplification_avg-pressure_rotor.h5
 
 rotor:
-  r_tip: 0.39167
+  r_tip: 0.322
   rho_ref: 1.22523
-  rpm: 3500
+  rpm: 5252
   pref: 101325
-  c_ref: 0.05 # reference chord [m], used only when normalize is true below
+  c_ref: null # reference chord [m], used only when normalize is true below
 
 # NDA case: hide the blade's actual size in plots - radii become r/R,
 # chord becomes chord/c_ref, forces become C_T/C_Q-style coefficients,
@@ -44,11 +44,11 @@ crop:
   span_min: null
 
 friction:
-  reverse_chord: true
-  radii: [0.098, 0.196, 0.2937, 0.3525, 0.372]
+  reverse_chord: false
+  radii: [0.1, 0.21, 0.25, 0.27, 0.29]
 
 convergence:
-  dt: 0.0000503 # 0.00009524 -> forces
+  dt: 0.0000488 # 0.000063468 # forces
 
 blade_figsize: null # null for ISAE2 case
 

@@ -48,17 +48,17 @@ os.makedirs(os.path.join(master_path, 'data', 'pfluct'), exist_ok=True)
 # present, etc. - see skin_friction_manager.py for the Skin_Friction
 # case, and README.md, "Any surface variable at radii").
 
-print(40*'-')
-print('Opening SurfaceVariable file: ', os.path.join(master_path, avg_pressure_file))
-sv_pressure = SurfaceVariable(
-   os.path.join(master_path, avg_pressure_file),
-   r_tip=r_tip,
-   rho_ref=rho_ref,
-   rpm=rpm,
-   pref=pref,
-   c_ref=c_ref,
-   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
-)
+# print(40*'-')
+# print('Opening SurfaceVariable file: ', os.path.join(master_path, avg_pressure_file))
+# sv_pressure = SurfaceVariable(
+#    os.path.join(master_path, avg_pressure_file),
+#    r_tip=r_tip,
+#    rho_ref=rho_ref,
+#    rpm=rpm,
+#    pref=pref,
+#    c_ref=c_ref,
+#    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
+# )
 
 # "Convergence checking on pressure") - needs an INSTANTANEOUS (multi-
 # frame) pressure file, never a PowerFLOW-pre-averaged one, same
@@ -150,7 +150,7 @@ plot_autocorrelation_windows(
 # the raw-pressure equivalent, via variable_time_series_at_point() rather
 # than a Cp-based one:
 chord_pts = np.arange(0, 101, 10)
-span_pts = [50, 80, 90, 95]
+span_pts = [50, 70, 80, 90]
 
 for chord in chord_pts:
    for span in span_pts:
@@ -195,7 +195,7 @@ for chord in chord_pts:
 # edge (no automatic detection - check per case, see the method's docstring):
 print(40*'-')
 print('Plotting Cp vs x/c at several radii, average over all frames')
-sv_pressure.plot_cp_radii(
+sv_pressure_inst.plot_cp_radii(
    radii=radii,
    frame=None, stat='mean', span_min=span_min, reverse_chord=reverse_chord,
    savepath=os.path.join(master_path, f'images/cp/avg/cp_radii_avg_{case}.png'),
@@ -229,8 +229,8 @@ sv_pressure_inst.plot_cp_radii(
 # Whole-blade -Cp scatter, both surfaces:
 print(40*'-')
 print('Plotting -Cp surface scatter, average over all frames')
-sv_pressure.plot_variable_surface(
-   lambda s: -sv_pressure.cp(surface=s, stat='mean'),
+sv_pressure_inst.plot_variable_surface(
+   lambda s: -sv_pressure_inst.cp(surface=s, stat='mean'),
    cbar_label='-Cp', span_min=span_min, surface='Upper',
    figsize=blade_figsize,
    normalize=normalize,
@@ -298,7 +298,7 @@ sv_pressure_inst.plot_variable_surface(
 # Needs a real time axis: pass dt explicitly if this file has no usable
 # Metadata/mid_s (see README.md for when that's populated):
 
-span_pcts = np.arange(86, 101, 2)  # % of r/R
+span_pcts = np.arange(70, 90, 2)  # % of r/R
 chord_pcts = np.arange(0, 101, 10)  # % of x/c
 
 for span in span_pcts:
