@@ -516,19 +516,33 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
     output's Metadata, and to shift pf2ens's own output back onto the
     raw .snc's absolute coordinate convention (both branches then agree
     - see raw_positions_to_ensight_frame()). The shift used (written to
-    Metadata as axis_origin) is a HYBRID: lrf_axis_origin's own
-    component PERPENDICULAR to the rotation axis, but the selected
-    faces' own bounding-box midpoint's component ALONG the rotation
-    axis - confirmed directly against a real pf2ens export that pf2ens
-    uses exactly this mix, not a single uniform convention (two earlier
-    versions of this function each used ONE of the two uniformly for
-    all 3 components - lrf_axis_origin alone got radius right but left
-    the along-axis component off by several cm, corrupting
-    surface_split's Upper/Lower match; the selected faces' own bbox
-    center alone only happens to coincide with lrf_axis_origin for a
-    symmetric, e.g. whole-rotor, face selection, and was measurably
-    wrong - a ~22cm perpendicular offset - for an asymmetric one like a
-    single blade).
+    Metadata as axis_origin) combines TWO sources, one analytic and one
+    empirical, not a single formula:
+
+    - PERPENDICULAR to the rotation axis: lrf_axis_origin directly - a
+      fixed point ON the true rotation axis, correct regardless of
+      which faces are selected (confirmed reliable even for an
+      asymmetric, e.g. single-blade, selection - an earlier version of
+      this code instead used the selected faces' own bounding-box
+      midpoint uniformly for all 3 components, which only coincides
+      with lrf_axis_origin for a symmetric, e.g. whole-rotor, selection,
+      and was measurably wrong - a ~22cm offset - for an asymmetric
+      one).
+    - ALONG the rotation axis: measured EMPIRICALLY, from a direct
+      comparison between pf2ens's own reference-frame output and the
+      raw .snc's own bounding-box center for the same selected faces
+      (see the code just before the main frame loop) - NOT assumed from
+      the raw .snc's own bbox alone (a later, still-incorrect version of
+      this code tried exactly that: close, but pf2ens's own internal
+      re-meshing, splitting complex surfels into quads/trias for EnSight
+      compatibility, shifts ITS OWN bbox center by a few mm relative to
+      the raw surfel centroids - confirmed on a real case where that
+      residual was comparable to the blade's own thickness and still
+      corrupted surface_split's Upper/Lower match, even though the same
+      bbox-based approach worked on a different case where the residual
+      happened to be small enough not to matter). This is why pf2ens
+      now runs for reference_frame BEFORE the main per-frame loop below,
+      not inside it.
     '''
 
     reference_frame = first_frame if reference_frame is None else reference_frame
@@ -584,24 +598,25 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
     raw_positions = ref_reader.surfel_centroids() * ref_reader.lattice_scales['LatticeLength']
     raw_positions = raw_positions[face_surfel_mask]
 
-    # axis_origin is a HYBRID of two different references, confirmed by
-    # direct comparison against a real pf2ens export (see
-    # raw_positions_to_ensight_frame()'s docstring): pf2ens centers the
-    # PERPENDICULAR-to-axis components on lrf_axis_origin, but the
-    # ALONG-axis component on the selected face's OWN bounding-box
-    # midpoint - using axis_origin_raw uniformly for all 3 components
-    # (an earlier version of this code) gets the perpendicular components
-    # right (so radius comes out correct) but leaves the along-axis
-    # component off by several cm, which is larger than a thin blade's
-    # own thickness and corrupts surface_split's Upper/Lower nearest-
-    # neighbor match (confirmed: collapsed a ~50/50 split down to a
-    # a few hundred stray points on a real case).
+    # axis_origin's PERPENDICULAR-to-axis component is lrf_axis_origin
+    # directly (confirmed reliable even for an asymmetric, e.g. single-
+    # blade, selection - it's a fixed point ON the true rotation axis,
+    # independent of which faces happen to be selected). The ALONG-axis
+    # component, though, is measured EMPIRICALLY below, from pf2ens's own
+    # actual reference-frame output - NOT assumed from the raw .snc's own
+    # bounding-box midpoint (an earlier version of this code did that,
+    # and was close but not exact: pf2ens's own internal re-meshing
+    # (splitting complex surfels into quads/trias for EnSight
+    # compatibility - see EnsightFrame.normals()'s docstring) shifts its
+    # OWN bbox center by a few mm relative to the raw surfel centroids,
+    # confirmed on a real case where that residual was comparable to the
+    # blade's own thickness and corrupted surface_split's Upper/Lower
+    # match, even though the SAME approach worked on a different case
+    # where the residual happened to be small enough not to matter).
     axis_direction_unit = axis_direction / np.linalg.norm(axis_direction)
-    bbox_center = (raw_positions.min(axis=0) + raw_positions.max(axis=0)) / 2
     origin_along = (axis_origin_raw @ axis_direction_unit) * axis_direction_unit
     origin_perp = axis_origin_raw - origin_along
-    bbox_along = (bbox_center @ axis_direction_unit) * axis_direction_unit
-    axis_origin = origin_perp + bbox_along
+    raw_bbox_center = (raw_positions.min(axis=0) + raw_positions.max(axis=0)) / 2
 
     if surface_split:
         reference_positions = raw_positions
@@ -611,6 +626,30 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
 
     ref_reader.close()
 
+    # Absolute, resolved BEFORE pf2ens runs with cwd=work_dir - snc_path
+    # may have been given relative to the caller's own working directory,
+    # which is no longer where the subprocess runs.
+    snc_path_abs = os.path.abspath(snc_path)
+
+    # Run pf2ens for reference_frame FIRST (before the main loop below),
+    # so axis_origin's along-axis component can be measured from its
+    # ACTUAL output (see above) before axis_origin is finalized -
+    # EnsightSeriesWriter needs the complete axis_origin up front, since
+    # it applies to every frame via add_frame(). The resulting
+    # EnsightFrame is reused for reference_frame's own turn in the main
+    # loop instead of running pf2ens for it a second time.
+    ref_basename = f'frame_{reference_frame}'
+    subprocess.run(
+        ['pf2ens', '-f', str(reference_frame), '-b', ref_basename, '-i', ','.join(include_faces), snc_path_abs],
+        check=True, cwd=work_dir,
+    )
+    reference_ensight_frame = EnsightFrame(os.path.join(work_dir, ref_basename + '.case'))
+    ref_positions = reference_ensight_frame.positions()
+    pf2ens_bbox_center = (ref_positions.min(axis=0) + ref_positions.max(axis=0)) / 2
+    empirical_shift = raw_bbox_center - pf2ens_bbox_center
+    shift_along = (empirical_shift @ axis_direction_unit) * axis_direction_unit
+    axis_origin = origin_perp + shift_along
+
     writer = EnsightSeriesWriter(
         output_path, variables=variables, surface_split=surface_split,
         reference_positions=reference_positions, reference_upper=reference_upper,
@@ -618,35 +657,33 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
         blade_lrf_offset_deg=blade_lrf_offset_deg,
     )
 
-    # Absolute, resolved BEFORE the loop below starts running pf2ens with
-    # cwd=work_dir - snc_path may have been given relative to the caller's
-    # own working directory, which is no longer where the subprocess runs.
-    snc_path_abs = os.path.abspath(snc_path)
-
     try:
         for frame in range(first_frame, last_frame + 1):
 
-            # RELATIVE basename, run with cwd=work_dir - NOT
-            # os.path.join(work_dir, ...) (an absolute path). pf2ens
-            # writes whatever basename it's given straight into the
-            # .case file as the geometry/variable filenames; if that's
-            # already absolute, VTK's EnSight reader (which expects a
-            # .case file's referenced filenames to be relative to the
-            # .case file's own directory) blindly joins its own
-            # directory onto them ANYWAY, producing a doubled path like
-            # "/tmp/xxx//tmp/xxx/frame_1.geo.ens" - confirmed exactly
-            # this failure mode on the HPC (IndexError: index (0) out of
-            # range for this dataset, from an empty multiblock after
-            # that doubled path failed to open) - not a bad frame index,
-            # every frame hit it the same way.
-            basename = f'frame_{frame}'
+            if frame == reference_frame:
+                ensight_frame = reference_ensight_frame
+            else:
+                # RELATIVE basename, run with cwd=work_dir - NOT
+                # os.path.join(work_dir, ...) (an absolute path). pf2ens
+                # writes whatever basename it's given straight into the
+                # .case file as the geometry/variable filenames; if
+                # that's already absolute, VTK's EnSight reader (which
+                # expects a .case file's referenced filenames to be
+                # relative to the .case file's own directory) blindly
+                # joins its own directory onto them ANYWAY, producing a
+                # doubled path like "/tmp/xxx//tmp/xxx/frame_1.geo.ens" -
+                # confirmed exactly this failure mode on the HPC
+                # (IndexError: index (0) out of range for this dataset,
+                # from an empty multiblock after that doubled path
+                # failed to open) - not a bad frame index, every frame
+                # hit it the same way.
+                basename = f'frame_{frame}'
+                subprocess.run(
+                    ['pf2ens', '-f', str(frame), '-b', basename, '-i', ','.join(include_faces), snc_path_abs],
+                    check=True, cwd=work_dir,
+                )
+                ensight_frame = EnsightFrame(os.path.join(work_dir, basename + '.case'))
 
-            subprocess.run(
-                ['pf2ens', '-f', str(frame), '-b', basename, '-i', ','.join(include_faces), snc_path_abs],
-                check=True, cwd=work_dir,
-            )
-
-            ensight_frame = EnsightFrame(os.path.join(work_dir, basename + '.case'))
             writer.add_frame(
                 ensight_frame,
                 frame_index=frame,

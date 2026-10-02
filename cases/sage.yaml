@@ -21,7 +21,7 @@ files:
   avg_pressure: EDAT-nosimplification_avg-pressure_rotor.h5
 
 rotor:
-  r_tip: 0.322
+  r_tip: 0.3040
   rho_ref: 1.22523
   rpm: 5252
   pref: 101325
