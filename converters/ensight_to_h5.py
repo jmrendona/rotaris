@@ -217,13 +217,13 @@ class EnsightFrame:
 class EnsightSeriesWriter:
 
     '''
-    Incrementally build one HDF5 file out of multiple EnsightFrame reads,
-    one call to add_frame() per simulation frame. Geometry (positions
-    only - see Normals note below) is stored once, taken from whichever
-    frame is passed with is_reference=True - the blade's shape doesn't
-    change between frames, only its orientation, and each frame's own
-    geometry is only used to populate that one-time reference (see Note
-    below).
+    Incrementally build one HDF5 file out of one write_reference_geometry()
+    call plus one call to add_frame() per simulation frame. Geometry
+    (positions only - see Normals note below) is stored once, from
+    whichever frame write_reference_geometry() is given - the blade's
+    shape doesn't change between frames, only its orientation, and that
+    one frame's own geometry is only used to populate this one-time
+    reference (see Note below).
 
     Normals
     -------
@@ -334,28 +334,23 @@ class EnsightSeriesWriter:
         dataset.resize(dataset.shape[0] + 1, axis=0)
         dataset[-1] = value
 
-    def add_frame(self, frame: EnsightFrame, frame_index: int, frame_meta: dict = None,
-                  is_reference: bool = False):
+    def write_reference_geometry(self, frame: EnsightFrame, frame_index: int):
 
         '''
-        Append one frame's variables (and, if is_reference, the geometry)
-        to the growing HDF5 file.
-
-        Parameters
-        ----------
-        frame : EnsightFrame
-        frame_index : int
-            The simulation frame index this corresponds to (for metadata
-            and for looking up frame_meta, if not passed explicitly).
-        frame_meta : dict, optional
-            One entry from parse_nc_stats()'s return value (start_ts,
-            mid_ts, end_ts, mid_s, lrf_position_rad). If omitted, those
-            fields are left as NaN/0.
-        is_reference : bool
-            If True, this frame's positions are stored as the file's
-            Geometry (only meaningful the first time it's called).
-            Normals are deliberately not written here - see
-            EnsightFrame.normals().
+        Write Geometry/<label> (and, the first time this is called,
+        establish self._masks / the empty Data datasets - see
+        _init_datasets()) from `frame`'s own positions. Call this
+        EXACTLY once, BEFORE any add_frame() calls - add_frame() no
+        longer writes Geometry itself (an earlier version of this class
+        tied Geometry-writing to whichever add_frame() call happened to
+        be passed is_reference=True, which silently wrote NO Geometry
+        at all whenever that frame fell outside the range add_frame()
+        was actually called for - exactly what a chunked conversion
+        sharing one fixed reference_frame across chunks needs, for
+        merge_h5_chunks() to see byte-identical Geometry in every chunk
+        - confirmed as a real bug this way: every chunk but the one
+        containing reference_frame ended up with NO Geometry group at
+        all).
 
         frame.positions() is shifted by +self.axis_origin before use
         (undoing pf2ens's own internal lrf_axis_origin-centering - see
@@ -369,42 +364,64 @@ class EnsightSeriesWriter:
         Surface_X/Y/Z-Force in the forces branch.
 
         self.blade_lrf_offset_deg, if nonzero, additionally rotates ONLY
-        the stored Geometry (is_reference, below) about
-        self.axis_direction through self.axis_origin, by the SAME
-        constant angle/sign convention as SNCReader.to_h5()'s own
-        blade_lrf_offset_deg - a FIXED mounting/modeling misalignment
-        between the LRF's own nominal zero-orientation and the blade's
-        actual geometric orientation, independent of which branch
-        (forces or pressure) is doing the reading. Applied AFTER
-        surface_split's own nearest-neighbor match (which uses the
-        UNROTATED positions - rotating first would only misalign it
-        against reference_positions, which come from the SAME, still-
-        unrotated raw .snc convention), so classification is unaffected
-        by this purely cosmetic/orientation correction.
+        the stored Geometry about self.axis_direction through
+        self.axis_origin, by the SAME constant angle/sign convention as
+        SNCReader.to_h5()'s own blade_lrf_offset_deg - a FIXED mounting/
+        modeling misalignment between the LRF's own nominal zero-
+        orientation and the blade's actual geometric orientation,
+        independent of which branch (forces or pressure) is doing the
+        reading. Applied AFTER surface_split's own nearest-neighbor
+        match (which uses the UNROTATED positions - rotating first
+        would only misalign it against reference_positions, which come
+        from the SAME, still-unrotated raw .snc convention), so
+        classification is unaffected by this purely cosmetic/
+        orientation correction.
         '''
 
         positions = frame.positions()
         if self.axis_origin is not None:
             positions = positions + self.axis_origin
 
-        n_points = positions.shape[0]
+        if self._data_groups is None:
+            self._init_datasets(frame, positions.shape[0], positions)
+
+        geo_positions = positions
+        if self.blade_lrf_offset_deg != 0.0:
+            axis = self.axis_direction / np.linalg.norm(self.axis_direction)
+            blade_offset_rad = np.radians(self.blade_lrf_offset_deg)
+            geo_positions = SNCReader._rotate_about_axis(
+                geo_positions - self.axis_origin, axis, -blade_offset_rad) + self.axis_origin
+        for label, mask in self._masks.items():
+            geo = self._h5f.create_group(f'Geometry/{label}' if label else 'Geometry')
+            geo.create_dataset('X', data=geo_positions[mask, 0].astype('f4'))
+            geo.create_dataset('Y', data=geo_positions[mask, 1].astype('f4'))
+            geo.create_dataset('Z', data=geo_positions[mask, 2].astype('f4'))
+            geo.attrs['reference_frame_index'] = frame_index
+
+    def add_frame(self, frame: EnsightFrame, frame_index: int, frame_meta: dict = None):
+
+        '''
+        Append one frame's variables to the growing HDF5 file.
+        write_reference_geometry() must already have been called once
+        (establishes self._masks/the Data datasets this appends to, and
+        writes Geometry itself - no longer this method's job).
+
+        Parameters
+        ----------
+        frame : EnsightFrame
+        frame_index : int
+            The simulation frame index this corresponds to (for metadata
+            and for looking up frame_meta, if not passed explicitly).
+        frame_meta : dict, optional
+            One entry from parse_nc_stats()'s return value (start_ts,
+            mid_ts, end_ts, mid_s, lrf_position_rad). If omitted, those
+            fields are left as NaN/0.
+        '''
 
         if self._data_groups is None:
-            self._init_datasets(frame, n_points, positions)
-
-        if is_reference:
-            geo_positions = positions
-            if self.blade_lrf_offset_deg != 0.0:
-                axis = self.axis_direction / np.linalg.norm(self.axis_direction)
-                blade_offset_rad = np.radians(self.blade_lrf_offset_deg)
-                geo_positions = SNCReader._rotate_about_axis(
-                    geo_positions - self.axis_origin, axis, -blade_offset_rad) + self.axis_origin
-            for label, mask in self._masks.items():
-                geo = self._h5f.create_group(f'Geometry/{label}' if label else 'Geometry')
-                geo.create_dataset('X', data=geo_positions[mask, 0].astype('f4'))
-                geo.create_dataset('Y', data=geo_positions[mask, 1].astype('f4'))
-                geo.create_dataset('Z', data=geo_positions[mask, 2].astype('f4'))
-                geo.attrs['reference_frame_index'] = frame_index
+            raise RuntimeError(
+                "write_reference_geometry() must be called once before any add_frame() calls."
+            )
 
         for name in self.variables:
             key = name.replace(' ', '_')
@@ -657,6 +674,16 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
         blade_lrf_offset_deg=blade_lrf_offset_deg,
     )
 
+    # Written UNCONDITIONALLY here, regardless of whether reference_frame
+    # falls inside [first_frame, last_frame] - a chunked conversion
+    # sharing one fixed reference_frame across every chunk (so
+    # merge_h5_chunks() sees byte-identical Geometry everywhere) routinely
+    # has reference_frame OUTSIDE most chunks' own range (see
+    # EnsightSeriesWriter.write_reference_geometry()'s docstring for the
+    # real bug this fixes - every chunk but the one containing
+    # reference_frame silently ended up with no Geometry group at all).
+    writer.write_reference_geometry(reference_ensight_frame, reference_frame)
+
     try:
         for frame in range(first_frame, last_frame + 1):
 
@@ -688,7 +715,6 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
                 ensight_frame,
                 frame_index=frame,
                 frame_meta=frame_meta_by_index.get(frame),
-                is_reference=(frame == reference_frame),
             )
 
             for fname in os.listdir(work_dir):

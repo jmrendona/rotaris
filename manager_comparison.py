@@ -46,10 +46,10 @@ from bladeprocessor.case_comparison import plot_time_trace_compare, plot_vs_angl
 MASTER_PATH = '/scratch/jmrendon/Rotor-alone/comparison'  # TODO: real output path for saved figures
 
 CASES = {
-    '2025':     {'inst_force_file': '/path/to/2025/2025_forces_rotor.h5'},       # TODO
-    '2025-T':   {'inst_force_file': '/path/to/2025-T/2025T_forces_rotor.h5'},    # TODO
-    '2026':     {'inst_force_file': '/path/to/2026/2026_forces_rotor.h5'},       # TODO
-    '2026-DNS': {'inst_force_file': '/path/to/2026-DNS/2026DNS_forces_rotor.h5'},  # TODO
+    '2025':     {'inst_force_file': '/scratch/jmrendon/Rotor-alone/6e-5_6000rpm/2025_forces_rotor.h5'},       # TODO
+    '2025-T':   {'inst_force_file': '/scratch/jmrendon/Rotor-alone/6e-5_6000rpm-transition/2025T_forces_rotor.h5'},    # TODO
+    '2026':     {'inst_force_file': '/scratch/jmrendon/Rotor-alone/15e-6_6000rpm/2026_forces_rotor.h5'},       # TODO
+    '2026-DNS': {'inst_force_file': '/scratch/jmrendon/Rotor-alone/1e-5_6000rpm-dns/2026DNS_forces_rotor.h5'},  # TODO
 }
 
 # Shared rotor/geometry/crop parameters - see cases/6e-5_6000rpm_HF.yaml
@@ -57,10 +57,10 @@ CASES = {
 # ['2026-DNS']['rpm'] = ...) only if one case genuinely differs.
 R_TIP = 0.125
 RPM = 6000
-DT = 0.000056
+DT = 0.0000556
 SPAN_MIN = 0.02
 SPAN_AXIS, CHORD_AXIS, THICKNESS_AXIS = 0, 2, 1
-VALIDATE_AXES = True
+VALIDATE_AXES = False
 N_SPAN_BINS = 10  # matches this project's own 10-equally-spaced-strips convention (see thesis Fig. 5.6/5.7)
 
 # Which 3 (of N_SPAN_BINS) strips to compare - 0-indexed, root/mid/tip by
@@ -123,14 +123,14 @@ def main():
     print('Plotting cross-case raw time-trace comparison (Fig. 5.6 redesign)')
     plot_time_trace_compare(
         results, dt=DT, strips=STRIPS,
-        savepath=os.path.join(MASTER_PATH, 'images/forces/comparison/force_time_trace_compare.pdf'),
+        savepath=os.path.join(MASTER_PATH, 'images/forces/comparison/force_time_trace_compare.png'),
     )
 
     print(40 * '-')
     print('Plotting cross-case phase-locked/polar comparison (Fig. 5.7 redesign)')
     plot_vs_angle_compare(
         phase_locked_all, strips=STRIPS,
-        savepath=os.path.join(MASTER_PATH, 'images/forces/comparison/force_vs_angle_compare.pdf'),
+        savepath=os.path.join(MASTER_PATH, 'images/forces/comparison/force_vs_angle_compare.png'),
     )
 
 

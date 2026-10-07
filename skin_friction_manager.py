@@ -487,7 +487,7 @@ plot_integral_timescale(
 # style separation/reattachment discussion above for why the tip region
 # is a reasonable "hardest case" choice on this project's own geometry -
 # adjust per case).
-chord_pts = np.arange(0, 101, 10)
+chord_pts = np.arange(30, 101, 10)
 span_pts = [50, 70, 80, 90]
 
 for chord in chord_pts:
