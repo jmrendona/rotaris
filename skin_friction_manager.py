@@ -8,6 +8,10 @@ from bladeprocessor.convergence import plot_cumulative_stats
 from bladeprocessor.convergence import plot_cumulative_moments
 from bladeprocessor.convergence import plot_autocorrelation_windows
 from bladeprocessor.convergence import plot_integral_timescale
+from bladeprocessor.pod import pod
+from bladeprocessor.pod import plot_pod_mode
+from bladeprocessor.pod import plot_pod_energy
+from bladeprocessor.pod import plot_pod_temporal_coefficient
 
 # ------------- Wall shear / friction lines ------------- #
 #
@@ -43,7 +47,7 @@ dt = cfg.dt
 blade_figsize = cfg.blade_figsize
 frame_loop_step = cfg.frame_loop_step
 
-for _sub in ('cf/avg', 'cf/inst', 'cf/rms', 'cf/convergence/global', 'cf/convergence/local'):
+for _sub in ('cf/avg', 'cf/inst', 'cf/rms', 'cf/convergence/global', 'cf/convergence/local', 'cf/pod'):
 	os.makedirs(os.path.join(master_path, 'images', _sub), exist_ok=True)
 
 
@@ -587,3 +591,116 @@ for chord in chord_pts:
       cf_spanwise_point_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
       savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_spanwise_point_integral_timescale_s{span:03d}_c{chord:03d}_{case}.png'),
       )
+
+# ------------- Proper Orthogonal Decomposition (POD) of Cf ------------- #
+#
+# Objective, energy-ranked check of the spatial coherent structure
+# identified from the friction-line/critical-point analysis above (e.g.
+# an LSB/leading-edge-vortex-like structure and its migration with span -
+# see rotaris-docs/pod_section.tex for the full derivation). Computed on
+# ONE surface at a time (Upper/suction side here, where that structure
+# was identified - NOT both surfaces combined, matching how
+# cf_time_series() is already surface-specific), restricted to the span
+# window where the structure actually lives - NOT assumed to be the tip;
+# pod_span_min/pod_span_max below are a placeholder and must be set from
+# this case's own friction-line/critical-point findings above before the
+# result means anything.
+pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
+
+span_fl, chord_fl = fl._span_chord('Upper')
+radius_fl = fl._radius('Upper')
+pod_region = (span_fl >= pod_span_min) & (span_fl <= pod_span_max)
+
+print(40*'-')
+print(f'Running POD on Cf magnitude, Upper surface, {int(pod_region.sum())} points in the selected region')
+cf_pod_mag_data = fl.cf_time_series(surface='Upper', component=None)[:, pod_region]
+cf_pod_mag_result = pod(cf_pod_mag_data, n_modes=10)
+print('Cf magnitude POD energy fractions (first 5): ', cf_pod_mag_result['energy_fraction'][:5])
+
+print(40*'-')
+print('Plotting Cf magnitude POD energy spectrum')
+plot_pod_energy(
+   cf_pod_mag_result,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_energy_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf magnitude POD mode 1 (most energetic) on the actual blade geometry')
+plot_pod_mode(
+   radius_fl[pod_region], chord_fl[pod_region], cf_pod_mag_result, mode_index=0,
+   unit_label='$C_f$ mode amplitude [-]',
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode1_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf magnitude POD mode 1 temporal coefficient')
+plot_pod_temporal_coefficient(
+   cf_pod_mag_result, mode_index=0, dt=dt,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode1_coeff_{case}.png'),
+)
+
+# Chordwise component specifically - the signed quantity whose sign
+# reversal actually DEFINES separation/the LSB (see
+# rotaris-docs/cf_computations_section.tex, "Directional Components
+# versus Magnitude"), so the most direct POD counterpart to the
+# friction-line/critical-point story above:
+print(40*'-')
+print(f'Running POD on Cf chordwise component, Upper surface, {int(pod_region.sum())} points in the selected region')
+cf_pod_chordwise_data = fl.cf_time_series(surface='Upper', component='chordwise')[:, pod_region]
+cf_pod_chordwise_result = pod(cf_pod_chordwise_data, n_modes=10)
+print('Cf chordwise POD energy fractions (first 5): ', cf_pod_chordwise_result['energy_fraction'][:5])
+
+print(40*'-')
+print('Plotting Cf chordwise POD energy spectrum')
+plot_pod_energy(
+   cf_pod_chordwise_result,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_energy_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf chordwise POD mode 1 (most energetic) on the actual blade geometry')
+plot_pod_mode(
+   radius_fl[pod_region], chord_fl[pod_region], cf_pod_chordwise_result, mode_index=0,
+   unit_label='$C_{f,chordwise}$ mode amplitude [-]',
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode1_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf chordwise POD mode 1 temporal coefficient')
+plot_pod_temporal_coefficient(
+   cf_pod_chordwise_result, mode_index=0, dt=dt,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode1_coeff_{case}.png'),
+)
+
+# Spanwise component specifically - the signed quantity whose sign
+# reversal actually DEFINES separation/the LSB (see
+# rotaris-docs/cf_computations_section.tex, "Directional Components
+# versus Magnitude"), so the most direct POD counterpart to the
+# friction-line/critical-point story above:
+print(40*'-')
+print(f'Running POD on Cf spanwise component, Upper surface, {int(pod_region.sum())} points in the selected region')
+cf_pod_spanwise_data = fl.cf_time_series(surface='Upper', component='spanwise')[:, pod_region]
+cf_pod_spanwise_result = pod(cf_pod_spanwise_data, n_modes=10)
+print('Cf spanwise POD energy fractions (first 5): ', cf_pod_spanwise_result['energy_fraction'][:5])
+
+print(40*'-')
+print('Plotting Cf spanwise POD energy spectrum')
+plot_pod_energy(
+   cf_pod_spanwise_result,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_energy_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf spanwise POD mode 1 (most energetic) on the actual blade geometry')
+plot_pod_mode(
+   radius_fl[pod_region], chord_fl[pod_region], cf_pod_spanwise_result, mode_index=0,
+   unit_label='$C_{f,spanwise}$ mode amplitude [-]',
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode1_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf spanwise POD mode 1 temporal coefficient')
+plot_pod_temporal_coefficient(
+   cf_pod_spanwise_result, mode_index=0, dt=dt,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode1_coeff_{case}.png'),
+)

@@ -11,6 +11,10 @@ from bladeprocessor.convergence import plot_autocorrelation_windows
 from bladeprocessor.convergence import plot_cumulative_moments
 from bladeprocessor.convergence import plot_integral_timescale
 from bladeprocessor.convergence import plot_cycle_correlation
+from bladeprocessor.pod import pod
+from bladeprocessor.pod import plot_pod_mode
+from bladeprocessor.pod import plot_pod_energy
+from bladeprocessor.pod import plot_pod_temporal_coefficient
 
 cfg = load_case_config()
 master_path = cfg.master_path
@@ -33,7 +37,7 @@ dt = cfg.dt
 blade_figsize = cfg.blade_figsize
 frame_loop_step = cfg.frame_loop_step
 
-for _sub in ('cp/avg', 'cp/inst', 'cp/rms', 'cp/convergence/global', 'cp/convergence/local', 'pfluct/spectra'):
+for _sub in ('cp/avg', 'cp/inst', 'cp/rms', 'cp/convergence/global', 'cp/convergence/local', 'cp/pod', 'pfluct/spectra'):
 	os.makedirs(os.path.join(master_path, 'images', _sub), exist_ok=True)
 
 os.makedirs(os.path.join(master_path, 'data', 'pfluct'), exist_ok=True)
@@ -354,6 +358,62 @@ for span in span_pcts:
 #    figsize=blade_figsize,
 #    savepath=os.path.join(master_path, f'images/cp/cp_surface_with_stagnation_{case}.png'),
 # )
+
+# ------------- Proper Orthogonal Decomposition (POD) of Cp ------------- #
+#
+# Objective, energy-ranked check of the spatial coherent structure
+# identified from the pressure/separation analysis above (e.g. an
+# LSB/leading-edge-vortex-like structure and its migration with span -
+# see rotaris-docs/pod_section.tex for the full derivation). Computed on
+# ONE surface at a time (Upper/suction side here, where that structure
+# was identified - NOT both surfaces combined, matching how
+# cp_time_series()/variable_time_series() are already surface-specific),
+# restricted to the span window where the structure actually lives - NOT
+# assumed to be the tip; pod_span_min/pod_span_max below are a
+# placeholder and must be set from this case's own findings above before
+# the result means anything.
+#
+# Note (see bladeprocessor/pod.py's own module docstring): unlike
+# FrictionLines, SurfaceVariable's cp_time_series()/variable_time_series()
+# do not support span cropping at the HDF5-read level - they always read
+# every point, every frame, of the requested surface first. The region
+# mask below is only applied after that eager read.
+pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
+
+span_sv, chord_sv = sv_pressure_inst._span_chord('Upper')
+radius_sv = sv_pressure_inst._radius('Upper')
+pod_region = (span_sv >= pod_span_min) & (span_sv <= pod_span_max)
+
+print(40*'-')
+print(f'Running POD on {p_label}, Upper surface, {int(pod_region.sum())} points in the selected region')
+if normalize:
+   cp_pod_data = sv_pressure_inst.cp_time_series(surface='Upper')[:, pod_region]
+else:
+   cp_pod_data = sv_pressure_inst.variable_time_series('static_pressure', surface='Upper')[:, pod_region]
+cp_pod_result = pod(cp_pod_data, n_modes=10)
+print(f'{p_label} POD energy fractions (first 5): ', cp_pod_result['energy_fraction'][:5])
+
+print(40*'-')
+print(f'Plotting {p_label} POD energy spectrum')
+plot_pod_energy(
+   cp_pod_result,
+   savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_energy_{case}.png'),
+)
+
+print(40*'-')
+print(f'Plotting {p_label} POD mode 1 (most energetic) on the actual blade geometry')
+plot_pod_mode(
+   radius_sv[pod_region], chord_sv[pod_region], cp_pod_result, mode_index=0,
+   unit_label=f'{p_label} mode amplitude [-]',
+   savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode1_{case}.png'),
+)
+
+print(40*'-')
+print(f'Plotting {p_label} POD mode 1 temporal coefficient')
+plot_pod_temporal_coefficient(
+   cp_pod_result, mode_index=0, dt=dt,
+   savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode1_coeff_{case}.png'),
+)
 
 # # ------------- Cases comparison plotted into a commo grid ------------- #
 # #
