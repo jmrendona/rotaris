@@ -609,12 +609,13 @@ pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case'
 
 span_fl, chord_fl = fl._span_chord('Upper')
 radius_fl = fl._radius('Upper')
+area_fl = fl._area('Upper')
 pod_region = (span_fl >= pod_span_min) & (span_fl <= pod_span_max)
 
 print(40*'-')
 print(f'Running POD on Cf magnitude, Upper surface, {int(pod_region.sum())} points in the selected region')
 cf_pod_mag_data = fl.cf_time_series(surface='Upper', component=None)[:, pod_region]
-cf_pod_mag_result = pod(cf_pod_mag_data, n_modes=10)
+cf_pod_mag_result = pod(cf_pod_mag_data, n_modes=10, weights=area_fl[pod_region])
 print('Cf magnitude POD energy fractions (first 5): ', cf_pod_mag_result['energy_fraction'][:5])
 
 print(40*'-')
@@ -647,7 +648,7 @@ plot_pod_temporal_coefficient(
 print(40*'-')
 print(f'Running POD on Cf chordwise component, Upper surface, {int(pod_region.sum())} points in the selected region')
 cf_pod_chordwise_data = fl.cf_time_series(surface='Upper', component='chordwise')[:, pod_region]
-cf_pod_chordwise_result = pod(cf_pod_chordwise_data, n_modes=10)
+cf_pod_chordwise_result = pod(cf_pod_chordwise_data, n_modes=10, weights=area_fl[pod_region])
 print('Cf chordwise POD energy fractions (first 5): ', cf_pod_chordwise_result['energy_fraction'][:5])
 
 print(40*'-')
@@ -680,7 +681,7 @@ plot_pod_temporal_coefficient(
 print(40*'-')
 print(f'Running POD on Cf spanwise component, Upper surface, {int(pod_region.sum())} points in the selected region')
 cf_pod_spanwise_data = fl.cf_time_series(surface='Upper', component='spanwise')[:, pod_region]
-cf_pod_spanwise_result = pod(cf_pod_spanwise_data, n_modes=10)
+cf_pod_spanwise_result = pod(cf_pod_spanwise_data, n_modes=10, weights=area_fl[pod_region])
 print('Cf spanwise POD energy fractions (first 5): ', cf_pod_spanwise_result['energy_fraction'][:5])
 
 print(40*'-')

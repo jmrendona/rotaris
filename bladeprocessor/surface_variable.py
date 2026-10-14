@@ -110,10 +110,12 @@ class SurfaceVariable:
                 self.frame_times = None
 
             self.positions = {}
+            self.areas = {}
             self.available_variables = {}
             for label in ('Upper', 'Lower'):
                 geo = f[f'Geometry/{label}']
                 self.positions[label] = np.column_stack([geo['X'][:], geo['Y'][:], geo['Z'][:]])
+                self.areas[label] = geo['Area'][:]
                 self.available_variables[label] = list(f[f'Data/{label}'].keys())
 
     def _radius(self, surface: str):
@@ -138,6 +140,18 @@ class SurfaceVariable:
         chord = chord - (chord.min() + chord.max()) / 2
 
         return span, chord
+
+    def _area(self, surface: str):
+
+        '''
+        Per-surfel physical area [m^2], straight from the raw
+        Geometry/<surface>/Area dataset - see FrictionLines._area().
+        Needed e.g. as the `weights` argument to bladeprocessor/pod.py's
+        pod() for an area-weighted POD inner product on a non-uniform
+        mesh.
+        '''
+
+        return self.areas[surface]
 
     def _q_ref(self, surface: str):
 

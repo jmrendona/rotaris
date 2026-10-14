@@ -212,10 +212,12 @@ class FrictionLines:
 
                 normals_full = np.column_stack(
                     [geo['Normal_X'][:], geo['Normal_Y'][:], geo['Normal_Z'][:]])
+                area_full = geo['Area'][:]
 
                 self.surfaces[label] = {
                     'positions': positions_full[mask],
                     'normals': normals_full[mask],
+                    'area': area_full[mask],
                     'force': np.stack([
                         data['Surface_X-Force'][:, mask],
                         data['Surface_Y-Force'][:, mask],
@@ -282,6 +284,19 @@ class FrictionLines:
         chord = positions[:, self.chord_axis] - self._chord_center[surface]
 
         return span, chord
+
+    def _area(self, surface: str):
+
+        '''
+        Per-surfel physical area [m^2], straight from the raw
+        Geometry/<surface>/Area dataset (the same field StripForces uses
+        for F = sum(f*A) - see eq:sectional-force in
+        strip_forces_section.tex). Needed e.g. as the `weights` argument
+        to bladeprocessor/pod.py's pod() for an area-weighted POD inner
+        product on a non-uniform mesh (see that module's docstring).
+        '''
+
+        return self.surfaces[surface]['area']
 
     def _force(self, surface: str, frame: int = None):
 
