@@ -17,7 +17,7 @@ case: 2026DNS
 files:
   inst_force: 2026DNS_forces_rotor.h5
   avg_force: RA-beam-no-interaction_avg_forces_rotor.h5
-  inst_pressure: 2025HF_pressure_rotor.h5
+  inst_pressure: 2026DNS_pressure_rotor.h5
   avg_pressure: RA-beam_avg_pressure_rotor.h5
 
 rotor:
@@ -46,7 +46,7 @@ friction:
   radii: [0.045, 0.072, 0.100, 0.117, 0.122]
 
 convergence:
-  dt: 0.0000556
+  dt: 0.000005
 
 blade_figsize: null # null for ISAWE2 case
 

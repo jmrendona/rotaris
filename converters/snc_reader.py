@@ -921,7 +921,20 @@ class SNCReader:
         if span_max is not None:
             base_mask = base_mask & (coords[:, span_axis] <= span_max)
 
-        frame_meta = parse_nc_stats(nc_stats_path) if nc_stats_path else None
+        frame_meta = None
+        if nc_stats_path:
+            try:
+                frame_meta = parse_nc_stats(nc_stats_path)
+            except ValueError as exc:
+                # Falls back to _rotation_angle()'s own self-derived formula
+                # below (same as passing nc_stats_path=None) - a file that
+                # doesn't parse (e.g. a custom/partial .snc export with no
+                # 'Frame ... LRF_position(rad)' table at all) shouldn't
+                # block an otherwise-working conversion; this value was
+                # only ever PREFERRED over the self-derived formula, never
+                # required (see this method's own nc_stats_path docstring).
+                print(f"WARNING: nc_stats_path='{nc_stats_path}' did not parse ({exc}) - "
+                      "falling back to the self-derived rotation-angle formula.")
         aligned_frame_meta = self._aligned_frame_meta(frame_meta) if frame_meta else None
         blade_offset_rad = np.radians(blade_lrf_offset_deg)
 

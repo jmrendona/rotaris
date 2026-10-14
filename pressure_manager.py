@@ -95,11 +95,16 @@ if normalize:
    # Cp-based series (pref subtracted, divided by LOCAL q_ref per point -
    # see cp_time_series()) instead of raw pressure - hides the actual
    # dynamic pressure scale (tied to r_tip/rpm) the same way normalize
-   # hides radius/chord elsewhere.
-   p_series = sv_pressure_inst.cp_time_series(surface='Upper').mean(axis=1)[:-2]  # drop corrupted last frame(s)
+   # hides radius/chord elsewhere. cp_spatial_mean_time_series() (not
+   # cp_time_series().mean(axis=1)) - streams through the file a few
+   # frames at a time instead of loading the full (n_frames, n_points)
+   # array first, which OOM'd on a real DNS-resolution case (a (3674,
+   # 84898396) float32 array is 1.13 TiB; the spatial-mean result itself
+   # is only one scalar per frame).
+   p_series = sv_pressure_inst.cp_spatial_mean_time_series(surface='Upper')[:-2]  # drop corrupted last frame(s)
    p_ylabel, p_label = '$C_p$ [-]', '$C_p$'
 else:
-   p_series = sv_pressure_inst.variable_time_series('static_pressure', surface='Upper').mean(axis=1)[:-2]  # drop corrupted last frame(s)
+   p_series = sv_pressure_inst.variable_spatial_mean_time_series('static_pressure', surface='Upper')[:-2]  # drop corrupted last frame(s)
    p_ylabel, p_label = 'Pressure [Pa]', 'Pressure'
 
 print(40*'-')
@@ -161,7 +166,8 @@ for chord in chord_pts:
       print(40*'-')
       print('Plotting cumulative mean+variance of pressure at a single point near the tip')
       p_point_series, p_point_info = sv_pressure_inst.variable_time_series_at_point(
-         'static_pressure', span_pct=span, chord_pct=chord, surface='Upper')
+         'static_pressure', span_pct=span, chord_pct=chord, surface='Upper')  # drop corrupted last frame(s)
+      p_point_series = p_point_series[:-2]
 
       print('Point actually used: ', p_point_info)
       plot_cumulative_stats(
@@ -373,11 +379,16 @@ for span in span_pcts:
 # placeholder and must be set from this case's own findings above before
 # the result means anything.
 #
-# Note (see bladeprocessor/pod.py's own module docstring): unlike
-# FrictionLines, SurfaceVariable's cp_time_series()/variable_time_series()
-# do not support span cropping at the HDF5-read level - they always read
-# every point, every frame, of the requested surface first. The region
-# mask below is only applied after that eager read.
+# cp_time_series_region()/variable_time_series_region() (not
+# cp_time_series()/variable_time_series() + a post-hoc column crop) -
+# the crop is applied PER FRAME-CHUNK, during the streamed read itself,
+# never holding the full (n_frames, n_points) array in memory at once
+# (confirmed a real OOM on a DNS-resolution case otherwise - see those
+# methods' docstrings). The OUTPUT is still held in full, though - if
+# pod_span_min/pod_span_max below select too much of the blade for that
+# to fit, the fix is a SMALLER region, not a different reading strategy;
+# they're a placeholder and must be set from this case's own findings
+# above before the result means anything either way.
 pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
 
 span_sv, chord_sv = sv_pressure_inst._span_chord('Upper')
@@ -387,9 +398,9 @@ pod_region = (span_sv >= pod_span_min) & (span_sv <= pod_span_max)
 print(40*'-')
 print(f'Running POD on {p_label}, Upper surface, {int(pod_region.sum())} points in the selected region')
 if normalize:
-   cp_pod_data = sv_pressure_inst.cp_time_series(surface='Upper')[:, pod_region]
+   cp_pod_data = sv_pressure_inst.cp_time_series_region(surface='Upper', region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
 else:
-   cp_pod_data = sv_pressure_inst.variable_time_series('static_pressure', surface='Upper')[:, pod_region]
+   cp_pod_data = sv_pressure_inst.variable_time_series_region('static_pressure', surface='Upper', region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
 cp_pod_result = pod(cp_pod_data, n_modes=10)
 print(f'{p_label} POD energy fractions (first 5): ', cp_pod_result['energy_fraction'][:5])
 

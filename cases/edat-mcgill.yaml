@@ -15,9 +15,9 @@ master_path: /scratch/jmrendon/EDAT-McGill/4e-5_6000rpm
 case: EDAT-McGill
 
 files:
-  inst_force: McGill_inst-forces_rotor.h5
+  inst_force: EDAT-McGill_inst-forces_rotor.h5
   avg_force: RA-beam-no-interaction_avg_forces_rotor.h5
-  inst_pressure: EDAT-nosimplification_pressure_rotor.h5
+  inst_pressure: EDAT-McGill_inst-pressure_rotor.h5
   avg_pressure: EDAT-nosimplification_avg-pressure_rotor.h5
 
 rotor:
@@ -41,14 +41,14 @@ axes:
   skip_validation: true # set True if you have a highly swept blade
 
 crop:
-  span_min: 0.01
+  span_min: 0.015
 
 friction:
-  reverse_chord: true
-  radii: [0.015, 0.025, 0.040, 0.050, 0.070]
+  reverse_chord: false
+  radii: [0.025, 0.040, 0.050, 0.070, 0.075]
 
 convergence:
-  dt: 0.0000555 # 0.00005 -> pressure
+  dt: 0.00005 # 0.00005 -> pressure
 
 blade_figsize: null # null for ISAE2 case
 

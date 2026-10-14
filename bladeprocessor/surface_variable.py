@@ -148,7 +148,8 @@ class SurfaceVariable:
 
         return 0.5 * self.rho_ref * (omega * r) ** 2
 
-    def variable(self, name: str, surface: str = 'Upper', frame: int = None, stat: str = 'mean'):
+    def variable(self, name: str, surface: str = 'Upper', frame: int = None, stat: str = 'mean',
+                 frame_chunk_size: int = 50):
 
         '''
         Raw per-surfel values of Data/<surface>/<name>.
@@ -176,6 +177,22 @@ class SurfaceVariable:
             quantity with a large steady component looks dominated by
             that rather than by its fluctuation. Rarely what you want;
             provided for completeness.
+        frame_chunk_size : int
+            Only used when frame is None (a `stat` reduction). The
+            reduction is computed by STREAMING through the dataset this
+            many frames at a time, never holding the full
+            (n_frames, n_points) array in memory at once - see
+            variable_spatial_mean_time_series()'s docstring for why
+            (same real OOM on a DNS-resolution case, this time from
+            data.mean(axis=0)/similar needing the full array first - this
+            is what plot_cp_radii()/plot_variable_surface(stat='mean' or
+            'rms')/cp() all actually call underneath, so this one fix
+            covers all of them). 'rms' reads the file TWICE (once for the
+            mean, once for the deviations from it - a genuine second
+            pass, not avoidable without either storing the whole array
+            or an online/Welford-style running variance, which was not
+            judged worth the added complexity here); 'mean'/'raw_rms'
+            read it once.
 
         Returns
         -------
@@ -196,16 +213,32 @@ class SurfaceVariable:
                     raise ValueError(f"frame={frame} out of range (n_frames={self.n_frames})")
                 return f[key][frame]
 
-            data = f[key][:]
+            dset = f[key]
+            n_frames_total, n_points = dset.shape
 
-        if stat == 'mean':
-            return data.mean(axis=0)
-        elif stat == 'rms':
-            return np.sqrt(((data - data.mean(axis=0)) ** 2).mean(axis=0))
-        elif stat == 'raw_rms':
-            return np.sqrt((data ** 2).mean(axis=0))
-        else:
-            raise ValueError(f"Unknown stat '{stat}' - use 'mean', 'rms', or 'raw_rms'.")
+            if stat not in ('mean', 'rms', 'raw_rms'):
+                raise ValueError(f"Unknown stat '{stat}' - use 'mean', 'rms', or 'raw_rms'.")
+
+            total = np.zeros(n_points, dtype='f8')
+            for start in range(0, n_frames_total, frame_chunk_size):
+                end = min(start + frame_chunk_size, n_frames_total)
+                chunk = dset[start:end, :]
+                total += (chunk.astype('f8') ** 2).sum(axis=0) if stat == 'raw_rms' else chunk.sum(axis=0)
+
+            if stat == 'raw_rms':
+                return np.sqrt(total / n_frames_total).astype(dset.dtype)
+
+            mean = total / n_frames_total
+            if stat == 'mean':
+                return mean.astype(dset.dtype)
+
+            # stat == 'rms': second pass, now that `mean` is known.
+            total_sq_dev = np.zeros(n_points, dtype='f8')
+            for start in range(0, n_frames_total, frame_chunk_size):
+                end = min(start + frame_chunk_size, n_frames_total)
+                total_sq_dev += ((dset[start:end, :] - mean[None, :]) ** 2).sum(axis=0)
+
+            return np.sqrt(total_sq_dev / n_frames_total).astype(dset.dtype)
 
     def cp(self, surface: str = 'Upper', frame: int = None, stat: str = 'mean',
            pressure_variable: str = 'static_pressure'):
@@ -314,6 +347,196 @@ class SurfaceVariable:
 
         return (p - self.pref) / q_ref[None, :]
 
+    def variable_spatial_mean_time_series(self, name: str, surface: str = 'Upper',
+                                           frame_chunk_size: int = 50) -> np.ndarray:
+
+        '''
+        Spatial mean of Data/<surface>/<name> at EVERY frame - i.e.
+        variable_time_series(name, surface).mean(axis=1), but computed by
+        STREAMING through the dataset a few frames at a time, never
+        holding the full (n_frames, n_points) array in memory at once.
+
+        Use this (not variable_time_series(...).mean(axis=1)) whenever
+        n_points is large enough that the full array doesn't fit in RAM
+        - confirmed a real OOM on a DNS-resolution case: a (3674,
+        84898396) float32 array is 1.13 TiB, while the actual result
+        needed is just one scalar per frame. Peak memory here instead
+        scales as O(frame_chunk_size * n_points) - tune frame_chunk_size
+        down further for an even larger case, or up (fewer, larger HDF5
+        reads) if memory allows and read throughput matters more.
+
+        Parameters
+        ----------
+        name : str
+            Dataset name under Data/<surface> - see variable().
+        frame_chunk_size : int
+            How many frames to read from disk at once. 50 by default -
+            lower this for a case where n_points alone (regardless of
+            frame count) is already large enough that 50 frames' worth
+            doesn't fit.
+
+        Returns
+        -------
+        np.ndarray, shape (n_frames,)
+        '''
+
+        with h5py.File(self.filename, 'r') as f:
+            key = f'Data/{surface}/{name}'
+            if key not in f:
+                raise KeyError(
+                    f"'{name}' not found under Data/{surface} of '{self.filename}' - "
+                    f"available: {self.available_variables[surface]}"
+                )
+            dset = f[key]
+            n_frames = dset.shape[0]
+            means = np.empty(n_frames, dtype='f8')
+            for start in range(0, n_frames, frame_chunk_size):
+                end = min(start + frame_chunk_size, n_frames)
+                means[start:end] = dset[start:end, :].mean(axis=1)
+
+        return means
+
+    def cp_spatial_mean_time_series(self, surface: str = 'Upper',
+                                     pressure_variable: str = 'static_pressure',
+                                     frame_chunk_size: int = 50) -> np.ndarray:
+
+        '''
+        Spatial mean of Cp = (p - pref) / q_ref at EVERY frame - i.e.
+        cp_time_series(surface, pressure_variable).mean(axis=1), but
+        streamed the same way variable_spatial_mean_time_series() is -
+        see that method's docstring for why (same real OOM on a large
+        case, same fix).
+
+        Returns
+        -------
+        np.ndarray, shape (n_frames,)
+        '''
+
+        if self.rho_ref is None or self.rpm is None:
+            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cp.")
+        if self.pref is None:
+            raise ValueError("pref must be set (in __init__) to compute Cp.")
+
+        q_ref = self._q_ref(surface)
+
+        with h5py.File(self.filename, 'r') as f:
+            key = f'Data/{surface}/{pressure_variable}'
+            if key not in f:
+                raise KeyError(
+                    f"'{pressure_variable}' not found under Data/{surface} of '{self.filename}' - "
+                    f"available: {self.available_variables[surface]}"
+                )
+            dset = f[key]
+            n_frames = dset.shape[0]
+            means = np.empty(n_frames, dtype='f8')
+            for start in range(0, n_frames, frame_chunk_size):
+                end = min(start + frame_chunk_size, n_frames)
+                cp_chunk = (dset[start:end, :] - self.pref) / q_ref[None, :]
+                means[start:end] = cp_chunk.mean(axis=1)
+
+        return means
+
+    def variable_time_series_region(self, name: str, surface: str, region_mask: np.ndarray,
+                                     frame_chunk_size: int = 50) -> np.ndarray:
+
+        '''
+        Raw per-surfel values of Data/<surface>/<name> at EVERY frame,
+        restricted to region_mask's own selected points - i.e.
+        variable_time_series(name, surface)[:, region_mask], but read by
+        STREAMING a few frames at a time (see
+        variable_spatial_mean_time_series()'s docstring for why - the
+        SAME real OOM on a DNS-resolution case, now for POD-style
+        analysis instead of a spatial mean), the column crop applied to
+        each chunk BEFORE accumulating - never holds more than
+        frame_chunk_size frames' worth of EVERY point in memory at once,
+        unlike variable_time_series(name, surface)[:, region_mask] (an
+        earlier version of e.g. pressure_manager.py's POD block did
+        exactly that - eager full read, THEN crop - which doesn't help
+        at all, the full (n_frames, n_points) array is already built by
+        the time the crop runs).
+
+        The OUTPUT here is still shape (n_frames, region_mask.sum()) and
+        IS held in memory in full - if region_mask selects too much of
+        the blade for that to fit, the fix is a SMALLER region (e.g.
+        pressure_manager.py's own pod_span_min/pod_span_max), not a
+        different reading strategy - this method only avoids the
+        unnecessary FULL-WIDTH intermediate, it can't shrink a genuinely
+        too-large requested OUTPUT.
+
+        Parameters
+        ----------
+        name : str
+            Dataset name under Data/<surface> - see variable().
+        region_mask : np.ndarray of bool, shape (n_points,)
+            Which points (of this surface's own full point count) to
+            keep - e.g. from _span_chord()/_radius(), same convention as
+            plot_at_radii()'s own span_min/span_max cropping.
+        frame_chunk_size : int
+            See variable_spatial_mean_time_series()'s parameter of the
+            same name.
+
+        Returns
+        -------
+        np.ndarray, shape (n_frames, region_mask.sum())
+        '''
+
+        with h5py.File(self.filename, 'r') as f:
+            key = f'Data/{surface}/{name}'
+            if key not in f:
+                raise KeyError(
+                    f"'{name}' not found under Data/{surface} of '{self.filename}' - "
+                    f"available: {self.available_variables[surface]}"
+                )
+            dset = f[key]
+            n_frames = dset.shape[0]
+            n_selected = int(region_mask.sum())
+            out = np.empty((n_frames, n_selected), dtype=dset.dtype)
+            for start in range(0, n_frames, frame_chunk_size):
+                end = min(start + frame_chunk_size, n_frames)
+                out[start:end, :] = dset[start:end, :][:, region_mask]
+
+        return out
+
+    def cp_time_series_region(self, surface: str, region_mask: np.ndarray,
+                               pressure_variable: str = 'static_pressure',
+                               frame_chunk_size: int = 50) -> np.ndarray:
+
+        '''
+        Cp = (p - pref) / q_ref at EVERY frame, restricted to
+        region_mask's own selected points - the Cp equivalent of
+        variable_time_series_region(), same streamed-read/crop-before-
+        accumulate approach and for the same reason (see that method's
+        docstring).
+
+        Returns
+        -------
+        np.ndarray, shape (n_frames, region_mask.sum())
+        '''
+
+        if self.rho_ref is None or self.rpm is None:
+            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cp.")
+        if self.pref is None:
+            raise ValueError("pref must be set (in __init__) to compute Cp.")
+
+        q_ref = self._q_ref(surface)[region_mask]
+
+        with h5py.File(self.filename, 'r') as f:
+            key = f'Data/{surface}/{pressure_variable}'
+            if key not in f:
+                raise KeyError(
+                    f"'{pressure_variable}' not found under Data/{surface} of '{self.filename}' - "
+                    f"available: {self.available_variables[surface]}"
+                )
+            dset = f[key]
+            n_frames = dset.shape[0]
+            n_selected = int(region_mask.sum())
+            out = np.empty((n_frames, n_selected), dtype='f8')
+            for start in range(0, n_frames, frame_chunk_size):
+                end = min(start + frame_chunk_size, n_frames)
+                out[start:end, :] = (dset[start:end, :][:, region_mask] - self.pref) / q_ref[None, :]
+
+        return out
+
     def variable_time_series_at_point(self, name: str, span_pct: float, chord_pct: float,
                                        surface: str = 'Upper', tol: float = 0.0015,
                                        chord_percentile: float = 0.1, reverse_chord: bool = False,
@@ -346,13 +569,28 @@ class SurfaceVariable:
             {'idx', 'r', 'xc', 'surface'} - the ACTUAL point used (see
             _nearest_point()), since the nearest raw surfel won't sit
             exactly on the requested span_pct/chord_pct.
+
+        Reads ONLY this one point's own column directly from the HDF5
+        dataset (f[key][:, idx], a single-column hyperslab, not
+        variable_time_series(name, surface)[:, idx]) - the latter builds
+        the FULL (n_frames, n_points) array first and only THEN takes one
+        column from it, which confirmed a real OOM on a DNS-resolution
+        case (1.13 TiB for one such array) for what's actually just one
+        column's worth of data.
         '''
 
         idx, r_actual, xc_actual = self._nearest_point(
             span_pct, chord_pct, surface=surface, tol=tol, chord_percentile=chord_percentile,
             reverse_chord=reverse_chord, span_min=span_min, span_max=span_max)
 
-        series = self.variable_time_series(name, surface=surface)[:, idx]
+        with h5py.File(self.filename, 'r') as f:
+            key = f'Data/{surface}/{name}'
+            if key not in f:
+                raise KeyError(
+                    f"'{name}' not found under Data/{surface} of '{self.filename}' - "
+                    f"available: {self.available_variables[surface]}"
+                )
+            series = f[key][:, idx]
 
         return series, {'idx': idx, 'r': r_actual, 'xc': xc_actual, 'surface': surface}
 

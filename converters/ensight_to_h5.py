@@ -564,7 +564,27 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
 
     reference_frame = first_frame if reference_frame is None else reference_frame
 
-    frame_meta_by_index = parse_nc_stats(nc_stats_path) if nc_stats_path else {}
+    frame_meta_by_index = {}
+    if nc_stats_path:
+        try:
+            frame_meta_by_index = parse_nc_stats(nc_stats_path)
+        except ValueError as exc:
+            # nc_stats is NOT required for Geometry correctness (see the
+            # Parameters section above) - only for Metadata/mid_s and
+            # lrf_position_rad, used by SurfaceVariable.timetrace()/
+            # periodogram() for a real sampling rate. A file this doesn't
+            # parse for (e.g. a custom/partial .snc export whose own
+            # nc-stats.ri output has no 'Frame ... LRF_position(rad)'
+            # table at all - confirmed on a real case) shouldn't block
+            # an otherwise-working conversion over metadata that's a
+            # nice-to-have, not a requirement.
+            print(
+                f"WARNING: nc_stats_path='{nc_stats_path}' did not parse ({exc}) - "
+                "proceeding without it. Metadata/mid_s and lrf_position_rad will be "
+                "blank; SurfaceVariable.timetrace()/periodogram() will fall back to a "
+                "frame-index-only time axis (see their own dt parameter to work around "
+                "that) unless dt is passed explicitly."
+            )
 
     cleanup_work_dir = work_dir is None
     work_dir = work_dir or tempfile.mkdtemp(prefix='ensight_to_h5_')

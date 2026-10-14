@@ -15,9 +15,9 @@ master_path: /scratch/jmrendon/tayyab
 case: 5b_fan_shroud
 
 files:
-  inst_force: 2025HF_forces_blade5.h5
+  inst_force: 5b_forces.h5
   avg_force: 2025HF_avg_forces_blade5.h5
-  inst_pressure: 2025HF_pressure_blade5.h5
+  inst_pressure: 5b_pressure.h5
   avg_pressure: 2025HF_avg_pressure_blade5.h5
 
 rotor:
@@ -43,7 +43,7 @@ crop:
   span_min: null # null if the full extend will be used
 
 friction:
-  reverse_chord: true
+  reverse_chord: false
   radii: [0.085, 0.1, 0.125, 0.150, 0.17]
 
 convergence:

@@ -35,20 +35,18 @@ converters/snc_reader.py's and FrictionLines/StripForces's own
 constructor-level span_min/span_max cropping, both added after a real
 OOM on an uncropped whole-rotor case): the data matrix handed to pod()
 has one column per surfel, so a full, uncropped surface can easily reach
-hundreds of thousands of columns. UNLIKE FrictionLines/StripForces,
-SurfaceVariable's own variable_time_series()/cp_time_series() do NOT
-currently support any span_min/span_max cropping at the HDF5-read level
-- they always read every point, every frame, of whichever Data/<surface>
-variable is requested (see those methods' own docstrings). Column-
-masking a SurfaceVariable-derived array AFTER calling
-variable_time_series()/cp_time_series() (as shown in the examples below)
-only reduces what pod() itself has to factor - it does not avoid the
-eager full-array read happening first. For a large instantaneous
-pressure file, this read could reproduce the same category of OOM this
-project already fixed once for Cf/forces; if that turns out to be a
-problem in practice, the fix is the same one already applied elsewhere -
-adding masked, column-selective HDF5 reads to SurfaceVariable itself -
-not yet done here since it wasn't asked for.
+hundreds of thousands (or, on a DNS-resolution case, tens of millions)
+of columns. For SurfaceVariable, use variable_time_series_region()/
+cp_time_series_region() (NOT variable_time_series()/cp_time_series()
+plus a post-hoc column crop, as an earlier version of this docstring's
+own examples did) - the region crop is applied PER FRAME-CHUNK, during
+a streamed read, so the full (n_frames, n_points) array is never held
+in memory at once (confirmed a real OOM on a DNS-resolution case
+otherwise - see those methods' own docstrings). The OUTPUT itself is
+still held in full, though, so a region that's still too large for
+THAT to fit needs to be genuinely smaller - see "region" below for how
+to pick one (restricted to wherever the structure of interest actually
+is, not the whole blade).
 
 pod() is applied to ONE surface at a time (e.g. the suction/Upper side
 alone, if that is where the phenomenon of interest - a separation
@@ -81,7 +79,7 @@ assumed in advance:
     span, chord = sv._span_chord('Upper')
     radius = sv._radius('Upper')
     region = (span > 0.05) & (span < 0.10)
-    cp_data = sv.cp_time_series(surface='Upper')[:, region]  # see memory note above
+    cp_data = sv.cp_time_series_region(surface='Upper', region_mask=region)  # streamed - see memory note above
     result = pod(cp_data, n_modes=10)
     plot_pod_mode(radius[region], chord[region], result, mode_index=0,
                   unit_label='$C_p$ mode amplitude [-]',
@@ -215,7 +213,8 @@ def pod(data, n_modes: int = None, subtract_mean: bool = True, weights=None):
 
 def plot_pod_mode(radius, chord, pod_result: dict, mode_index: int = 0,
                    cmap: str = 'RdBu_r', marker_size: float = 1, value_clip_percentile: float = 99,
-                   unit_label: str = None, ax=None, savepath: str = None, dpi: int = 600):
+                   unit_label: str = None, figsize: tuple = None, ax=None, savepath: str = None,
+                   dpi: int = 600):
 
     '''
     ONE POD spatial mode, plotted the same way this project already
@@ -279,6 +278,21 @@ def plot_pod_mode(radius, chord, pod_result: dict, mode_index: int = 0,
         Colorbar label - defaults to a generic 'Mode amplitude [-]';
         pass something like '$C_p$ mode amplitude [-]' or
         '$C_f$ mode amplitude [-]' for the quantity actually decomposed.
+    figsize : tuple, optional
+        Default (None): computed from radius/chord's OWN data extent, so
+        the figure's own wide/short proportions roughly match the data
+        BEFORE set_aspect('equal') below forces the two axes onto the
+        same physical scale - a fixed figsize that doesn't do this (an
+        earlier version of this function hardcoded (9, 5)) leaves most
+        of the figure blank whenever the actual radius/chord extent is
+        far more elongated than that fixed box, which a typical blade
+        region (radius usually spanning much more than chord, same as
+        every other surface plot in this project) routinely is -
+        confirmed as a real, reproducible problem on two different
+        cases, for BOTH the Cf-POD and Cp-POD call sites (same shared
+        function, see this module's own docstring for why there's only
+        one). Pass a tuple to override if the computed default isn't
+        right for a particular region.
 
     Returns
     -------
@@ -304,7 +318,13 @@ def plot_pod_mode(radius, chord, pod_result: dict, mode_index: int = 0,
     mode_clipped = np.clip(mode, -vmax, vmax)
 
     if ax is None:
-        fig, ax = plt.subplots(figsize=(9, 5))
+        if figsize is None:
+            r_range = float(radius.max() - radius.min()) if radius.size else 1.0
+            c_range = float(chord.max() - chord.min()) if chord.size else 1.0
+            height = 5.0
+            width = np.clip(height * (r_range / c_range if c_range > 0 else 1.0), 4.0, 20.0)
+            figsize = (width, height)
+        fig, ax = plt.subplots(figsize=figsize)
     else:
         fig = ax.figure
 
