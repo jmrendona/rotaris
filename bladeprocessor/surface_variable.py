@@ -115,7 +115,16 @@ class SurfaceVariable:
             for label in ('Upper', 'Lower'):
                 geo = f[f'Geometry/{label}']
                 self.positions[label] = np.column_stack([geo['X'][:], geo['Y'][:], geo['Z'][:]])
-                self.areas[label] = geo['Area'][:]
+                # Unlike the forces branch (converters/snc_reader.py,
+                # which writes Geometry/<label>/Area from the raw .snc),
+                # the pressure branch's own
+                # converters/ensight_to_h5.py's write_reference_geometry()
+                # only ever writes X/Y/Z - no Area (and no normals) are
+                # available from pf2ens's EnSight export. None here means
+                # "no per-surfel area available for this file" - see
+                # _area()'s docstring for the resulting error if it's
+                # actually requested (e.g. for an area-weighted POD).
+                self.areas[label] = geo['Area'][:] if 'Area' in geo else None
                 self.available_variables[label] = list(f[f'Data/{label}'].keys())
 
     def _radius(self, surface: str):
@@ -149,7 +158,25 @@ class SurfaceVariable:
         Needed e.g. as the `weights` argument to bladeprocessor/pod.py's
         pod() for an area-weighted POD inner product on a non-uniform
         mesh.
+
+        Raises ValueError if this file's Geometry/<surface> group has no
+        Area dataset - true for every pressure-branch file written by
+        converters/ensight_to_h5.py (see _load()'s comment), as opposed
+        to the forces branch (converters/snc_reader.py), which always
+        writes it. Check availability first with
+        `sv.areas[surface] is not None` if a caller needs to degrade
+        gracefully (e.g. fall back to an unweighted POD) rather than
+        hit this error.
         '''
+
+        if self.areas[surface] is None:
+            raise ValueError(
+                f"'{self.filename}' has no Geometry/{surface}/Area dataset - "
+                "pressure-branch files (converters/ensight_to_h5.py) don't "
+                "currently write per-surfel area, unlike the forces branch "
+                "(converters/snc_reader.py). Use pod(weights=None) (the "
+                "default) for an unweighted POD on this file instead."
+            )
 
         return self.areas[surface]
 

@@ -393,8 +393,18 @@ pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case'
 
 span_sv, chord_sv = sv_pressure_inst._span_chord('Upper')
 radius_sv = sv_pressure_inst._radius('Upper')
-area_sv = sv_pressure_inst._area('Upper')
 pod_region = (span_sv >= pod_span_min) & (span_sv <= pod_span_max)
+
+# Pressure-branch files (converters/ensight_to_h5.py) don't currently
+# carry a per-surfel Area (unlike the forces branch - see
+# SurfaceVariable._area()'s docstring), so fall back to an unweighted
+# POD on this file rather than crash; the forces-branch Cf POD in
+# skin_friction_manager.py is unaffected and stays area-weighted.
+if sv_pressure_inst.areas['Upper'] is not None:
+   pod_weights = sv_pressure_inst._area('Upper')[pod_region]
+else:
+   print(f"No per-surfel Area in '{inst_pressure_file}' (pressure-branch file) - running an UNWEIGHTED POD.")
+   pod_weights = None
 
 print(40*'-')
 print(f'Running POD on {p_label}, Upper surface, {int(pod_region.sum())} points in the selected region')
@@ -402,7 +412,7 @@ if normalize:
    cp_pod_data = sv_pressure_inst.cp_time_series_region(surface='Upper', region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
 else:
    cp_pod_data = sv_pressure_inst.variable_time_series_region('static_pressure', surface='Upper', region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
-cp_pod_result = pod(cp_pod_data, n_modes=10, weights=area_sv[pod_region])
+cp_pod_result = pod(cp_pod_data, n_modes=10, weights=pod_weights)
 print(f'{p_label} POD energy fractions (first 5): ', cp_pod_result['energy_fraction'][:5])
 
 print(40*'-')
