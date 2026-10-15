@@ -606,11 +606,33 @@ for chord in chord_pts:
 # this case's own friction-line/critical-point findings above before the
 # result means anything.
 pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
+# pod_chord_min/pod_chord_max: set these (e.g. pod_chord_min = -0.02) if
+# plot_pod_mode()'s own output shows a stray point sitting far from the
+# rest of the selected region - confirmed a real degenerate/edge surfel
+# on a real case, visible as a single dot that also drags the plot's own
+# axis range out to accommodate it, squeezing the actual structure into
+# a sliver. None (default, either one): no crop - check the printed
+# chord min/max below first; only add a bound once you've confirmed
+# there's a genuine single-point (or near-single-point) outlier, not
+# real edge data (see FrictionLines/SurfaceVariable's own chord_percentile
+# docstrings for the same caution about assuming something is an
+# artifact rather than real physics).
+if c_ref is not None:
+   pod_chord_min, pod_chord_max = -c_ref/2, c_ref/2  # TODO: set from this case's own findings below, if needed
+else:
+   pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own findings below, if needed
 
 span_fl, chord_fl = fl._span_chord('Upper')
 radius_fl = fl._radius('Upper')
 area_fl = fl._area('Upper')
 pod_region = (span_fl >= pod_span_min) & (span_fl <= pod_span_max)
+print(f'pod_region chord range BEFORE any pod_chord_min/pod_chord_max crop: '
+      f'[{chord_fl[pod_region].min():.4f}, {chord_fl[pod_region].max():.4f}] '
+      f'({int(pod_region.sum())} points) - check this for a stray outlier before trusting the plot/POD below')
+if pod_chord_min is not None:
+   pod_region &= chord_fl >= pod_chord_min
+if pod_chord_max is not None:
+   pod_region &= chord_fl <= pod_chord_max
 
 print(40*'-')
 print(f'Running POD on Cf magnitude, Upper surface, {int(pod_region.sum())} points in the selected region')
@@ -630,6 +652,7 @@ print('Plotting Cf magnitude POD mode 1 (most energetic) on the actual blade geo
 plot_pod_mode(
    radius_fl[pod_region], chord_fl[pod_region], cf_pod_mag_result, mode_index=0,
    unit_label='$C_f$ mode amplitude [-]',
+   figsize=blade_figsize,
    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode1_{case}.png'),
 )
 
@@ -663,6 +686,7 @@ print('Plotting Cf chordwise POD mode 1 (most energetic) on the actual blade geo
 plot_pod_mode(
    radius_fl[pod_region], chord_fl[pod_region], cf_pod_chordwise_result, mode_index=0,
    unit_label='$C_{f,chordwise}$ mode amplitude [-]',
+   figsize=blade_figsize,
    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode1_{case}.png'),
 )
 
@@ -696,6 +720,7 @@ print('Plotting Cf spanwise POD mode 1 (most energetic) on the actual blade geom
 plot_pod_mode(
    radius_fl[pod_region], chord_fl[pod_region], cf_pod_spanwise_result, mode_index=0,
    unit_label='$C_{f,spanwise}$ mode amplitude [-]',
+   figsize=blade_figsize,
    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode1_{case}.png'),
 )
 
