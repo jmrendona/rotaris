@@ -622,7 +622,17 @@ pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own find
 span_fl, chord_fl = fl._span_chord('Upper')
 radius_fl = fl._radius('Upper')
 area_fl = fl._area('Upper')
-pod_region = (span_fl >= pod_span_min) & (span_fl <= pod_span_max)
+# radius_fl (TRUE physical radius, [0, r_tip]) - NOT span_fl (the raw,
+# CENTERED Cartesian span coordinate _span_chord() returns, roughly
+# [-half_extent, +half_extent]) - pod_span_min/pod_span_max are fractions
+# of r_tip, so they only mean "10%-100% of the blade" when compared
+# against radius_fl. Comparing them against span_fl instead (an earlier
+# version of this line did) silently selected some arbitrary narrow
+# sliver near whichever end has positive centered-span values instead -
+# confirmed on a real case: 0.1*r_tip to 1*r_tip was intended to cover
+# nearly the whole blade, but the plotted region only ever showed the
+# last ~15% near the tip.
+pod_region = (radius_fl >= pod_span_min) & (radius_fl <= pod_span_max)
 print(f'pod_region chord range BEFORE any pod_chord_min/pod_chord_max crop: '
       f'[{chord_fl[pod_region].min():.4f}, {chord_fl[pod_region].max():.4f}] '
       f'({int(pod_region.sum())} points) - check this for a stray outlier before trusting the plot/POD below')

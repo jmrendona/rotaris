@@ -25,7 +25,7 @@ rotor:
   rho_ref: 1.22523
   rpm: 6000
   pref: 101325
-  c_ref: null # reference chord [m], used only when normalize is true below
+  c_ref: 0.0125 # reference chord [m], used only when normalize is true below
 
 # NDA case: hide the blade's actual size in plots - radii become r/R,
 # chord becomes chord/c_ref, forces become C_T/C_Q-style coefficients,

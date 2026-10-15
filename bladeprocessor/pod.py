@@ -104,13 +104,25 @@ def pod(data, n_modes: int = None, subtract_mean: bool = True, weights=None):
 
     '''
     Proper Orthogonal Decomposition of a time-resolved scalar field via
-    the singular value decomposition (SVD) - the "method of snapshots"
-    approach, computed implicitly: since data is already (n_frames,
-    n_points) with n_points typically far larger than n_frames for a
-    CFD surface, numpy's economy SVD (full_matrices=False) on this exact
-    shape is already the computationally efficient path (equivalent in
-    cost to explicitly eigendecomposing the much smaller n_frames x
-    n_frames Gram matrix, without needing to form that matrix by hand).
+    the "method of snapshots": X's own (n_frames, n_frames) Gram matrix
+    is formed and eigendecomposed explicitly, rather than handing X
+    itself (n_frames, n_points) to a dense SVD routine. An earlier
+    version of this function called np.linalg.svd(X, full_matrices=False)
+    directly - mathematically equivalent and, in FLOP terms, just as
+    efficient when n_points >> n_frames (always true for a CFD surface) -
+    but confirmed, via a controlled reproduction on a real case, to
+    SEGFAULT (no Python traceback at all) at this project's actual data
+    scale: a (614-682, several million) matrix handed to np.linalg.svd
+    reliably crashed inside libflame.so (this cluster's LAPACK), and did
+    so NON-DETERMINISTICALLY depending on which compute node it landed on
+    for the identical shape - i.e. this isn't a clean "too big, always
+    fails" threshold to design around by shrinking the POD region; it's
+    a latent bug in the dense SVD driver itself at this scale, and a run
+    that happens to succeed once is not good evidence it'll succeed
+    again. Forming the Gram matrix via a plain BLAS matmul (X @ X.T) and
+    eigendecomposing that small (n_frames, n_frames) result instead never
+    invokes that code path - confirmed safe at the same real-data scale
+    that reliably crashed the direct-SVD version.
 
     subtract_mean : bool
         If True (default), each point's own time-mean is removed before
@@ -165,7 +177,7 @@ def pod(data, n_modes: int = None, subtract_mean: bool = True, weights=None):
             subtract_mean was True; None otherwise.
         n_modes_total : int
             min(n_frames, n_points) - how many modes exist in total
-            before any n_modes truncation (the rank of the economy SVD).
+            before any n_modes truncation (the rank of the decomposition).
     '''
 
     data = np.asarray(data, dtype=float)
@@ -188,8 +200,32 @@ def pod(data, n_modes: int = None, subtract_mean: bool = True, weights=None):
         sqrt_w = np.sqrt(weights)
         X = X * sqrt_w[None, :]
 
-    U, S, Vt = np.linalg.svd(X, full_matrices=False)
+    # Method of snapshots: eigendecompose the small (n_frames, n_frames)
+    # Gram matrix instead of calling np.linalg.svd(X, ...) directly on the
+    # full (n_frames, n_points) matrix - see this function's own
+    # docstring for why (a confirmed SVD-driver segfault at this
+    # project's real data scale). eigh (not eig) because X @ X.T is
+    # exactly symmetric by construction, and its eigenvalues are the
+    # squared singular values of X - so they're mathematically
+    # guaranteed non-negative; any small negative values that show up
+    # are floating-point noise, clipped away before the sqrt below.
+    gram = X @ X.T
+    eigvals, eigvecs = np.linalg.eigh(gram)
+    order = np.argsort(eigvals)[::-1]
+    eigvals = np.clip(eigvals[order], 0, None)
+    U = eigvecs[:, order]
+    S = np.sqrt(eigvals)
     n_modes_total = len(S)
+
+    # Spatial modes (V^T = S^-1 U^T X) - a cheap (n_frames, n_frames) @
+    # (n_frames, n_points) matmul, not another dense SVD/eigendecomposition.
+    # A ~zero singular value (only possible if two snapshots are exactly
+    # linearly dependent, e.g. a duplicated frame) would make that one
+    # row's direction ill-defined, not wrong - left as all-zero rather
+    # than dividing by ~0 and amplifying noise into a meaningless mode.
+    nonzero = S > 0
+    Vt = np.zeros((n_modes_total, n_points))
+    Vt[nonzero] = (U[:, nonzero].T @ X) / S[nonzero, None]
 
     if sqrt_w is not None:
         with np.errstate(invalid='ignore', divide='ignore'):

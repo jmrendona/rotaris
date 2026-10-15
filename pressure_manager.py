@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import matplotlib.pyplot as plt
 
 from case_config import load_case_config
 from bladeprocessor.blades_postproc import BladePostProcessor
@@ -85,203 +86,203 @@ sv_pressure_inst = SurfaceVariable(
 #cp_frame0 = sv.cp(surface='Upper', frame=0)
 #cp_rms = sv.cp(surface='Upper', frame=None, stat='rms')
 
-# ------------- Convergence checking on pressure (see README.md) ------------- #
+# # ------------- Convergence checking on pressure (see README.md) ------------- #
 
 # # Spatial mean pressure/Cp per frame - same reduction
 # # plot_cf_phase_portrait() uses on cf_time_series() in skin_friction_manager.py -
 # # every convergence.py function takes this plain 1D per-frame series, exactly
 # # like thrust/torque in forces_manager.py:
-if normalize:
-   # Cp-based series (pref subtracted, divided by LOCAL q_ref per point -
-   # see cp_time_series()) instead of raw pressure - hides the actual
-   # dynamic pressure scale (tied to r_tip/rpm) the same way normalize
-   # hides radius/chord elsewhere. cp_spatial_mean_time_series() (not
-   # cp_time_series().mean(axis=1)) - streams through the file a few
-   # frames at a time instead of loading the full (n_frames, n_points)
-   # array first, which OOM'd on a real DNS-resolution case (a (3674,
-   # 84898396) float32 array is 1.13 TiB; the spatial-mean result itself
-   # is only one scalar per frame).
-   p_series = sv_pressure_inst.cp_spatial_mean_time_series(surface='Upper')[:-2]  # drop corrupted last frame(s)
-   p_ylabel, p_label = '$C_p$ [-]', '$C_p$'
-else:
-   p_series = sv_pressure_inst.variable_spatial_mean_time_series('static_pressure', surface='Upper')[:-2]  # drop corrupted last frame(s)
-   p_ylabel, p_label = 'Pressure [Pa]', 'Pressure'
-
-print(40*'-')
-print('Plotting cumulative mean+variance of pressure')
-plot_cumulative_stats(
-  p_series, dt=dt, rpm=rpm, sync='none', ylabel=p_ylabel,
-  savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_cumulative_stats_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting integral timescale / required averaging time for pressure')
-plot_integral_timescale(
-  p_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-  savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_integral_timescale_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting cumulative mean of pressure vs revolutions included')
-plot_cumulative_mean(
-  p_series, dt=dt, rpm=rpm, ylabel=p_ylabel,
-  savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_cumulative_mean_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting cumulative skewness+flatness of pressure')
-plot_cumulative_moments(
-  p_series, dt=dt, rpm=rpm, sync='none', label=p_label,
-  savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_cumulative_moments_{case}.png'),
-)
-
-print(40*'-')
-print('Plotting pressure autocorrelation, first half vs second half of the run')
-plot_autocorrelation_windows(
-  p_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
-  savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_autocorrelation_windows_{case}.png'),
-)
+# if normalize:
+#    # Cp-based series (pref subtracted, divided by LOCAL q_ref per point -
+#    # see cp_time_series()) instead of raw pressure - hides the actual
+#    # dynamic pressure scale (tied to r_tip/rpm) the same way normalize
+#    # hides radius/chord elsewhere. cp_spatial_mean_time_series() (not
+#    # cp_time_series().mean(axis=1)) - streams through the file a few
+#    # frames at a time instead of loading the full (n_frames, n_points)
+#    # array first, which OOM'd on a real DNS-resolution case (a (3674,
+#    # 84898396) float32 array is 1.13 TiB; the spatial-mean result itself
+#    # is only one scalar per frame).
+#    p_series = sv_pressure_inst.cp_spatial_mean_time_series(surface='Upper')[:-2]  # drop corrupted last frame(s)
+#    p_ylabel, p_label = '$C_p$ [-]', '$C_p$'
+# else:
+#    p_series = sv_pressure_inst.variable_spatial_mean_time_series('static_pressure', surface='Upper')[:-2]  # drop corrupted last frame(s)
+#    p_ylabel, p_label = 'Pressure [Pa]', 'Pressure'
 
 # print(40*'-')
-# print('Plotting cycle-to-cycle correlation of pressure')
-# plot_cycle_correlation(
-#   p_series, dt=dt, rpm=rpm, period_deg=72,
-#   savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_cycle_correlation_{case}.png'),
+# print('Plotting cumulative mean+variance of pressure')
+# plot_cumulative_stats(
+#   p_series, dt=dt, rpm=rpm, sync='none', ylabel=p_ylabel,
+#   savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_cumulative_stats_{case}.png'),
 # )
 
-# Convergence at a SINGLE point, not just the spatial mean above (see
-# README.md, "Convergence checking at a single point, not just the
-# spatial mean") - a converged spatial mean is necessary but not
-# sufficient for convergence at any given point; span_pct/chord_pct=90/25
-# targets a point near the tip, a location expected to be among the
-# hardest to converge - see skin_friction_manager.py's own per-point loop
-# (cf_time_series_at_point) for the same reasoning applied to Cf; this is
-# the raw-pressure equivalent, via variable_time_series_at_point() rather
-# than a Cp-based one:
-chord_pts = np.arange(0, 101, 10)
-span_pts = [50, 70, 80, 90]
+# print(40*'-')
+# print('Plotting integral timescale / required averaging time for pressure')
+# plot_integral_timescale(
+#   p_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+#   savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_integral_timescale_{case}.png'),
+# )
 
-for chord in chord_pts:
-   for span in span_pts:
-      print(40*'-')
-      print('Plotting cumulative mean+variance of pressure at a single point near the tip')
-      p_point_series, p_point_info = sv_pressure_inst.variable_time_series_at_point(
-         'static_pressure', span_pct=span, chord_pct=chord, surface='Upper')  # drop corrupted last frame(s)
-      p_point_series = p_point_series[:-2]
+# print(40*'-')
+# print('Plotting cumulative mean of pressure vs revolutions included')
+# plot_cumulative_mean(
+#   p_series, dt=dt, rpm=rpm, ylabel=p_ylabel,
+#   savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_cumulative_mean_{case}.png'),
+# )
 
-      print('Point actually used: ', p_point_info)
-      plot_cumulative_stats(
-         p_point_series, dt=dt, rpm=rpm, sync='none', ylabel='Pressure [Pa]',
-         savepath=os.path.join(master_path, f'images/cp/convergence/local/pressure_point_cumulative_stats_s{span:03d}_c{chord:03d}_{case}.png'),
-      )
+# print(40*'-')
+# print('Plotting cumulative skewness+flatness of pressure')
+# plot_cumulative_moments(
+#   p_series, dt=dt, rpm=rpm, sync='none', label=p_label,
+#   savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_cumulative_moments_{case}.png'),
+# )
 
-      print(40*'-')
-      print('Plotting cumulative skewness+flatness of pressure at a single point')
-      plot_cumulative_moments(
-         p_point_series, dt=dt, rpm=rpm, sync='none', label='Pressure',
-         savepath=os.path.join(master_path, f'images/cp/convergence/local/pressure_point_cumulative_moments_s{span:03d}_c{chord:03d}_{case}.png'),
-      )
+# print(40*'-')
+# print('Plotting pressure autocorrelation, first half vs second half of the run')
+# plot_autocorrelation_windows(
+#   p_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+#   savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_autocorrelation_windows_{case}.png'),
+# )
 
-      print(40*'-')
-      print('Plotting pressure autocorrelation at a single point, first half vs second half of the run')
-      plot_autocorrelation_windows(
-         p_point_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
-         savepath=os.path.join(master_path, f'images/cp/convergence/local/pressure_point_autocorrelation_windows_s{span:03d}_c{chord:03d}_{case}.png'),
-      )
+# # print(40*'-')
+# # print('Plotting cycle-to-cycle correlation of pressure')
+# # plot_cycle_correlation(
+# #   p_series, dt=dt, rpm=rpm, period_deg=72,
+# #   savepath=os.path.join(master_path, f'images/cp/convergence/global/pressure_cycle_correlation_{case}.png'),
+# # )
 
-      print(40*'-')
-      print('Plotting integral timescale / required averaging time for pressure at a single point')
-      plot_integral_timescale(
-         p_point_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-         savepath=os.path.join(master_path, f'images/cp/convergence/local/pressure_point_integral_timescale_s{span:03d}_c{chord:03d}_{case}.png'),
-      )
+# # Convergence at a SINGLE point, not just the spatial mean above (see
+# # README.md, "Convergence checking at a single point, not just the
+# # spatial mean") - a converged spatial mean is necessary but not
+# # sufficient for convergence at any given point; span_pct/chord_pct=90/25
+# # targets a point near the tip, a location expected to be among the
+# # hardest to converge - see skin_friction_manager.py's own per-point loop
+# # (cf_time_series_at_point) for the same reasoning applied to Cf; this is
+# # the raw-pressure equivalent, via variable_time_series_at_point() rather
+# # than a Cp-based one:
+# chord_pts = np.arange(0, 101, 10)
+# span_pts = [50, 70, 80, 90]
+
+# for chord in chord_pts:
+#    for span in span_pts:
+#       print(40*'-')
+#       print('Plotting cumulative mean+variance of pressure at a single point near the tip')
+#       p_point_series, p_point_info = sv_pressure_inst.variable_time_series_at_point(
+#          'static_pressure', span_pct=span, chord_pct=chord, surface='Upper')  # drop corrupted last frame(s)
+#       p_point_series = p_point_series[:-2]
+
+#       print('Point actually used: ', p_point_info)
+#       plot_cumulative_stats(
+#          p_point_series, dt=dt, rpm=rpm, sync='none', ylabel='Pressure [Pa]',
+#          savepath=os.path.join(master_path, f'images/cp/convergence/local/pressure_point_cumulative_stats_s{span:03d}_c{chord:03d}_{case}.png'),
+#       )
+
+#       print(40*'-')
+#       print('Plotting cumulative skewness+flatness of pressure at a single point')
+#       plot_cumulative_moments(
+#          p_point_series, dt=dt, rpm=rpm, sync='none', label='Pressure',
+#          savepath=os.path.join(master_path, f'images/cp/convergence/local/pressure_point_cumulative_moments_s{span:03d}_c{chord:03d}_{case}.png'),
+#       )
+
+#       print(40*'-')
+#       print('Plotting pressure autocorrelation at a single point, first half vs second half of the run')
+#       plot_autocorrelation_windows(
+#          p_point_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+#          savepath=os.path.join(master_path, f'images/cp/convergence/local/pressure_point_autocorrelation_windows_s{span:03d}_c{chord:03d}_{case}.png'),
+#       )
+
+#       print(40*'-')
+#       print('Plotting integral timescale / required averaging time for pressure at a single point')
+#       plot_integral_timescale(
+#          p_point_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+#          savepath=os.path.join(master_path, f'images/cp/convergence/local/pressure_point_integral_timescale_s{span:03d}_c{chord:03d}_{case}.png'),
+#       )
 
 
-# ------------- Radii cuts profiles for surface variables ------------- #
+# # ------------- Radii cuts profiles for surface variables ------------- #
 
-# Cp vs local x/c at several radii, BOTH surfaces in one plot - span_min
-# isolates one blade half (see skin_friction_manager.py's friction_lines()
-# for why), and reverse_chord fixes which end is the leading vs. trailing
-# edge (no automatic detection - check per case, see the method's docstring):
-print(40*'-')
-print('Plotting Cp vs x/c at several radii, average over all frames')
-sv_pressure_inst.plot_cp_radii(
-   radii=radii,
-   frame=None, stat='mean', span_min=span_min, reverse_chord=reverse_chord,
-   savepath=os.path.join(master_path, f'images/cp/avg/cp_radii_avg_{case}.png'),
-)
+# # Cp vs local x/c at several radii, BOTH surfaces in one plot - span_min
+# # isolates one blade half (see skin_friction_manager.py's friction_lines()
+# # for why), and reverse_chord fixes which end is the leading vs. trailing
+# # edge (no automatic detection - check per case, see the method's docstring):
+# print(40*'-')
+# print('Plotting Cp vs x/c at several radii, average over all frames')
+# sv_pressure_inst.plot_cp_radii(
+#    radii=radii,
+#    frame=None, stat='mean', span_min=span_min, reverse_chord=reverse_chord,
+#    savepath=os.path.join(master_path, f'images/cp/avg/cp_radii_avg_{case}.png'),
+# )
 
-for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
-  print(40*'-')
-  print('Plotting Cp vs x/c at several radii, instatenous frame ', frame)
-  sv_pressure_inst.plot_cp_radii(
-    radii=radii,
-    frame=frame, span_min=span_min, reverse_chord=reverse_chord,
-    savepath=os.path.join(master_path, f'images/cp/inst/cp_radii_frame{frame:03d}_{case}.png'),
-)
+# for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
+#   print(40*'-')
+#   print('Plotting Cp vs x/c at several radii, instatenous frame ', frame)
+#   sv_pressure_inst.plot_cp_radii(
+#     radii=radii,
+#     frame=frame, span_min=span_min, reverse_chord=reverse_chord,
+#     savepath=os.path.join(master_path, f'images/cp/inst/cp_radii_frame{frame:03d}_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting Cp rms vs x/c at several radii, instatenous files')
-sv_pressure_inst.plot_cp_radii(
-   radii=radii,
-   frame=None, stat='rms', span_min=span_min, reverse_chord=reverse_chord,
-   savepath=os.path.join(master_path, f'images/cp/rms/cp_radii_rms_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cp rms vs x/c at several radii, instatenous files')
+# sv_pressure_inst.plot_cp_radii(
+#    radii=radii,
+#    frame=None, stat='rms', span_min=span_min, reverse_chord=reverse_chord,
+#    savepath=os.path.join(master_path, f'images/cp/rms/cp_radii_rms_{case}.png'),
+# )
 
-# ------------- Any surface variable over the whole blade ------------- #
-#
-# Generalizes friction_lines() (skin_friction_manager.py) to any scalar
-# field, and to_common_grid()/field() lets a SurfaceVariable slot into
-# the existing SurfaceField/SurfaceFieldComparator machinery for
-# cross-case deltas - see README.md, "Whole-blade surface plot" /
-# "Cross-case comparison".
+# # ------------- Any surface variable over the whole blade ------------- #
+# #
+# # Generalizes friction_lines() (skin_friction_manager.py) to any scalar
+# # field, and to_common_grid()/field() lets a SurfaceVariable slot into
+# # the existing SurfaceField/SurfaceFieldComparator machinery for
+# # cross-case deltas - see README.md, "Whole-blade surface plot" /
+# # "Cross-case comparison".
 
-# Whole-blade -Cp scatter, both surfaces:
-print(40*'-')
-print('Plotting -Cp surface scatter, average over all frames')
-sv_pressure_inst.plot_variable_surface(
-   lambda s: -sv_pressure_inst.cp(surface=s, stat='mean'),
-   cbar_label='-Cp', span_min=span_min, surface='Upper',
-   figsize=blade_figsize,
-   normalize=normalize,
-   savepath=os.path.join(master_path, f'images/cp/avg/cp_surface_avg_upper_{case}.png'),
-)
+# # Whole-blade -Cp scatter, both surfaces:
+# print(40*'-')
+# print('Plotting -Cp surface scatter, average over all frames')
+# sv_pressure_inst.plot_variable_surface(
+#    lambda s: -sv_pressure_inst.cp(surface=s, stat='mean'),
+#    cbar_label='-Cp', span_min=span_min, surface='Upper',
+#    figsize=blade_figsize,
+#    normalize=normalize,
+#    savepath=os.path.join(master_path, f'images/cp/avg/cp_surface_avg_upper_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting -Cp surface scatter rms value')
-sv_pressure_inst.plot_variable_surface(
-lambda s: -sv_pressure_inst.cp(surface=s, stat='rms'),
-cbar_label='-Cp', span_min=span_min, surface='Upper',
-figsize=blade_figsize,
-normalize=normalize,
-savepath=os.path.join(master_path, f'images/cp/rms/cp_surface_rms_upper_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting -Cp surface scatter rms value')
+# sv_pressure_inst.plot_variable_surface(
+# lambda s: -sv_pressure_inst.cp(surface=s, stat='rms'),
+# cbar_label='-Cp', span_min=span_min, surface='Upper',
+# figsize=blade_figsize,
+# normalize=normalize,
+# savepath=os.path.join(master_path, f'images/cp/rms/cp_surface_rms_upper_{case}.png'),
+# )
 
-for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
-  print(40*'-')
-  print('Plotting -Cp surface scatter, instantaneous frame ', frame)
-  sv_pressure_inst.plot_variable_surface(
-    lambda s: -sv_pressure_inst.cp(surface=s, frame=frame),
-    cbar_label='-Cp', span_min=span_min, surface='Upper',
-    figsize=blade_figsize,
-    normalize=normalize,
-    savepath=os.path.join(master_path, f'images/cp/inst/cp_surface_upper_frame{frame:03d}_{case}.png'),
-  )
+# for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
+#   print(40*'-')
+#   print('Plotting -Cp surface scatter, instantaneous frame ', frame)
+#   sv_pressure_inst.plot_variable_surface(
+#     lambda s: -sv_pressure_inst.cp(surface=s, frame=frame),
+#     cbar_label='-Cp', span_min=span_min, surface='Upper',
+#     figsize=blade_figsize,
+#     normalize=normalize,
+#     savepath=os.path.join(master_path, f'images/cp/inst/cp_surface_upper_frame{frame:03d}_{case}.png'),
+#   )
 
-# ------------- Computation with instatenous files containing pressure ------------- #
+# # ------------- Computation with instatenous files containing pressure ------------- #
 
-# Pressure fluctuation p'(frame) = p(frame) - p_mean, one blade contour
-# per frame - needs a multi-frame file to show a real signal (a
-# single-frame file gives exactly 0 everywhere, since p(frame) == p_mean):
-for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
-  print(40*'-')
-  print('Plotting pressure fluctuation, instantaneous frame ', frame)
-  sv_pressure_inst.plot_pressure_fluctuation(
-      frame, span_min=span_min, surface='Upper',
-      figsize=blade_figsize,
-      normalize=normalize,
-      savepath=os.path.join(master_path, f'images/pfluct/p_fluct_upper_frame{frame:03d}_{case}.png'),
-   )
+# # Pressure fluctuation p'(frame) = p(frame) - p_mean, one blade contour
+# # per frame - needs a multi-frame file to show a real signal (a
+# # single-frame file gives exactly 0 everywhere, since p(frame) == p_mean):
+# for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
+#   print(40*'-')
+#   print('Plotting pressure fluctuation, instantaneous frame ', frame)
+#   sv_pressure_inst.plot_pressure_fluctuation(
+#       frame, span_min=span_min, surface='Upper',
+#       figsize=blade_figsize,
+#       normalize=normalize,
+#       savepath=os.path.join(master_path, f'images/pfluct/p_fluct_upper_frame{frame:03d}_{case}.png'),
+#    )
 
 # Prms needs no new method - it's already variable(stat='rms'). Normalized,
 # this switches to Cp's own rms (Cp_rms = Prms / q_ref, LOCAL per-point
@@ -308,7 +309,7 @@ sv_pressure_inst.plot_variable_surface(
 # Needs a real time axis: pass dt explicitly if this file has no usable
 # Metadata/mid_s (see README.md for when that's populated):
 
-span_pcts = np.arange(70, 90, 2)  # % of r/R
+span_pcts = np.arange(70, 98, 2)  # % of r/R
 chord_pcts = np.arange(0, 101, 10)  # % of x/c
 
 for span in span_pcts:
@@ -334,6 +335,16 @@ for span in span_pcts:
       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
       savepath=os.path.join(master_path, f'data/pfluct/p_timetrace_s{span:03d}_c{chord:03d}_{case}.h5'),
     )
+    # plot_timetrace()/plot_periodogram() each return (fig, ax) that's never
+    # captured here, so each one stays open until the WHOLE script exits -
+    # 10 span_pcts x 11 chord_pcts = 110 iterations x 2 plots/iteration =
+    # 220 never-closed figures by the end of this loop alone, on top of
+    # every OTHER plot already made above it. Confirmed to actually crash
+    # (segfault, not a clean MemoryError) on a real large case - the
+    # "More than 20 figures" RuntimeWarning earlier in the log was already
+    # flagging exactly this. plt.close('all') is safe here since nothing
+    # later needs an EARLIER iteration's figure still open.
+    plt.close('all')
 
 # # ------------- Leading-edge stagnation point ------------- #
 # #
@@ -389,6 +400,10 @@ for span in span_pcts:
 # to fit, the fix is a SMALLER region, not a different reading strategy;
 # they're a placeholder and must be set from this case's own findings
 # above before the result means anything either way.
+p_label = '$C_p$' if normalize else 'Pressure'  # POD's own label - NOT dependent on the
+# (commented-out above) convergence block's own p_label, which this section used to rely
+# on - confirmed a real NameError once that block was commented out on its own.
+
 pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
 # pod_chord_min/pod_chord_max: set these (e.g. pod_chord_min = -0.02) if
 # plot_pod_mode()'s own output shows a stray point sitting far from the
@@ -405,7 +420,18 @@ pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own find
 
 span_sv, chord_sv = sv_pressure_inst._span_chord('Upper')
 radius_sv = sv_pressure_inst._radius('Upper')
-pod_region = (span_sv >= pod_span_min) & (span_sv <= pod_span_max)
+# radius_sv (TRUE physical radius, [0, r_tip]) - NOT span_sv (the raw,
+# CENTERED Cartesian span coordinate _span_chord() returns, roughly
+# [-half_extent, +half_extent]) - pod_span_min/pod_span_max are fractions
+# of r_tip, so they only mean "10%-100% of the blade" when compared
+# against radius_sv. Comparing them against span_sv instead (an earlier
+# version of this line did) silently selected some arbitrary narrow
+# sliver near whichever end has positive centered-span values instead -
+# confirmed on a real case (the Cf-POD equivalent in
+# skin_friction_manager.py): 0.1*r_tip to 1*r_tip was intended to cover
+# nearly the whole blade, but the plotted region only ever showed the
+# last ~15% near the tip.
+pod_region = (radius_sv >= pod_span_min) & (radius_sv <= pod_span_max)
 print(f'pod_region chord range BEFORE any pod_chord_min/pod_chord_max crop: '
       f'[{chord_sv[pod_region].min():.4f}, {chord_sv[pod_region].max():.4f}] '
       f'({int(pod_region.sum())} points) - check this for a stray outlier before trusting the plot/POD below')
