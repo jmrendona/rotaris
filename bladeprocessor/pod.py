@@ -279,20 +279,23 @@ def plot_pod_mode(radius, chord, pod_result: dict, mode_index: int = 0,
         pass something like '$C_p$ mode amplitude [-]' or
         '$C_f$ mode amplitude [-]' for the quantity actually decomposed.
     figsize : tuple, optional
-        Default (None): computed from radius/chord's OWN data extent, so
-        the figure's own wide/short proportions roughly match the data
-        BEFORE set_aspect('equal') below forces the two axes onto the
-        same physical scale - a fixed figsize that doesn't do this (an
-        earlier version of this function hardcoded (9, 5)) leaves most
-        of the figure blank whenever the actual radius/chord extent is
-        far more elongated than that fixed box, which a typical blade
-        region (radius usually spanning much more than chord, same as
-        every other surface plot in this project) routinely is -
-        confirmed as a real, reproducible problem on two different
-        cases, for BOTH the Cf-POD and Cp-POD call sites (same shared
-        function, see this module's own docstring for why there's only
-        one). Pass a tuple to override if the computed default isn't
-        right for a particular region.
+        (9, 5) by default - same convention as
+        FrictionLines.friction_lines()/SurfaceVariable.plot_variable_surface()'s
+        own figsize parameter: a plain fixed default, with the CALLER
+        responsible for passing a region-appropriate value (e.g. this
+        project's own per-case blade_figsize, already threaded through
+        to every other plot in pressure_manager.py/skin_friction_manager.py)
+        when the default doesn't suit a particular region. An earlier
+        version of this parameter tried to auto-compute a "data-matching"
+        figsize instead - that broke down for a POD region cropped to a
+        narrow spanwise slice (chord spanning several times more than
+        the radius band itself, the opposite of a whole-blade plot),
+        which also then threw off the colorbar/label layout tuned for a
+        normally-proportioned figure. set_aspect('equal') below still
+        renders the TRUE physical proportions correctly inside whatever
+        figsize is given - a region whose own aspect doesn't match the
+        chosen figsize will show as a plot that doesn't fill the full
+        width or height of its axes box, which is expected, not a bug.
 
     Returns
     -------
@@ -319,32 +322,7 @@ def plot_pod_mode(radius, chord, pod_result: dict, mode_index: int = 0,
 
     if ax is None:
         if figsize is None:
-            # The LARGER of the two data ranges gets a fixed `base` size;
-            # the other is scaled DOWN by the SAME ratio, so the figure's
-            # own proportions exactly match the data's before
-            # set_aspect('equal') below - unlike an earlier version of
-            # this code, which clipped width to a hardcoded floor without
-            # also rescaling height, silently breaking the very aspect
-            # ratio it was trying to fix whenever chord's own range was
-            # LARGER than radius's (confirmed wrong on a real case: a POD
-            # region that was a narrow spanwise slice near the tip, where
-            # chord spans ~5x more than the radius band itself - the
-            # opposite of a whole-blade plot, where radius typically
-            # spans much more than chord). min_dim only scales BOTH
-            # dimensions up together afterward, to keep axis labels/the
-            # colorbar legible - it never changes the ratio between them.
-            r_range = float(radius.max() - radius.min()) if radius.size else 1.0
-            c_range = float(chord.max() - chord.min()) if chord.size else 1.0
-            r_range, c_range = (r_range or 1.0), (c_range or 1.0)
-            base, min_dim = 8.0, 2.5
-            if r_range >= c_range:
-                width, height = base, base * c_range / r_range
-            else:
-                width, height = base * r_range / c_range, base
-            if min(width, height) < min_dim:
-                scale = min_dim / min(width, height)
-                width, height = width * scale, height * scale
-            figsize = (width, height)
+            figsize = (9, 5)
         fig, ax = plt.subplots(figsize=figsize)
     else:
         fig = ax.figure

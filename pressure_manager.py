@@ -390,10 +390,29 @@ for span in span_pcts:
 # they're a placeholder and must be set from this case's own findings
 # above before the result means anything either way.
 pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
+# pod_chord_min/pod_chord_max: set these (e.g. pod_chord_min = -0.02) if
+# plot_pod_mode()'s own output shows a stray point sitting far from the
+# rest of the selected region - confirmed a real degenerate/edge surfel
+# on a real case, visible as a single dot that also drags the plot's own
+# axis range out to accommodate it, squeezing the actual structure into
+# a sliver. None (default, either one): no crop - check the printed
+# chord min/max below first; only add a bound once you've confirmed
+# there's a genuine single-point (or near-single-point) outlier, not
+# real edge data (see FrictionLines/SurfaceVariable's own chord_percentile
+# docstrings for the same caution about assuming something is an
+# artifact rather than real physics).
+pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own findings below, if needed
 
 span_sv, chord_sv = sv_pressure_inst._span_chord('Upper')
 radius_sv = sv_pressure_inst._radius('Upper')
 pod_region = (span_sv >= pod_span_min) & (span_sv <= pod_span_max)
+print(f'pod_region chord range BEFORE any pod_chord_min/pod_chord_max crop: '
+      f'[{chord_sv[pod_region].min():.4f}, {chord_sv[pod_region].max():.4f}] '
+      f'({int(pod_region.sum())} points) - check this for a stray outlier before trusting the plot/POD below')
+if pod_chord_min is not None:
+   pod_region &= chord_sv >= pod_chord_min
+if pod_chord_max is not None:
+   pod_region &= chord_sv <= pod_chord_max
 
 # Pressure-branch files (converters/ensight_to_h5.py) don't currently
 # carry a per-surfel Area (unlike the forces branch - see
@@ -427,6 +446,7 @@ print(f'Plotting {p_label} POD mode 1 (most energetic) on the actual blade geome
 plot_pod_mode(
    radius_sv[pod_region], chord_sv[pod_region], cp_pod_result, mode_index=0,
    unit_label=f'{p_label} mode amplitude [-]',
+   figsize=blade_figsize,
    savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode1_{case}.png'),
 )
 

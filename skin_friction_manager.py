@@ -617,10 +617,7 @@ pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case'
 # real edge data (see FrictionLines/SurfaceVariable's own chord_percentile
 # docstrings for the same caution about assuming something is an
 # artifact rather than real physics).
-if c_ref is not None:
-   pod_chord_min, pod_chord_max = -c_ref/2, c_ref/2  # TODO: set from this case's own findings below, if needed
-else:
-   pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own findings below, if needed
+pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own findings below, if needed
 
 span_fl, chord_fl = fl._span_chord('Upper')
 radius_fl = fl._radius('Upper')
