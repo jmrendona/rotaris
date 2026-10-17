@@ -8,6 +8,8 @@ from bladeprocessor.convergence import plot_cumulative_stats
 from bladeprocessor.convergence import plot_cumulative_moments
 from bladeprocessor.convergence import plot_autocorrelation_windows
 from bladeprocessor.convergence import plot_integral_timescale
+from bladeprocessor.convergence import plot_periodogram
+from bladeprocessor.convergence import plot_phase_lock
 from bladeprocessor.pod import pod
 from bladeprocessor.pod import plot_pod_mode
 from bladeprocessor.pod import plot_pod_energy
@@ -670,6 +672,29 @@ plot_pod_temporal_coefficient(
    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode1_coeff_{case}.png'),
 )
 
+# Is mode 1's own temporal coefficient a_1(t) tied to the rotor's own
+# rotation (a peak at an integer multiple of f_rot, and/or a clean
+# phase-locked curve vs azimuth), or does it carry an independent
+# frequency of its own (e.g. a shear-layer/vortex-shedding instability
+# whose frequency instead scales with local velocity, not rpm) - see
+# rotaris-docs/pod_section.tex's own discussion of this in relation to
+# the harmonic decomposition.
+print(40*'-')
+print('Plotting Cf magnitude POD mode 1 temporal coefficient PSD')
+plot_periodogram(
+   cf_pod_mag_result['coefficients'][:, 0], dt=dt,
+   ylabel='$a_1(t)$ PSD',
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode1_coeff_psd_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf magnitude POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
+plot_phase_lock(
+   cf_pod_mag_result['coefficients'][:, 0], dt, rpm,
+   ylabel='$a_1(t)$ phase-locked mean',
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode1_coeff_phaselock_{case}.png'),
+)
+
 # Chordwise component specifically - the signed quantity whose sign
 # reversal actually DEFINES separation/the LSB (see
 # rotaris-docs/cf_computations_section.tex, "Directional Components
@@ -704,6 +729,22 @@ plot_pod_temporal_coefficient(
    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode1_coeff_{case}.png'),
 )
 
+print(40*'-')
+print('Plotting Cf chordwise POD mode 1 temporal coefficient PSD')
+plot_periodogram(
+   cf_pod_chordwise_result['coefficients'][:, 0], dt=dt,
+   ylabel='$a_1(t)$ PSD',
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode1_coeff_psd_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf chordwise POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
+plot_phase_lock(
+   cf_pod_chordwise_result['coefficients'][:, 0], dt, rpm,
+   ylabel='$a_1(t)$ phase-locked mean',
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode1_coeff_phaselock_{case}.png'),
+)
+
 # Spanwise component specifically - the signed quantity whose sign
 # reversal actually DEFINES separation/the LSB (see
 # rotaris-docs/cf_computations_section.tex, "Directional Components
@@ -736,4 +777,20 @@ print('Plotting Cf spanwise POD mode 1 temporal coefficient')
 plot_pod_temporal_coefficient(
    cf_pod_spanwise_result, mode_index=0, dt=dt,
    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode1_coeff_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf spanwise POD mode 1 temporal coefficient PSD')
+plot_periodogram(
+   cf_pod_spanwise_result['coefficients'][:, 0], dt=dt,
+   ylabel='$a_1(t)$ PSD',
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode1_coeff_psd_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf spanwise POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
+plot_phase_lock(
+   cf_pod_spanwise_result['coefficients'][:, 0], dt, rpm,
+   ylabel='$a_1(t)$ phase-locked mean',
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode1_coeff_phaselock_{case}.png'),
 )

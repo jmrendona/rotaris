@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.signal import welch
 
 plt.rcParams.update({
     "text.usetex": True,
@@ -1228,6 +1229,217 @@ def plot_cycle_correlation(series, dt: float, rpm: float, period_deg: float = 36
     ax.axhline(1.0, color='k', linewidth=0.8, alpha=0.5, linestyle='--')
     ax.set_xlabel('Cycle')
     ax.set_ylabel('Cycle-to-cycle correlation [-]')
+    ax.grid(True, alpha=0.4)
+    fig.tight_layout()
+
+    if savepath:
+        fig.savefig(savepath, dpi=dpi)
+
+    return fig, ax
+
+
+def periodogram(series, dt: float = None, fs: float = None, n_chunk: int = 4, nperseg: int = None,
+                 nfft: int = None, detrend='constant', **welch_kwargs):
+
+    '''
+    Welch power spectral density of a plain scalar time series - the
+    same scipy.signal.welch wrapper as SurfaceVariable.periodogram(),
+    generalized to any already-extracted 1D array (e.g. a POD mode's own
+    temporal coefficient a_k(t) from bladeprocessor/pod.py's pod(),
+    rather than only a named Data/<surface> variable at one point) -
+    standalone for the same reason as every other function in this
+    module.
+
+    Parameters
+    ----------
+    series : array-like, shape (n_frames,)
+    dt : float, optional
+        Physical timestep [s] between frames - used to derive fs (1/dt)
+        if fs isn't given directly.
+    fs : float, optional
+        Sampling frequency [Hz]. One of fs or dt is REQUIRED - a
+        periodogram's frequency axis is meaningless without a real
+        sampling rate.
+    n_chunk : int
+        Baseline Welch segmentation, used whenever nperseg/nfft aren't
+        given explicitly: nperseg = len(series) // n_chunk (4 segments
+        by default), nfft = the next power of 2 >= nperseg (zero-padded
+        FFT) - same convention as SurfaceVariable.periodogram().
+    nperseg, nfft : int, optional
+        Passed to scipy.signal.welch as-is if given - overrides the
+        n_chunk-based baseline above for that one call.
+    detrend : str or False
+        Passed to scipy.signal.welch - 'constant' (default) removes the
+        segment's own mean before its FFT. Set to False if series is
+        already mean-removed (e.g. a POD mode's coefficient, which
+        pod()'s own subtract_mean step has already centered) to avoid
+        double-removing the mean.
+    **welch_kwargs
+        Any other scipy.signal.welch keyword (window, noverlap, ...).
+
+    Returns
+    -------
+    freq : np.ndarray, [Hz]
+    psd : np.ndarray
+        Power spectral density, units = (series units)^2 / Hz.
+    '''
+
+    series = np.asarray(series, dtype=float)
+
+    if fs is None:
+        if dt is None:
+            raise ValueError("periodogram() needs fs or dt - a frequency axis is meaningless without one.")
+        fs = 1.0 / dt
+
+    if nperseg is None:
+        nperseg = len(series) // n_chunk
+    if nfft is None:
+        nfft = 1 << (nperseg - 1).bit_length()  # next power of 2 >= nperseg
+
+    freq, psd = welch(series, fs=fs, nperseg=nperseg, nfft=nfft, detrend=detrend, **welch_kwargs)
+
+    return freq, psd
+
+
+def plot_periodogram(series, dt: float = None, fs: float = None, n_chunk: int = 4, nperseg: int = None,
+                      nfft: int = None, detrend='constant', ylabel: str = None, ax=None,
+                      savepath: str = None, dpi: int = 600, **welch_kwargs):
+
+    '''
+    Plot periodogram() as PSD vs frequency, log x-axis (frequency
+    decades) / linear y-axis - same style as
+    SurfaceVariable.plot_periodogram(db=False), generalized to any plain
+    series (see periodogram()'s own docstring).
+
+    Returns
+    -------
+    (fig, ax)
+    '''
+
+    freq, psd = periodogram(series, dt=dt, fs=fs, n_chunk=n_chunk, nperseg=nperseg, nfft=nfft,
+                             detrend=detrend, **welch_kwargs)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 5))
+    else:
+        fig = ax.figure
+
+    # Skip freq=0 (DC) - undefined on a log axis, and not a frequency
+    # component anyway (removed by detrend='constant' already).
+    start = 1 if freq[0] == 0 else 0
+
+    ax.semilogx(freq[start:], psd[start:], color='k', linewidth=1.2)
+    ax.set_xlabel('Frequency [Hz]')
+    ax.set_ylabel(ylabel or 'PSD')
+    ax.ticklabel_format(style='plain', axis='y')
+    ax.grid(True, which='both', alpha=0.3)
+    fig.tight_layout()
+
+    if savepath:
+        fig.savefig(savepath, dpi=dpi)
+
+    return fig, ax
+
+
+def phase_lock(series, dt: float, rpm: float, n_azimuth_bins: int = 72):
+
+    '''
+    Phase-locked (revolution-folded) average of a plain scalar time
+    series - the same azimuth-binning as StripForces.phase_lock(),
+    generalized to any already-extracted 1D array (e.g. a POD mode's own
+    temporal coefficient a_k(t)) rather than only StripForces' own
+    compute() result - standalone for the same reason as every other
+    function in this module.
+
+    Bins every frame by its rotor azimuth angle (needs rpm and dt - see
+    StripForces.phase_lock()'s docstring for the constant-rpm assumption
+    this relies on) into n_azimuth_bins bins spanning one full
+    revolution (0-360 deg), and averages every frame that lands in each
+    bin, however many revolutions that spans in total. A series tightly
+    locked to rotor phase collapses onto a clean, repeatable curve here;
+    a series with no phase relationship to rotation instead averages out
+    toward a flat line, well inside its own cycle-to-cycle scatter (see
+    cycle_correlation() for a complementary check of the same question).
+
+    Parameters
+    ----------
+    series : array-like, shape (n_frames,)
+    dt : float
+        Physical timestep [s] between frames.
+    rpm : float
+        Rotor speed [rev/min].
+    n_azimuth_bins : int
+        Number of azimuth bins spanning 0-360 degrees.
+
+    Returns
+    -------
+    dict
+        'azimuth_deg' : np.ndarray, shape (n_azimuth_bins,) - bin center
+            azimuth angles [deg].
+        'mean' : np.ndarray, shape (n_azimuth_bins,) - phase-locked mean,
+            NaN where no frame fell in that bin.
+        'std' : np.ndarray, shape (n_azimuth_bins,) - standard deviation
+            of the frames within each bin (the residual, non-phase-locked
+            scatter about 'mean') - NaN where no frame fell in that bin.
+        'counts' : np.ndarray, shape (n_azimuth_bins,) - number of frames
+            averaged into each bin.
+    '''
+
+    series = np.asarray(series, dtype=float)
+    if dt is None or rpm is None:
+        raise ValueError("phase_lock() needs both dt and rpm to compute azimuth angle.")
+    if len(series) < 2:
+        raise ValueError(f"Need at least 2 frames to phase-lock - got {len(series)}.")
+
+    t = np.arange(len(series)) * dt
+    azimuth = (t * rpm * 6.0) % 360.0  # rpm * 6 = rpm * 360/60, degrees/second
+
+    edges = np.linspace(0, 360, n_azimuth_bins + 1)
+    centers = (edges[:-1] + edges[1:]) / 2
+    bin_idx = np.clip(np.digitize(azimuth, edges) - 1, 0, n_azimuth_bins - 1)
+    counts = np.bincount(bin_idx, minlength=n_azimuth_bins).astype(float)
+    has_data = counts > 0
+
+    sums = np.zeros(n_azimuth_bins)
+    np.add.at(sums, bin_idx, series)
+    mean = np.full(n_azimuth_bins, np.nan)
+    mean[has_data] = sums[has_data] / counts[has_data]
+
+    sq_sums = np.zeros(n_azimuth_bins)
+    np.add.at(sq_sums, bin_idx, series ** 2)
+    var = np.full(n_azimuth_bins, np.nan)
+    var[has_data] = sq_sums[has_data] / counts[has_data] - mean[has_data] ** 2
+    std = np.sqrt(np.clip(var, 0, None))
+
+    return {'azimuth_deg': centers, 'mean': mean, 'std': std, 'counts': counts}
+
+
+def plot_phase_lock(series, dt: float, rpm: float, n_azimuth_bins: int = 72, ylabel: str = None,
+                     ax=None, color: str = 'black', savepath: str = None, dpi: int = 600):
+
+    '''
+    Plot phase_lock()'s phase-locked mean against rotor azimuth, with a
+    shaded band at +/- one within-bin standard deviation showing the
+    residual (non-phase-locked) scatter about it.
+
+    Returns
+    -------
+    (fig, ax)
+    '''
+
+    result = phase_lock(series, dt, rpm, n_azimuth_bins=n_azimuth_bins)
+    azimuth_deg, mean, std = result['azimuth_deg'], result['mean'], result['std']
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(9, 5))
+    else:
+        fig = ax.figure
+
+    ax.plot(azimuth_deg, mean, '-', color=color, linewidth=1.5)
+    ax.fill_between(azimuth_deg, mean - std, mean + std, color=color, alpha=0.2, linewidth=0)
+    ax.set_xlabel('Azimuth [deg]')
+    ax.set_xlim(0, 360)
+    ax.set_ylabel(ylabel or 'Phase-locked mean')
     ax.grid(True, alpha=0.4)
     fig.tight_layout()
 

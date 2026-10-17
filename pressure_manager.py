@@ -12,6 +12,8 @@ from bladeprocessor.convergence import plot_autocorrelation_windows
 from bladeprocessor.convergence import plot_cumulative_moments
 from bladeprocessor.convergence import plot_integral_timescale
 from bladeprocessor.convergence import plot_cycle_correlation
+from bladeprocessor.convergence import plot_periodogram
+from bladeprocessor.convergence import plot_phase_lock
 from bladeprocessor.pod import pod
 from bladeprocessor.pod import plot_pod_mode
 from bladeprocessor.pod import plot_pod_energy
@@ -481,6 +483,29 @@ print(f'Plotting {p_label} POD mode 1 temporal coefficient')
 plot_pod_temporal_coefficient(
    cp_pod_result, mode_index=0, dt=dt,
    savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode1_coeff_{case}.png'),
+)
+
+# Is mode 1's own temporal coefficient a_1(t) tied to the rotor's own
+# rotation (a peak at an integer multiple of f_rot, and/or a clean
+# phase-locked curve vs azimuth), or does it carry an independent
+# frequency of its own - see rotaris-docs/pod_section.tex's own
+# discussion of this in relation to the harmonic decomposition, and the
+# equivalent check already done on the Cf POD mode in
+# skin_friction_manager.py.
+print(40*'-')
+print(f'Plotting {p_label} POD mode 1 temporal coefficient PSD')
+plot_periodogram(
+   cp_pod_result['coefficients'][:, 0], dt=dt,
+   ylabel='$a_1(t)$ PSD',
+   savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode1_coeff_psd_{case}.png'),
+)
+
+print(40*'-')
+print(f'Plotting {p_label} POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
+plot_phase_lock(
+   cp_pod_result['coefficients'][:, 0], dt, rpm,
+   ylabel='$a_1(t)$ phase-locked mean',
+   savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode1_coeff_phaselock_{case}.png'),
 )
 
 # # ------------- Cases comparison plotted into a commo grid ------------- #
