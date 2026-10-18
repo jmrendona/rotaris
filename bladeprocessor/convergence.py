@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import ScalarFormatter
 from scipy.signal import welch
 
 plt.rcParams.update({
@@ -1331,7 +1332,15 @@ def plot_periodogram(series, dt: float = None, fs: float = None, n_chunk: int = 
     ax.semilogx(freq[start:], psd[start:], color='k', linewidth=1.2)
     ax.set_xlabel('Frequency [Hz]')
     ax.set_ylabel(ylabel or 'PSD')
-    ax.ticklabel_format(style='plain', axis='y')
+    # NOT ticklabel_format(style='plain') - unlike
+    # SurfaceVariable.plot_periodogram()'s dB-scale case (where plain
+    # notation suits ordinary-sized dB values), this plots the RAW psd,
+    # which for something like a POD mode's coefficient can be tiny
+    # (e.g. ~1e-15) - plain notation then rounds every tick to
+    # "0.00000000000000" (confirmed on a real case). A scientific
+    # formatter keeps the labels readable at any magnitude instead.
+    ax.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    ax.ticklabel_format(style='sci', axis='y', scilimits=(-2, 2))
     ax.grid(True, which='both', alpha=0.3)
     fig.tight_layout()
 
