@@ -406,7 +406,7 @@ p_label = '$C_p$' if normalize else 'Pressure'  # POD's own label - NOT dependen
 # (commented-out above) convergence block's own p_label, which this section used to rely
 # on - confirmed a real NameError once that block was commented out on its own.
 
-pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
+pod_span_min, pod_span_max = 0.55 * r_tip, 0.96 * r_tip  # TODO: set from this case's own findings above
 # pod_chord_min/pod_chord_max: set these (e.g. pod_chord_min = -0.02) if
 # plot_pod_mode()'s own output shows a stray point sitting far from the
 # rest of the selected region - confirmed a real degenerate/edge surfel
@@ -468,45 +468,48 @@ plot_pod_energy(
    cp_pod_result,
    savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_energy_{case}.png'),
 )
+modes = [0,1]
 
-print(40*'-')
-print(f'Plotting {p_label} POD mode 1 (most energetic) on the actual blade geometry')
-plot_pod_mode(
-   radius_sv[pod_region], chord_sv[pod_region], cp_pod_result, mode_index=0,
-   unit_label=f'{p_label} mode amplitude [-]',
-   figsize=blade_figsize,
-   savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode1_{case}.png'),
-)
+for m in modes:
+   print(40*'-')
+   print(f'Plotting {p_label} POD mode {m+1} (most energetic) on the actual blade geometry')
+   plot_pod_mode(
+      radius_sv[pod_region], chord_sv[pod_region], cp_pod_result, mode_index=m,
+      unit_label=f'{p_label} mode amplitude [-]',
+      figsize=blade_figsize,
+      radius_full=radius_sv, chord_full=chord_sv,
+      savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_{case}.png'),
+   )
 
-print(40*'-')
-print(f'Plotting {p_label} POD mode 1 temporal coefficient')
-plot_pod_temporal_coefficient(
-   cp_pod_result, mode_index=0, dt=dt,
-   savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode1_coeff_{case}.png'),
-)
+   print(40*'-')
+   print(f'Plotting {p_label} POD mode {m+1} temporal coefficient')
+   plot_pod_temporal_coefficient(
+      cp_pod_result, mode_index=m, dt=dt,
+      savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_coeff_{case}.png'),
+   )
 
-# Is mode 1's own temporal coefficient a_1(t) tied to the rotor's own
-# rotation (a peak at an integer multiple of f_rot, and/or a clean
-# phase-locked curve vs azimuth), or does it carry an independent
-# frequency of its own - see rotaris-docs/pod_section.tex's own
-# discussion of this in relation to the harmonic decomposition, and the
-# equivalent check already done on the Cf POD mode in
-# skin_friction_manager.py.
-print(40*'-')
-print(f'Plotting {p_label} POD mode 1 temporal coefficient PSD')
-plot_periodogram(
-   cp_pod_result['coefficients'][:, 0], dt=dt,
-   ylabel='$a_1(t)$ PSD',
-   savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode1_coeff_psd_{case}.png'),
-)
+   # Is mode 1's own temporal coefficient a_1(t) tied to the rotor's own
+   # rotation (a peak at an integer multiple of f_rot, and/or a clean
+   # phase-locked curve vs azimuth), or does it carry an independent
+   # frequency of its own - see rotaris-docs/pod_section.tex's own
+   # discussion of this in relation to the harmonic decomposition, and the
+   # equivalent check already done on the Cf POD mode in
+   # skin_friction_manager.py.
+   print(40*'-')
+   print(f'Plotting {p_label} POD mode {m+1} temporal coefficient PSD')
+   plot_periodogram(
+      cp_pod_result['coefficients'][:, m], dt=dt,
+      ylabel=f'$a_{m+1}(t)$ PSD',
+      savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_coeff_psd_{case}.png'),
+   )
 
-print(40*'-')
-print(f'Plotting {p_label} POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
-plot_phase_lock(
-   cp_pod_result['coefficients'][:, 0], dt, rpm,
-   ylabel='$a_1(t)$ phase-locked mean',
-   savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode1_coeff_phaselock_{case}.png'),
-)
+   print(40*'-')
+   print(f'Plotting {p_label} POD mode {m+1} temporal coefficient, phase-locked to rotor azimuth')
+   plot_phase_lock(
+      cp_pod_result['coefficients'][:, m], dt, rpm,
+      ylabel=f'$a_{m+1}(t)$ phase-locked mean',
+      savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_coeff_phaselock_{case}.png'),
+   )
 
 # # ------------- Cases comparison plotted into a commo grid ------------- #
 # #

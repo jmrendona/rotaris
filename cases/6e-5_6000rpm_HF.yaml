@@ -11,13 +11,13 @@
 # routed through this file - only the values that are genuinely the same
 # everywhere they appear are pulled out here.
 
-master_path: /scratch/jmrendon/Rotor-alone/6e-5_6000rpm
-case: 2025
+master_path: /scratch/jmrendon/Rotor-alone/1e-5_6000rpm-dns
+case: 2026DNS
 
 files:
-  inst_force: 2025_forces_rotor.h5
+  inst_force: 2026DNS_forces_rotor.h5
   avg_force: RA-beam-no-interaction_avg_forces_rotor.h5
-  inst_pressure: 2025_pressure_rotor.h5
+  inst_pressure: 2026DNS_pressure_rotor.h5
   avg_pressure: RA-beam_avg_pressure_rotor.h5
 
 rotor:

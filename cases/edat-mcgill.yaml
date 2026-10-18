@@ -48,7 +48,7 @@ friction:
   radii: [0.025, 0.040, 0.050, 0.070, 0.075]
 
 convergence:
-  dt: 0.00005 # 0.00005 -> pressure
+  dt: 0.0000554 # 0.00005 -> pressure
 
 blade_figsize: null # null for ISAE2 case
 

@@ -665,6 +665,7 @@ for m in modes:
       radius_fl[pod_region], chord_fl[pod_region], cf_pod_mag_result, mode_index=m,
       unit_label='$C_f$ mode amplitude [-]',
       figsize=blade_figsize,
+      radius_full=radius_fl, chord_full=chord_fl,
       savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_{case}.png'),
    )
 
@@ -723,6 +724,7 @@ for m in modes:
       radius_fl[pod_region], chord_fl[pod_region], cf_pod_chordwise_result, mode_index=m,
       unit_label='$C_{f,chordwise}$ mode amplitude [-]',
       figsize=blade_figsize,
+      radius_full=radius_fl, chord_full=chord_fl,
       savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_{case}.png'),
    )
 
@@ -774,6 +776,7 @@ for m in modes:
       radius_fl[pod_region], chord_fl[pod_region], cf_pod_spanwise_result, mode_index=m,
       unit_label='$C_{f,spanwise}$ mode amplitude [-]',
       figsize=blade_figsize,
+      radius_full=radius_fl, chord_full=chord_fl,
       savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_{case}.png'),
    )
 

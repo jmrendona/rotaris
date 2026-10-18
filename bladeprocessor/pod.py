@@ -316,7 +316,7 @@ def pod(data, n_modes: int = None, subtract_mean: bool = True, weights=None):
 def plot_pod_mode(radius, chord, pod_result: dict, mode_index: int = 0,
                    cmap: str = 'RdBu_r', marker_size: float = 1, value_clip_percentile: float = 99,
                    unit_label: str = None, figsize: tuple = None, ax=None, savepath: str = None,
-                   dpi: int = 600):
+                   dpi: int = 600, radius_full=None, chord_full=None, background_color: str = '0.85'):
 
     '''
     ONE POD spatial mode, plotted the same way this project already
@@ -370,6 +370,25 @@ def plot_pod_mode(radius, chord, pod_result: dict, mode_index: int = 0,
         Same n_points, same point ORDER, as the data pod() was computed
         from - whatever region selection was applied before calling
         pod() must be applied identically here.
+    radius_full, chord_full : array-like, shape (n_points_full,), optional
+        The SAME blade surface's full, unrestricted radius/chord (e.g.
+        before any pod_span_min/pod_span_max/pod_chord_min/pod_chord_max
+        crop) - when given, plotted FIRST as a neutral grey backdrop
+        (background_color), with the actual mode scatter (radius/chord
+        above, i.e. the cropped POD region) drawn on top. Gives the
+        blade's real physical context for a POD deliberately restricted
+        to a SMALL region (e.g. for memory reasons on a very large case -
+        see SurfaceVariable.variable_time_series_region()'s own
+        docstring) - without this, a narrow region plotted alone leaves
+        the rest of the axes blank once set_aspect('equal') stretches
+        them to fit figsize, which reads as missing/corrupted data rather
+        than "deliberately not computed here". Omit both (default) for
+        the previous behavior - just the region itself, no backdrop -
+        e.g. when the POD already covers the whole blade and a backdrop
+        would add nothing.
+    background_color : str
+        Matplotlib grayscale shorthand ('0.0' black - '1.0' white) for
+        the backdrop scatter, when radius_full/chord_full are given.
     mode_index : int
         0-indexed - mode_index=0 is the single most energetic mode.
     value_clip_percentile : float
@@ -422,6 +441,9 @@ def plot_pod_mode(radius, chord, pod_result: dict, mode_index: int = 0,
     vmax = vmax if vmax > 0 else 1.0
     mode_clipped = np.clip(mode, -vmax, vmax)
 
+    if (radius_full is None) != (chord_full is None):
+        raise ValueError("radius_full and chord_full must be given together.")
+
     if ax is None:
         if figsize is None:
             figsize = (9, 5)
@@ -429,7 +451,14 @@ def plot_pod_mode(radius, chord, pod_result: dict, mode_index: int = 0,
     else:
         fig = ax.figure
 
-    sc = ax.scatter(radius, chord, c=mode_clipped, s=marker_size, cmap=cmap, vmin=-vmax, vmax=vmax)
+    if radius_full is not None:
+        # zorder=1, drawn before (so underneath) the actual mode scatter
+        # below - plain context, not data, so it carries no colormap/
+        # colorbar of its own.
+        ax.scatter(np.asarray(radius_full), np.asarray(chord_full), s=marker_size,
+                   color=background_color, linewidths=0, zorder=1)
+
+    sc = ax.scatter(radius, chord, c=mode_clipped, s=marker_size, cmap=cmap, vmin=-vmax, vmax=vmax, zorder=2)
     ax.set_title(f'Mode {mode_index + 1} ({100 * energy[mode_index]:.1f}\\% energy)')
     ax.set_xlabel('$r$ [m]')
     ax.set_ylabel('chord [m]')
