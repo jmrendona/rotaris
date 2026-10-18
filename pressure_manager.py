@@ -290,28 +290,28 @@ sv_pressure_inst = SurfaceVariable(
 # this switches to Cp's own rms (Cp_rms = Prms / q_ref, LOCAL per-point
 # normalization - same as cp()) instead of raw Prms, so the value itself
 # is dimensionless too, not just the axes.
-print(40*'-')
-print('Plotting pressure RMS surface scatter, average over all frames')
-if normalize:
-   prms_get_values = lambda s: sv_pressure_inst.cp(surface=s, stat='rms')
-   prms_cbar_label = '$C_{p,rms}$ [-]'
-else:
-   prms_get_values = lambda s: sv_pressure_inst.variable('static_pressure', surface=s, stat='rms')
-   prms_cbar_label = '$P_{rms}$ [Pa]'
-sv_pressure_inst.plot_variable_surface(
-   prms_get_values,
-   cbar_label=prms_cbar_label, span_min=span_min, surface='Upper',
-   figsize=blade_figsize,
-   normalize=normalize,
-   savepath=os.path.join(master_path, f'images/pfluct/p_rms_surface_upper_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting pressure RMS surface scatter, average over all frames')
+# if normalize:
+#    prms_get_values = lambda s: sv_pressure_inst.cp(surface=s, stat='rms')
+#    prms_cbar_label = '$C_{p,rms}$ [-]'
+# else:
+#    prms_get_values = lambda s: sv_pressure_inst.variable('static_pressure', surface=s, stat='rms')
+#    prms_cbar_label = '$P_{rms}$ [Pa]'
+# sv_pressure_inst.plot_variable_surface(
+#    prms_get_values,
+#    cbar_label=prms_cbar_label, span_min=span_min, surface='Upper',
+#    figsize=blade_figsize,
+#    normalize=normalize,
+#    savepath=os.path.join(master_path, f'images/pfluct/p_rms_surface_upper_{case}.png'),
+# )
 
 # Point time trace + Welch periodogram (wall pressure fluctuations at one
 # location, given as % of r/R and x/c - see README.md, "Point time trace").
 # Needs a real time axis: pass dt explicitly if this file has no usable
 # Metadata/mid_s (see README.md for when that's populated):
 
-span_pcts = np.arange(70, 98, 2)  # % of r/R
+span_pcts = np.arange(98, 98, 2)  # % of r/R
 chord_pcts = np.arange(0, 101, 10)  # % of x/c
 
 for span in span_pcts:
