@@ -88,11 +88,17 @@ _COMPONENT_LABELS = {
 }
 
 
-def _strip_colors(strips, cmap):
+def _strip_colors(items, cmap):
 
-    '''Discrete colors for each selected strip, sampled from `cmap` - same convention as StripForces' own plots.'''
+    '''
+    Discrete colors for `items` (a strip list, or - for
+    plot_time_trace_compare()'s own color=case encoding - a case list),
+    evenly sampled from `cmap` - same convention as StripForces' own
+    plots. Name kept from its original strip-only use; genuinely generic
+    (only `len(items)` matters), so reused as-is rather than duplicated.
+    '''
 
-    return plt.cm.get_cmap(cmap)(np.linspace(0, 1, len(strips)))
+    return plt.cm.get_cmap(cmap)(np.linspace(0, 1, len(items)))
 
 
 def _build_shared_legend(legend_ax, strips, case_labels, colors, radii=None, fontsize=8):
@@ -144,6 +150,36 @@ def _build_shared_legend(legend_ax, strips, case_labels, colors, radii=None, fon
                       handlelength=2.0, labelspacing=0.5, borderpad=0.5, handletextpad=0.6)
 
 
+def _build_shared_legend_case_color(legend_ax, strips, case_labels, case_colors, radii=None, fontsize=8):
+
+    '''
+    Same purpose as _build_shared_legend() (one combined legend, built in
+    its own grid cell - see that function's docstring for why), but for
+    plot_time_trace_compare()'s swapped encoding: one colored line per
+    CASE (the color dimension here), followed by one black line per strip
+    (the linestyle dimension here) - the mirror image of
+    _build_shared_legend()'s strip-then-case ordering, matching
+    plot_time_trace_compare()'s own color=case/linestyle=strip design.
+    '''
+
+    handles, labels = [], []
+
+    for j, case_label in enumerate(case_labels):
+        handles.append(Line2D([0], [0], color=case_colors[j % len(case_colors)], linewidth=2.2))
+        labels.append(str(case_label))
+
+    for i, strip_i in enumerate(strips):
+        handles.append(Line2D([0], [0], color='black', linestyle=_LINESTYLES[i % len(_LINESTYLES)], linewidth=1.6))
+        if radii is not None:
+            labels.append(f'Strip {strip_i + 1} ($r$={radii[i]:.3f} m)')
+        else:
+            labels.append(f'Strip {strip_i + 1}')
+
+    legend_ax.axis('off')
+    legend_ax.legend(handles, labels, loc='center', frameon=False, fontsize=fontsize,
+                      handlelength=2.0, labelspacing=0.5, borderpad=0.5, handletextpad=0.6)
+
+
 def _check_consistent_strip_layout(results: dict, strips):
 
     '''
@@ -187,9 +223,23 @@ def plot_time_trace_compare(results: dict, dt: float = None, strips=(0, 4, 9),
     at once - the cross-case counterpart to StripForces.plot_time_trace()
     (which compares strips WITHIN one case). One panel per component (3
     by default, matching StripForces' own axial/radial/tangential split),
-    each panel overlaying every case's selected strips: color = strip,
-    linestyle = case (see module docstring) - all sharing ONE legend for
-    the whole figure.
+    each panel overlaying every case's selected strips.
+
+    Deliberately the OPPOSITE of the module's usual color=strip/
+    linestyle=case convention (see module docstring, and
+    plot_vs_angle_compare() which still uses it): here, color = CASE
+    (still `cmap`-sampled, same as everywhere else in this module - see
+    _strip_colors(); distinguishing the four cases is this figure's
+    actual point) and linestyle = strip (reusing the same large,
+    noise-robust dash patterns, _LINESTYLES). The raw traces this
+    function plots are noisy and heavily overlapping - confirmed, on a
+    real case, that 4 cases told apart only by linestyle under those
+    conditions is hard to read even with the large custom dash patterns,
+    whereas the strip-to-strip MAGNITUDE spread (the reason every strip
+    still shares one y-axis per panel, not faceted into separate
+    subplots) remains clear either way, since it's carried by each
+    line's vertical position, not by its color or style. All
+    cases/strips share ONE legend for the whole figure.
 
     Parameters
     ----------
@@ -217,6 +267,13 @@ def plot_time_trace_compare(results: dict, dt: float = None, strips=(0, 4, 9),
         reserved for the shared legend (see module/_build_shared_legend()
         docstrings for why a grid cell, not a figure-spanning legend row,
         is used). Passing a different number raises ValueError.
+    cmap : str
+        Colormap each CASE's own color is sampled from (evenly spaced,
+        one sample per case - see _strip_colors()) - 'cividis' by
+        default, same colormap/convention used for strip colors
+        elsewhere in this module and in StripForces' own plots, kept
+        here even though color now encodes case rather than strip, for
+        visual consistency across this project's figures.
     total_width_in, total_height_in : float
         The figure's FINAL physical size in inches - see module
         docstring's "Print-size handling" note for the EXACT condition
@@ -251,7 +308,7 @@ def plot_time_trace_compare(results: dict, dt: float = None, strips=(0, 4, 9),
     case_labels = list(results.keys())
     strips = list(strips)
     _check_consistent_strip_layout(results, strips)
-    colors = _strip_colors(strips, cmap)
+    case_colors = _strip_colors(case_labels, cmap)
 
     with plt.rc_context({
         'text.usetex': True, 'font.family': 'serif', 'font.serif': ['Computer Modern'],
@@ -267,8 +324,8 @@ def plot_time_trace_compare(results: dict, dt: float = None, strips=(0, 4, 9),
                 arr = results[case_label][component]  # (n_frames, n_span_bins)
                 t = np.arange(arr.shape[0]) * dt if dt is not None else np.arange(arr.shape[0])
                 for i, strip_i in enumerate(strips):
-                    ax.plot(t, arr[:, strip_i], color=colors[i],
-                            linestyle=_LINESTYLES[j % len(_LINESTYLES)], linewidth=1.3, alpha=0.9)
+                    ax.plot(t, arr[:, strip_i], color=case_colors[j],
+                            linestyle=_LINESTYLES[i % len(_LINESTYLES)], linewidth=1.3, alpha=0.9)
 
             ax.set_xlabel('Time [s]' if dt is not None else 'Frame index')
             ax.set_ylabel(_COMPONENT_LABELS.get(component, component))
@@ -277,7 +334,8 @@ def plot_time_trace_compare(results: dict, dt: float = None, strips=(0, 4, 9),
 
         last_case = results[case_labels[-1]]
         radii_for_legend = last_case['radius'][strips] if 'radius' in last_case else None
-        _build_shared_legend(axes[1, 1], strips, case_labels, colors, radii=radii_for_legend, fontsize=legend_fontsize)
+        _build_shared_legend_case_color(axes[1, 1], strips, case_labels, case_colors,
+                                         radii=radii_for_legend, fontsize=legend_fontsize)
 
         fig.tight_layout()
 
