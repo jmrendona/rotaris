@@ -18,14 +18,23 @@ per strip within each) either buries the actual comparison of interest
 small, separately-legended panels, or, if strip count and case count are
 both kept, becomes unreadable at the physical size a thesis page allows.
 
-Design: color encodes STRIP (a colormap, same convention as
-StripForces.plot_time_trace()/plot_vs_angle() - see _strip_colors());
-LINESTYLE encodes CASE (cycling through a fixed list of dash patterns -
-see _LINESTYLES). Together these let every (case, strip) combination be
-told apart on ONE panel per force component (3 panels total, not one per
-case), with a SINGLE shared legend explaining both encodings for the
-whole figure - built once, not repeated (or, worse, omitted) on every
-component's own panel.
+Design: color encodes CASE (cmap-sampled, same convention as
+StripForces.plot_time_trace()/plot_vs_angle() uses for strip - see
+_strip_colors(), reused here for case instead); LINESTYLE encodes STRIP
+(cycling through a fixed list of dash patterns - see _LINESTYLES).
+Distinguishing cases is the actual point of every plot in this module,
+so case gets color, the stronger of the two channels for telling several
+things apart on noisy, heavily-overlapping traces - confirmed, on a real
+case, that case told apart only by linestyle was hard to read even with
+_LINESTYLES' own large, noise-robust dash patterns. Strip-to-strip
+magnitude, the OTHER thing every plot here shows, is instead carried by
+each line's position (radius on the polar panels, vertical offset on the
+Cartesian ones), not by its color or style, so it reads clearly either
+way. Together these let every (case, strip) combination be told apart on
+ONE panel per force component (3 panels total, not one per case), with a
+SINGLE shared legend explaining both encodings for the whole figure -
+built once, not repeated (or, worse, omitted) on every component's own
+panel.
 
 Print-size handling: figures are generated directly at their FINAL
 physical size (inches, `total_width_in`/`total_height_in`), with LOCALLY
@@ -101,7 +110,7 @@ def _strip_colors(items, cmap):
     return plt.cm.get_cmap(cmap)(np.linspace(0, 1, len(items)))
 
 
-def _build_shared_legend(legend_ax, strips, case_labels, colors, radii=None, fontsize=8):
+def _build_shared_legend_case_color(legend_ax, strips, case_labels, case_colors, radii=None, fontsize=8):
 
     '''
     ONE combined legend for the whole multi-panel figure, drawn INSIDE
@@ -118,10 +127,11 @@ def _build_shared_legend(legend_ax, strips, case_labels, colors, radii=None, fon
     to a normal axes cell is laid out by matplotlib like any other
     subplot content, avoiding that failure mode entirely.
 
-    One colored line per selected strip (the color dimension), followed
-    by one black line per case (the linestyle dimension) - so a reader
-    can decode both encodings from a single legend rather than needing
-    them explained twice or guessed at.
+    One colored line per CASE (the color dimension in both of this
+    module's plot functions), followed by one black line per selected
+    strip (the linestyle dimension) - so a reader can decode both
+    encodings from a single legend rather than needing them explained
+    twice or guessed at.
 
     radii : array-like, optional
         Physical radius [m] of each selected strip (e.g.
@@ -130,36 +140,6 @@ def _build_shared_legend(legend_ax, strips, case_labels, colors, radii=None, fon
         reference; omitted if not available (e.g. mismatched strip
         layouts between cases - see plot_time_trace_compare()'s own
         docstring on this assumption).
-    '''
-
-    handles, labels = [], []
-
-    for i, strip_i in enumerate(strips):
-        handles.append(Line2D([0], [0], color=colors[i], linewidth=2.2))
-        if radii is not None:
-            labels.append(f'Strip {strip_i + 1} ($r$={radii[i]:.3f} m)')
-        else:
-            labels.append(f'Strip {strip_i + 1}')
-
-    for j, case_label in enumerate(case_labels):
-        handles.append(Line2D([0], [0], color='black', linestyle=_LINESTYLES[j % len(_LINESTYLES)], linewidth=1.6))
-        labels.append(str(case_label))
-
-    legend_ax.axis('off')
-    legend_ax.legend(handles, labels, loc='center', frameon=False, fontsize=fontsize,
-                      handlelength=2.0, labelspacing=0.5, borderpad=0.5, handletextpad=0.6)
-
-
-def _build_shared_legend_case_color(legend_ax, strips, case_labels, case_colors, radii=None, fontsize=8):
-
-    '''
-    Same purpose as _build_shared_legend() (one combined legend, built in
-    its own grid cell - see that function's docstring for why), but for
-    plot_time_trace_compare()'s swapped encoding: one colored line per
-    CASE (the color dimension here), followed by one black line per strip
-    (the linestyle dimension here) - the mirror image of
-    _build_shared_legend()'s strip-then-case ordering, matching
-    plot_time_trace_compare()'s own color=case/linestyle=strip design.
     '''
 
     handles, labels = [], []
@@ -184,7 +164,7 @@ def _check_consistent_strip_layout(results: dict, strips):
 
     '''
     Warns (does not raise) if the selected strips' physical radii differ
-    non-trivially between cases - _build_shared_legend()'s radii come
+    non-trivially between cases - _build_shared_legend_case_color()'s radii come
     from only ONE case (the last one processed), which silently assumes
     every case shares the same span_min/span_max/n_span_bins layout (as
     this project's own 4-case thesis comparison does, all built with the
@@ -264,7 +244,7 @@ def plot_time_trace_compare(results: dict, dt: float = None, strips=(0, 4, 9),
         Which of 'axial', 'radial', 'tangential' to plot - EXACTLY 3,
         no more, no fewer: they fill the top-left, top-right, and
         bottom-left cells of a 2x2 grid, with the bottom-right cell
-        reserved for the shared legend (see module/_build_shared_legend()
+        reserved for the shared legend (see module/_build_shared_legend_case_color()
         docstrings for why a grid cell, not a figure-spanning legend row,
         is used). Passing a different number raises ValueError.
     cmap : str
@@ -348,19 +328,37 @@ def plot_time_trace_compare(results: dict, dt: float = None, strips=(0, 4, 9),
 def plot_vs_angle_compare(phase_locked: dict, strips=(0, 4, 9),
                            component_list=('axial', 'tangential', 'radial'), cmap: str = 'cividis',
                            total_width_in: float = 6.3, total_height_in: float = 4.8,
-                           tick_fontsize: int = 14, label_fontsize: int = 15, legend_fontsize: int = 14,
+                           tick_fontsize: int = 10, label_fontsize: int = 15, legend_fontsize: int = 14,
+                           title_pad: float = 28,
                            savepath: str = None, dpi: int = 600):
 
     '''
     Phase-locked (revolution-folded) force vs. rotor azimuth, compared
     across several SIMULATIONS at once - the cross-case counterpart to
     StripForces.plot_vs_angle() (which compares strips WITHIN one case).
-    Same color = strip / linestyle = case / shared-legend design as
-    plot_time_trace_compare() - see that function's and the module's own
-    docstring - applied to a 2x2 grid of POLAR axes instead (0 deg at 3
-    o'clock/east, increasing counterclockwise, same convention as
-    StripForces.plot_vs_angle()); the bottom-right cell stays a normal
-    (non-polar) axes, holding the shared legend.
+    2x2 grid of POLAR axes (0 deg at 3 o'clock/east, increasing
+    counterclockwise, same convention as StripForces.plot_vs_angle());
+    the bottom-right cell stays a normal (non-polar) axes, holding the
+    shared legend.
+
+    Same color = CASE (cmap-sampled) / linestyle = strip design as
+    plot_time_trace_compare() - see that function's own docstring for
+    why (distinguishing cases is each figure's actual point; the
+    module's older color=strip/linestyle=case convention is no longer
+    used by either function in this module).
+
+    Two print-size issues specific to a compact polar subplot, fixed
+    here but not relevant to plot_time_trace_compare()'s Cartesian
+    panels: (1) the default tick_fontsize (14, fine on a Cartesian axis)
+    crowded BOTH the angular (0/45/90.../deg) and radial (force value)
+    tick labels against each other and against the grid circles on a
+    real case - lowered to 10 by default here. (2) matplotlib draws the
+    polar 90-degree label just above the plot circle, which collided
+    directly with this panel's own title at the previous, smaller `pad`
+    - confirmed on a real case (title_pad=16 was not enough); raised to
+    28 by default, exposed as its own parameter since the right value
+    depends on tick_fontsize/label_fontsize and the figure's own
+    physical size.
 
     Parameters
     ----------
@@ -371,9 +369,14 @@ def plot_vs_angle_compare(phase_locked: dict, strips=(0, 4, 9),
     component_list : sequence of str
         EXACTLY 3 entries - see plot_time_trace_compare()'s own
         docstring for why.
+    title_pad : float
+        Extra space, in points, between each polar panel's own top edge
+        and its title - see above for why this needed raising past
+        matplotlib's usual default.
     strips, cmap, total_width_in, total_height_in, tick_fontsize,
     label_fontsize, legend_fontsize : see plot_time_trace_compare() -
-        identical meaning here.
+        identical meaning here (tick_fontsize's default differs - see
+        above).
 
     Returns
     -------
@@ -392,7 +395,7 @@ def plot_vs_angle_compare(phase_locked: dict, strips=(0, 4, 9),
     case_labels = list(phase_locked.keys())
     strips = list(strips)
     _check_consistent_strip_layout(phase_locked, strips)
-    colors = _strip_colors(strips, cmap)
+    case_colors = _strip_colors(case_labels, cmap)
 
     with plt.rc_context({
         'text.usetex': True, 'font.family': 'serif', 'font.serif': ['Computer Modern'],
@@ -417,18 +420,19 @@ def plot_vs_angle_compare(phase_locked: dict, strips=(0, 4, 9),
                 for i, strip_i in enumerate(strips):
                     y = vals[:, strip_i]
                     y_closed = np.append(y, y[0])
-                    ax.plot(theta_closed, y_closed, color=colors[i],
-                            linestyle=_LINESTYLES[j % len(_LINESTYLES)], linewidth=1.3, alpha=0.9)
+                    ax.plot(theta_closed, y_closed, color=case_colors[j],
+                            linestyle=_LINESTYLES[i % len(_LINESTYLES)], linewidth=1.3, alpha=0.9)
 
             ax.set_theta_zero_location('E')
             ax.set_theta_direction(1)
             ax.set_rlabel_position(22.5)  # off the 45deg gridline, where it would otherwise overlap
-            ax.set_title(_COMPONENT_LABELS.get(component, component), fontsize=label_fontsize, pad=16)
+            ax.set_title(_COMPONENT_LABELS.get(component, component), fontsize=label_fontsize, pad=title_pad)
             ax.tick_params(axis='both', labelsize=tick_fontsize)
 
         last_case = phase_locked[case_labels[-1]]
         radii_for_legend = last_case['radius'][strips] if 'radius' in last_case else None
-        _build_shared_legend(legend_ax, strips, case_labels, colors, radii=radii_for_legend, fontsize=legend_fontsize)
+        _build_shared_legend_case_color(legend_ax, strips, case_labels, case_colors,
+                                         radii=radii_for_legend, fontsize=legend_fontsize)
 
         axes = np.array([[data_axes[0], data_axes[1]], [data_axes[2], legend_ax]], dtype=object)
 
