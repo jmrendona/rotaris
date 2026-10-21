@@ -406,7 +406,7 @@ p_label = '$C_p$' if normalize else 'Pressure'  # POD's own label - NOT dependen
 # (commented-out above) convergence block's own p_label, which this section used to rely
 # on - confirmed a real NameError once that block was commented out on its own.
 
-pod_span_min, pod_span_max = 0.55 * r_tip, 0.96 * r_tip  # TODO: set from this case's own findings above
+pod_span_min, pod_span_max = 0.2 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
 # pod_chord_min/pod_chord_max: set these (e.g. pod_chord_min = -0.02) if
 # plot_pod_mode()'s own output shows a stray point sitting far from the
 # rest of the selected region - confirmed a real degenerate/edge surfel
@@ -419,6 +419,21 @@ pod_span_min, pod_span_max = 0.55 * r_tip, 0.96 * r_tip  # TODO: set from this c
 # docstrings for the same caution about assuming something is an
 # artifact rather than real physics).
 pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own findings below, if needed
+# pod_point_stride: keep only every Nth point of pod_region (e.g. 2 or 3),
+# AFTER the span/chord crop above - for a case where even the physically-
+# justified region is still too many points to fit in memory (confirmed a
+# real OOM on a real DNS-resolution case: narrowing pod_span_min/
+# pod_span_max alone cut the region to 38% of the surface's total points,
+# which was still ~477GB materialized - point density only falls off
+# roughly linearly with a narrower span band, not steeply, so region
+# narrowing alone may not be enough on its own for an unusually
+# fine-resolution case). None/1 (default): no decimation, every point in
+# the selected region kept - this is what every OTHER case in this
+# project should leave it as; only set this for a case too large to fit
+# otherwise, same spirit as pod_span_min/pod_span_max/pod_chord_min/
+# pod_chord_max above - an explicit, deliberate reduction, not a silent
+# default.
+pod_point_stride = 6  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
 
 span_sv, chord_sv = sv_pressure_inst._span_chord('Upper')
 radius_sv = sv_pressure_inst._radius('Upper')
@@ -441,6 +456,16 @@ if pod_chord_min is not None:
    pod_region &= chord_sv >= pod_chord_min
 if pod_chord_max is not None:
    pod_region &= chord_sv <= pod_chord_max
+
+if pod_point_stride is not None and pod_point_stride > 1:
+   # Thin out the ALREADY-selected region's own points, in their existing
+   # order - not a re-crop by position, so it keeps points spread across
+   # the whole span_min/span_max x chord_min/chord_max box rather than
+   # cutting off one side of it.
+   kept_indices = np.flatnonzero(pod_region)[::pod_point_stride]
+   pod_region = np.zeros_like(pod_region)
+   pod_region[kept_indices] = True
+   print(f'pod_point_stride={pod_point_stride}: region thinned to {int(pod_region.sum())} points')
 
 # Pressure-branch files (converters/ensight_to_h5.py) don't currently
 # carry a per-surfel Area (unlike the forces branch - see
