@@ -1,15 +1,4 @@
-# Case config for manager.py - the common parameters that are the SAME
-# across most calls in manager.py for this case (see manager.py's own
-# top-of-file loader block). Switching to a different simulation means
-# pointing manager.py at a different one of these files, not hunting
-# through manager.py's ~1000 lines for every hardcoded number.
-#
-# NOTE: not every single call in manager.py uses these values as-is - a
-# handful of specific calls deliberately use a different span_min/radii/
-# etc. for that one plot (e.g. a tighter/looser crop for one diagnostic).
-# Those deliberate one-offs stay as literals at their own call site, NOT
-# routed through this file - only the values that are genuinely the same
-# everywhere they appear are pulled out here.
+# Config file for SAGE simulations of rotor in hover
 
 master_path: /scratch/jmrendon/DuctedFan/ductedfan_12e-5_vr12
 case: SAGE
@@ -27,9 +16,7 @@ rotor:
   pref: 101325
   c_ref: null # reference chord [m], used only when normalize is true below
 
-# NDA case: hide the blade's actual size in plots - radii become r/R,
-# chord becomes chord/c_ref, forces become C_T/C_Q-style coefficients,
-# pressure becomes Cp - see each manager's normalize=normalize calls.
+# True if NDA is applied
 normalize: false
 
 # Raw Cartesian axis (0=X, 1=Y, 2=Z) for each blade direction (this
@@ -49,8 +36,8 @@ friction:
 
 convergence:
   dt_pressure: 0.0000488
-  dt_forces: 0.000063468 # CHECK: read from this file's own previous comment ("0.000063468 # forces") - LEAST certain of this reorganization's guesses (unusual double-# comment format here vs. the other case files) - verify against the actual export before trusting
-
+  dt_forces: 0.000063468 
+  
 blade_figsize: null # null for ISAE2 case
 
 frame_loop_step: 90

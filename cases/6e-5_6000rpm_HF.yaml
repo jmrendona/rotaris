@@ -1,15 +1,4 @@
-# Case config for manager.py - the common parameters that are the SAME
-# across most calls in manager.py for this case (see manager.py's own
-# top-of-file loader block). Switching to a different simulation means
-# pointing manager.py at a different one of these files, not hunting
-# through manager.py's ~1000 lines for every hardcoded number.
-#
-# NOTE: not every single call in manager.py uses these values as-is - a
-# handful of specific calls deliberately use a different span_min/radii/
-# etc. for that one plot (e.g. a tighter/looser crop for one diagnostic).
-# Those deliberate one-offs stay as literals at their own call site, NOT
-# routed through this file - only the values that are genuinely the same
-# everywhere they appear are pulled out here.
+# Config file for ISAE2 simulations of isolated rotor in hover
 
 master_path: /scratch/jmrendon/Rotor-alone/1e-5_6000rpm-dns
 case: 2026DNS
@@ -47,7 +36,7 @@ friction:
 
 convergence:
   dt_pressure: 0.000005
-  dt_forces: 0.0000556 # CHECK: read from this file's own previous comment ("Forces -> 0.0000556") - verify against the actual export before trusting
+  dt_forces: 0.0000556 
 
 blade_figsize: null # null for ISAWE2 case
 
