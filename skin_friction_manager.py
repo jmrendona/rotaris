@@ -14,6 +14,7 @@ from bladeprocessor.pod import pod
 from bladeprocessor.pod import plot_pod_mode
 from bladeprocessor.pod import plot_pod_energy
 from bladeprocessor.pod import plot_pod_temporal_coefficient
+from bladeprocessor.pod import plot_pod_spectrogram
 
 # ------------- Wall shear / friction lines ------------- #
 #
@@ -658,6 +659,13 @@ plot_pod_energy(
    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_energy_{case}.png'),
 )
 
+print(40*'-')
+print('Plotting Cf magnitude POD spectrogram (every retained mode\'s own PSD)')
+plot_pod_spectrogram(
+   cf_pod_mag_result, dt=dt,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_spectrogram_{case}.png'),
+)
+
 for m in modes:
    print(40*'-')
    print('Plotting Cf magnitude POD mode 1 (most energetic) on the actual blade geometry')
@@ -717,6 +725,13 @@ plot_pod_energy(
    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_energy_{case}.png'),
 )
 
+print(40*'-')
+print('Plotting Cf chordwise POD spectrogram (every retained mode\'s own PSD)')
+plot_pod_spectrogram(
+   cf_pod_chordwise_result, dt=dt,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_spectrogram_{case}.png'),
+)
+
 for m in modes:
    print(40*'-')
    print('Plotting Cf chordwise POD mode 1 (most energetic) on the actual blade geometry')
@@ -767,6 +782,13 @@ print('Plotting Cf spanwise POD energy spectrum')
 plot_pod_energy(
    cf_pod_spanwise_result,
    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_energy_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf spanwise POD spectrogram (every retained mode\'s own PSD)')
+plot_pod_spectrogram(
+   cf_pod_spanwise_result, dt=dt,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_spectrogram_{case}.png'),
 )
 
 for m in modes:

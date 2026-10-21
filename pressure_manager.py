@@ -18,6 +18,7 @@ from bladeprocessor.pod import pod
 from bladeprocessor.pod import plot_pod_mode
 from bladeprocessor.pod import plot_pod_energy
 from bladeprocessor.pod import plot_pod_temporal_coefficient
+from bladeprocessor.pod import plot_pod_spectrogram
 
 cfg = load_case_config()
 master_path = cfg.master_path
@@ -467,6 +468,13 @@ print(f'Plotting {p_label} POD energy spectrum')
 plot_pod_energy(
    cp_pod_result,
    savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_energy_{case}.png'),
+)
+
+print(40*'-')
+print(f'Plotting {p_label} POD spectrogram (every retained mode\'s own PSD)')
+plot_pod_spectrogram(
+   cp_pod_result, dt=dt,
+   savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_spectrogram_{case}.png'),
 )
 modes = [0,1]
 

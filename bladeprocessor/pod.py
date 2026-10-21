@@ -88,6 +88,9 @@ assumed in advance:
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
+
+from bladeprocessor.convergence import periodogram
 
 plt.rcParams.update({
     "text.usetex": True,
@@ -568,6 +571,130 @@ def plot_pod_temporal_coefficient(pod_result: dict, mode_index: int = 0, dt: flo
     ax.set_ylabel(f'$a_{{{mode_index + 1}}}(t)$')
     ax.grid(True, alpha=0.3)
 
+    fig.tight_layout()
+
+    if savepath:
+        fig.savefig(savepath, dpi=dpi)
+
+    return fig, ax
+
+
+def plot_pod_spectrogram(pod_result: dict, dt: float = None, fs: float = None, n_modes: int = None,
+                          n_chunk: int = 4, nperseg: int = None, nfft: int = None, detrend='constant',
+                          cmap: str = 'cividis', ax=None, savepath: str = None, dpi: int = 600, **welch_kwargs):
+
+    '''
+    Welch PSD of EVERY retained POD mode's own temporal coefficient
+    a_k(t) (not just one, as plot_pod_temporal_coefficient()/
+    bladeprocessor.convergence.plot_periodogram() examine individually),
+    contoured together as mode index vs. frequency - generalizes the
+    single-mode PSD check into one figure showing how a dataset's
+    characteristic frequencies are distributed across its whole modal
+    decomposition, not just whichever one or two modes were picked out
+    for a closer look.
+
+    Each mode's own PSD row is normalized by ITS OWN maximum before
+    plotting (not by the global maximum across all modes) - otherwise a
+    handful of low-order, high-ENERGY modes (see plot_pod_energy()) would
+    wash out every higher-order mode's own spectral content under a
+    shared color scale, even though a mode's FREQUENCY content is a
+    separate question from how much of the total fluctuation ENERGY it
+    carries (see rotaris-docs/pod_section.tex's own
+    "Relation to the Harmonic Decomposition" subsection: POD ranks by
+    energy, with no frequency assumption built in - this plot is exactly
+    how that frequency content is then examined, across the whole
+    decomposition at once). Per-row normalization trades away any
+    information about one mode's PSD being larger in an absolute sense
+    than another's - plot_pod_energy() already shows that - in exchange
+    for making every mode's own dominant frequency equally visible.
+
+    A single horizontal band of color (a given frequency lit up across
+    many consecutive mode indices) indicates that one physical frequency
+    is spread across several modes rather than isolated in one (POD does
+    not guarantee a single frequency maps to a single mode - a traveling
+    structure in particular typically needs a pair, see mode_index=0/1's
+    own cross-check). A diagonal trend (characteristic frequency
+    increasing with mode index) is the usual broadband-turbulence
+    signature - higher-order, lower-energy modes generally carrying
+    higher-frequency, more spatially fine-grained content.
+
+    Parameters
+    ----------
+    pod_result : dict
+        pod()'s own return value.
+    dt, fs : see bladeprocessor.convergence.periodogram() - one of the
+        two is REQUIRED.
+    n_modes : int, optional
+        How many modes (starting from the most energetic) to include -
+        all modes present in `pod_result` by default. Keep this small
+        deliberately for a first look (e.g. 10-20) - Welch's method run
+        once per mode is not expensive, but a contour over hundreds of
+        modes is mostly uninformative, low-energy noise past whatever
+        point plot_pod_energy() already shows the spectrum flattening
+        out.
+    n_chunk, nperseg, nfft, detrend, **welch_kwargs : see
+        bladeprocessor.convergence.periodogram() - identical meaning,
+        applied identically to every mode (computed ONCE from the first
+        mode's own frame count, not re-derived per mode, so every row
+        shares exactly the same frequency axis and can be stacked into
+        one contour).
+    cmap : str
+        Sequential colormap for the normalized PSD - 'cividis' by
+        default, this project's own established colormap convention
+        (see bladeprocessor.case_comparison._strip_colors()).
+
+    Returns
+    -------
+    (fig, ax)
+    '''
+
+    coeff = pod_result['coefficients']
+    n_frames, n_modes_total = coeff.shape
+    n_modes = n_modes_total if n_modes is None else min(n_modes, n_modes_total)
+
+    # Computed once here (mirroring periodogram()'s own n_chunk-based
+    # default), then passed explicitly to every mode's own call below -
+    # letting each call re-derive its own nperseg/nfft from `len(series)`
+    # would still agree in practice (every mode has the same n_frames),
+    # but doing it once and passing it explicitly is what actually
+    # GUARANTEES every row shares one frequency axis, not just something
+    # that happens to hold given today's input shapes.
+    if nperseg is None:
+        nperseg = n_frames // n_chunk
+    if nfft is None:
+        nfft = 1 << (nperseg - 1).bit_length()
+
+    psd_rows = []
+    for k in range(n_modes):
+        freq, psd = periodogram(coeff[:, k], dt=dt, fs=fs, nperseg=nperseg, nfft=nfft,
+                                 detrend=detrend, **welch_kwargs)
+        psd_rows.append(psd)
+    psd_grid = np.array(psd_rows)  # (n_modes, n_freq)
+
+    # Skip freq=0 (DC) - undefined on a log x-axis, same convention as
+    # bladeprocessor.convergence.plot_periodogram().
+    start = 1 if freq[0] == 0 else 0
+    freq = freq[start:]
+    psd_grid = psd_grid[:, start:]
+
+    row_max = psd_grid.max(axis=1, keepdims=True)
+    row_max[row_max == 0] = 1.0  # an all-zero mode (e.g. a genuinely silent high-order mode) stays all-zero, not NaN
+    psd_norm = psd_grid / row_max
+
+    mode_idx = np.arange(1, n_modes + 1)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 5))
+    else:
+        fig = ax.figure
+
+    mesh = ax.pcolormesh(freq, mode_idx, psd_norm, cmap=cmap, shading='auto',
+                          norm=LogNorm(vmin=max(psd_norm[psd_norm > 0].min(), 1e-6), vmax=1.0))
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_xlabel('Frequency [Hz]')
+    ax.set_ylabel('POD mode')
+    fig.colorbar(mesh, ax=ax, label='Normalized PSD [-]')
     fig.tight_layout()
 
     if savepath:
