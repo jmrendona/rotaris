@@ -511,7 +511,6 @@ for m in modes:
       radius_sv[pod_region], chord_sv[pod_region], cp_pod_result, mode_index=m,
       unit_label=f'{p_label} mode amplitude [-]',
       figsize=blade_figsize,
-      radius_full=radius_sv, chord_full=chord_sv,
       savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_{case}.png'),
    )
 

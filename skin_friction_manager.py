@@ -699,7 +699,6 @@ for m in modes:
       radius_fl[pod_region], chord_fl[pod_region], cf_pod_mag_result, mode_index=m,
       unit_label='$C_f$ mode amplitude [-]',
       figsize=blade_figsize,
-      radius_full=radius_fl, chord_full=chord_fl,
       savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_{case}.png'),
    )
 
@@ -709,14 +708,7 @@ for m in modes:
       cf_pod_mag_result, mode_index=m, dt=dt,
       savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_{case}.png'),
    )
-
-   # Is mode 1's own temporal coefficient a_1(t) tied to the rotor's own
-   # rotation (a peak at an integer multiple of f_rot, and/or a clean
-   # phase-locked curve vs azimuth), or does it carry an independent
-   # frequency of its own (e.g. a shear-layer/vortex-shedding instability
-   # whose frequency instead scales with local velocity, not rpm) - see
-   # rotaris-docs/pod_section.tex's own discussion of this in relation to
-   # the harmonic decomposition.
+   
    print(40*'-')
    print('Plotting Cf magnitude POD mode 1 temporal coefficient PSD')
    plot_periodogram(
@@ -772,7 +764,6 @@ for m in modes:
       radius_fl[pod_region], chord_fl[pod_region], cf_pod_chordwise_result, mode_index=m,
       unit_label='$C_{f,chordwise}$ mode amplitude [-]',
       figsize=blade_figsize,
-      radius_full=radius_fl, chord_full=chord_fl,
       savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_{case}.png'),
    )
 
@@ -835,7 +826,6 @@ for m in modes:
       radius_fl[pod_region], chord_fl[pod_region], cf_pod_spanwise_result, mode_index=m,
       unit_label='$C_{f,spanwise}$ mode amplitude [-]',
       figsize=blade_figsize,
-      radius_full=radius_fl, chord_full=chord_fl,
       savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_{case}.png'),
    )
 
