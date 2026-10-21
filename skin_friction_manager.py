@@ -15,6 +15,7 @@ from bladeprocessor.pod import plot_pod_mode
 from bladeprocessor.pod import plot_pod_energy
 from bladeprocessor.pod import plot_pod_temporal_coefficient
 from bladeprocessor.pod import plot_pod_spectrogram
+from bladeprocessor.pod import pod_mode_phase
 
 # ------------- Wall shear / friction lines ------------- #
 #
@@ -732,6 +733,13 @@ for m in modes:
       savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_phaselock_{case}.png'),
    )
 
+# Do modes 1 and 2 form a traveling-wave pair? Quadrature (~90 deg), not
+# opposite phase (~180 deg), is the expected signature - see
+# pod_mode_phase()'s own docstring.
+print(40*'-')
+print('Checking Cf magnitude POD mode 1/2 phase relationship (quadrature check)')
+print(pod_mode_phase(cf_pod_mag_result, mode_a=0, mode_b=1, dt=dt))
+
 # Chordwise component specifically - the signed quantity whose sign
 # reversal actually DEFINES separation/the LSB (see
 # rotaris-docs/cf_computations_section.tex, "Directional Components
@@ -791,6 +799,10 @@ for m in modes:
       savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_phaselock_{case}.png'),
    )
 
+print(40*'-')
+print('Checking Cf chordwise POD mode 1/2 phase relationship (quadrature check)')
+print(pod_mode_phase(cf_pod_chordwise_result, mode_a=0, mode_b=1, dt=dt))
+
 # Spanwise component specifically - the signed quantity whose sign
 # reversal actually DEFINES separation/the LSB (see
 # rotaris-docs/cf_computations_section.tex, "Directional Components
@@ -849,3 +861,7 @@ for m in modes:
       ylabel=f'$a_{m+1}(t)$ phase-locked mean',
       savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_phaselock_{case}.png'),
    )
+
+print(40*'-')
+print('Checking Cf spanwise POD mode 1/2 phase relationship (quadrature check)')
+print(pod_mode_phase(cf_pod_spanwise_result, mode_a=0, mode_b=1, dt=dt))

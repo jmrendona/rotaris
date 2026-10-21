@@ -89,6 +89,7 @@ assumed in advance:
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
+from scipy.signal import csd, coherence
 
 from bladeprocessor.convergence import periodogram
 
@@ -701,3 +702,106 @@ def plot_pod_spectrogram(pod_result: dict, dt: float = None, fs: float = None, n
         fig.savefig(savepath, dpi=dpi)
 
     return fig, ax
+
+
+def pod_mode_phase(pod_result: dict, mode_a: int = 0, mode_b: int = 1, dt: float = None, fs: float = None,
+                    f_target: float = None, n_chunk: int = 4, nperseg: int = None, nfft: int = None,
+                    detrend='constant', **csd_kwargs):
+
+    '''
+    Cross-spectral phase between two POD modes' own temporal
+    coefficients, a_a(t) and a_b(t) - the quantitative version of the
+    "do modes a and b form a traveling-wave pair" check already
+    discussed qualitatively (comparable energy, see plot_pod_energy();
+    comparable characteristic frequency, see plot_pod_spectrogram()). A
+    genuinely traveling (as opposed to spatially stationary) structure
+    requires two modes in QUADRATURE - a phase difference of
+    approximately +/-90 degrees between their temporal coefficients,
+    the direct 1D analogue of the classical cos(kx)/sin(kx) spatial
+    quadrature pair needed to represent a traveling wave
+    A*cos(kx - w*t) = A*[cos(kx)cos(wt) + sin(kx)sin(wt)]. A phase
+    difference near 0 or +/-180 degrees instead indicates the two modes
+    are in (or out of) phase with each other - describing a spatially
+    STATIONARY pattern whose amplitude happens to be split across two
+    modes (e.g. for a numerical reason, not a physical traveling-wave
+    one), not a convecting one.
+
+    Evaluated at whichever frequency the two coefficients are most
+    coherently related (the frequency of peak magnitude-squared
+    coherence between them, via scipy.signal.coherence), not at an
+    arbitrary or pre-assumed frequency - a phase difference is only
+    meaningful where the two signals are actually related; elsewhere it
+    is, in effect, the phase difference of two unrelated noise
+    processes. Pass `f_target` explicitly (e.g. the frequency already
+    identified from plot_pod_spectrogram()/plot_periodogram()) to read
+    the phase off at a specific, chosen frequency instead.
+
+    Parameters
+    ----------
+    pod_result : dict
+        pod()'s own return value.
+    mode_a, mode_b : int
+        0-indexed mode numbers to compare (0, 1 by default - the first
+        and second, i.e. most energetic, modes).
+    dt, fs : see bladeprocessor.convergence.periodogram() - one of the
+        two is REQUIRED.
+    f_target : float, optional
+        Evaluate the phase at this specific frequency [Hz] instead of
+        the frequency of peak coherence.
+    n_chunk, nperseg, nfft, detrend, **csd_kwargs : see
+        bladeprocessor.convergence.periodogram() - identical meaning,
+        passed to both scipy.signal.csd and scipy.signal.coherence.
+
+    Returns
+    -------
+    dict
+        'frequency' : float [Hz] - the frequency the phase was read off
+            at (either f_target, or the frequency of peak coherence).
+        'phase_deg' : float, in (-180, 180] - the phase of a_b relative
+            to a_a at that frequency; positive means a_b leads a_a.
+        'coherence' : float, in [0, 1] - magnitude-squared coherence at
+            that frequency; how reliable 'phase_deg' actually is (close
+            to 1 is a clean, well-defined phase relationship; close to 0
+            means the two signals are essentially unrelated there, and
+            'phase_deg' should not be trusted).
+        'deviation_from_quadrature_deg' : float, in [0, 90] - how far
+            'phase_deg' sits from the nearest of +90/-90 degrees - 0
+            means perfect quadrature (the traveling-wave signature);
+            90 means perfectly in/out of phase (the stationary-pattern
+            signature).
+    '''
+
+    a_a = pod_result['coefficients'][:, mode_a]
+    a_b = pod_result['coefficients'][:, mode_b]
+    n_frames = len(a_a)
+
+    if fs is None:
+        if dt is None:
+            raise ValueError("pod_mode_phase() needs fs or dt - a frequency axis is meaningless without one.")
+        fs = 1.0 / dt
+
+    if nperseg is None:
+        nperseg = n_frames // n_chunk
+    if nfft is None:
+        nfft = 1 << (nperseg - 1).bit_length()
+
+    freq, Pxy = csd(a_a, a_b, fs=fs, nperseg=nperseg, nfft=nfft, detrend=detrend, **csd_kwargs)
+    _, Cxy = coherence(a_a, a_b, fs=fs, nperseg=nperseg, nfft=nfft, detrend=detrend, **csd_kwargs)
+
+    start = 1 if freq[0] == 0 else 0  # skip DC, same convention as periodogram()/plot_periodogram()
+    freq, Pxy, Cxy = freq[start:], Pxy[start:], Cxy[start:]
+
+    if f_target is None:
+        idx = np.argmax(Cxy)
+    else:
+        idx = np.argmin(np.abs(freq - f_target))
+
+    phase_deg = np.degrees(np.angle(Pxy[idx]))
+    deviation_from_quadrature = abs(abs(phase_deg) - 90.0)
+
+    return {
+        'frequency': freq[idx],
+        'phase_deg': phase_deg,
+        'coherence': Cxy[idx],
+        'deviation_from_quadrature_deg': deviation_from_quadrature,
+    }

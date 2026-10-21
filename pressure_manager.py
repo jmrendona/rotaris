@@ -19,6 +19,7 @@ from bladeprocessor.pod import plot_pod_mode
 from bladeprocessor.pod import plot_pod_energy
 from bladeprocessor.pod import plot_pod_temporal_coefficient
 from bladeprocessor.pod import plot_pod_spectrogram
+from bladeprocessor.pod import pod_mode_phase
 
 cfg = load_case_config()
 master_path = cfg.master_path
@@ -543,6 +544,10 @@ for m in modes:
       ylabel=f'$a_{m+1}(t)$ phase-locked mean',
       savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_coeff_phaselock_{case}.png'),
    )
+
+print(40*'-')
+print(f'Checking {p_label} POD mode 1/2 phase relationship (quadrature check)')
+print(pod_mode_phase(cp_pod_result, mode_a=0, mode_b=1, dt=dt))
 
 # # ------------- Cases comparison plotted into a commo grid ------------- #
 # #
