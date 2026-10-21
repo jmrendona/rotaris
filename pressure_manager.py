@@ -37,7 +37,7 @@ thickness_axis = cfg.thickness_axis
 span_min = cfg.span_min
 reverse_chord = cfg.reverse_chord
 radii = cfg.radii
-dt = cfg.dt
+dt = cfg.dt_pressure
 blade_figsize = cfg.blade_figsize
 frame_loop_step = cfg.frame_loop_step
 

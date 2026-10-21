@@ -46,7 +46,8 @@ friction:
   radii: [0.045, 0.072, 0.100, 0.117, 0.122]
 
 convergence:
-  dt: 0.000005 # Forces -> 0.0000556
+  dt_pressure: 0.000005
+  dt_forces: 0.0000556 # CHECK: read from this file's own previous comment ("Forces -> 0.0000556") - verify against the actual export before trusting
 
 blade_figsize: null # null for ISAWE2 case
 

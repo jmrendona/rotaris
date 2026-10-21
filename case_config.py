@@ -72,7 +72,16 @@ def load_case_config():
         reverse_chord=cfg['friction']['reverse_chord'],
         radii=cfg['friction']['radii'],
 
-        dt=cfg['convergence']['dt'],
+        # Separate, NOT interchangeable: the forces and pressure branches
+        # (different raw exports - converters/snc_reader.py vs
+        # converters/ensight_to_h5.py) can and do have different
+        # physical frame intervals for the same case - confirmed a real
+        # case where reusing one shared `dt` for both would have
+        # mis-scaled one branch's frequency axis by an order of
+        # magnitude. skin_friction_manager.py/forces_manager.py use
+        # dt_forces; pressure_manager.py uses dt_pressure.
+        dt_forces=cfg['convergence']['dt_forces'],
+        dt_pressure=cfg['convergence']['dt_pressure'],
 
         blade_figsize=tuple(cfg['blade_figsize']) if cfg['blade_figsize'] else None,
 

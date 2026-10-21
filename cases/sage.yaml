@@ -48,7 +48,8 @@ friction:
   radii: [0.1, 0.21, 0.25, 0.27, 0.29]
 
 convergence:
-  dt: 0.0000488 # 0.000063468 # forces
+  dt_pressure: 0.0000488
+  dt_forces: 0.000063468 # CHECK: read from this file's own previous comment ("0.000063468 # forces") - LEAST certain of this reorganization's guesses (unusual double-# comment format here vs. the other case files) - verify against the actual export before trusting
 
 blade_figsize: null # null for ISAE2 case
 

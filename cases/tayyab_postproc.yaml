@@ -47,7 +47,15 @@ friction:
   radii: [0.085, 0.1, 0.125, 0.150, 0.17]
 
 convergence:
-  dt: 0.00002692 # time step between frames (s)
+  # CHECK: unlike the other case files, no alternate value was ever
+  # recorded for this one, so there is no way to tell from the existing
+  # comment alone whether forces and pressure genuinely share this dt or
+  # whether only one branch's correct value was ever noted down. Kept
+  # identical for both here (preserves this file's current behavior
+  # exactly, no value invented) - confirm whether they actually differ
+  # for this case too before trusting either number.
+  dt_forces: 0.00002692 # time step between frames (s)
+  dt_pressure: 0.00002692 # time step between frames (s)
 
 blade_figsize: [7, 5.5] # null for ISAWE2 case
 

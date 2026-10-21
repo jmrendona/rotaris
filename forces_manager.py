@@ -25,7 +25,7 @@ chord_axis = cfg.chord_axis
 thickness_axis = cfg.thickness_axis
 validate_axes = cfg.validate_axes
 span_min = cfg.span_min
-dt = cfg.dt
+dt = cfg.dt_forces
 
 for _sub in ('forces/convergence/global', 'forces/convergence/local', 'forces/hanson'):
 	os.makedirs(os.path.join(master_path, 'images', _sub), exist_ok=True)
