@@ -16,6 +16,11 @@ from bladeprocessor.pod import plot_pod_energy
 from bladeprocessor.pod import plot_pod_temporal_coefficient
 from bladeprocessor.pod import plot_pod_spectrogram
 from bladeprocessor.pod import pod_mode_phase
+from bladeprocessor.spatial_correlation import two_point_correlation
+from bladeprocessor.spatial_correlation import plot_two_point_correlation
+from bladeprocessor.dmd import dmd
+from bladeprocessor.dmd import plot_dmd_spectrum
+from bladeprocessor.dmd import plot_dmd_mode
 
 # ------------- Wall shear / friction lines ------------- #
 #
@@ -732,6 +737,47 @@ print(40*'-')
 print('Checking Cf magnitude POD mode 1/2 phase relationship (quadrature check)')
 print(pod_mode_phase(cf_pod_mag_result, mode_a=0, mode_b=1, dt=dt))
 
+# Spatial coherence length of the raw Cf magnitude field itself -
+# anchored on the dominant POD mode's own peak location (see
+# two_point_correlation()'s own docstring for why this, rather than the
+# default peak-RMS point, is the right anchor once a specific coherent
+# structure has already been identified).
+cf_mag_ref_index = int(np.argmax(np.abs(cf_pod_mag_result['modes'][0])))
+print(40*'-')
+print('Checking Cf magnitude two-point spatial correlation / coherence length')
+print(two_point_correlation(
+   cf_pod_mag_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_mag_ref_index,
+)['length_scale'])
+plot_two_point_correlation(
+   cf_pod_mag_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_mag_ref_index,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_two_point_corr_{case}.png'),
+)
+
+# DMD, fit on the (noise-robust, truncated) POD coefficient subspace -
+# see bladeprocessor/dmd.py's own docstring for why this, rather than
+# exact DMD on the raw field, is used here.
+print(40*'-')
+print('Running DMD on Cf magnitude POD coefficient subspace')
+cf_dmd_mag_result = dmd(cf_pod_mag_result, dt=dt, n_modes=6)
+print('Cf magnitude DMD frequencies [Hz]: ', cf_dmd_mag_result['frequency'])
+print('Cf magnitude DMD growth rates [1/s]: ', cf_dmd_mag_result['growth_rate'])
+
+print(40*'-')
+print('Plotting Cf magnitude DMD spectrum')
+plot_dmd_spectrum(
+   cf_dmd_mag_result,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_dmd_spectrum_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf magnitude DMD mode 1 (largest amplitude) on the actual blade geometry')
+plot_dmd_mode(
+   radius_fl[pod_region], chord_fl[pod_region], cf_dmd_mag_result, mode_index=0,
+   unit_label='$C_f$ DMD mode amplitude [-]',
+   figsize=blade_figsize,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_dmd_mode1_{case}.png'),
+)
+
 # Chordwise component specifically - the signed quantity whose sign
 # reversal actually DEFINES separation/the LSB (see
 # rotaris-docs/cf_computations_section.tex, "Directional Components
@@ -794,6 +840,39 @@ print(40*'-')
 print('Checking Cf chordwise POD mode 1/2 phase relationship (quadrature check)')
 print(pod_mode_phase(cf_pod_chordwise_result, mode_a=0, mode_b=1, dt=dt))
 
+cf_chordwise_ref_index = int(np.argmax(np.abs(cf_pod_chordwise_result['modes'][0])))
+print(40*'-')
+print('Checking Cf chordwise two-point spatial correlation / coherence length')
+print(two_point_correlation(
+   cf_pod_chordwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_chordwise_ref_index,
+)['length_scale'])
+plot_two_point_correlation(
+   cf_pod_chordwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_chordwise_ref_index,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_two_point_corr_{case}.png'),
+)
+
+print(40*'-')
+print('Running DMD on Cf chordwise POD coefficient subspace')
+cf_dmd_chordwise_result = dmd(cf_pod_chordwise_result, dt=dt, n_modes=6)
+print('Cf chordwise DMD frequencies [Hz]: ', cf_dmd_chordwise_result['frequency'])
+print('Cf chordwise DMD growth rates [1/s]: ', cf_dmd_chordwise_result['growth_rate'])
+
+print(40*'-')
+print('Plotting Cf chordwise DMD spectrum')
+plot_dmd_spectrum(
+   cf_dmd_chordwise_result,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_spectrum_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf chordwise DMD mode 1 (largest amplitude) on the actual blade geometry')
+plot_dmd_mode(
+   radius_fl[pod_region], chord_fl[pod_region], cf_dmd_chordwise_result, mode_index=0,
+   unit_label='$C_{f,chordwise}$ DMD mode amplitude [-]',
+   figsize=blade_figsize,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_mode1_{case}.png'),
+)
+
 # Spanwise component specifically - the signed quantity whose sign
 # reversal actually DEFINES separation/the LSB (see
 # rotaris-docs/cf_computations_section.tex, "Directional Components
@@ -855,3 +934,36 @@ for m in modes:
 print(40*'-')
 print('Checking Cf spanwise POD mode 1/2 phase relationship (quadrature check)')
 print(pod_mode_phase(cf_pod_spanwise_result, mode_a=0, mode_b=1, dt=dt))
+
+cf_spanwise_ref_index = int(np.argmax(np.abs(cf_pod_spanwise_result['modes'][0])))
+print(40*'-')
+print('Checking Cf spanwise two-point spatial correlation / coherence length')
+print(two_point_correlation(
+   cf_pod_spanwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_spanwise_ref_index,
+)['length_scale'])
+plot_two_point_correlation(
+   cf_pod_spanwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_spanwise_ref_index,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_two_point_corr_{case}.png'),
+)
+
+print(40*'-')
+print('Running DMD on Cf spanwise POD coefficient subspace')
+cf_dmd_spanwise_result = dmd(cf_pod_spanwise_result, dt=dt, n_modes=6)
+print('Cf spanwise DMD frequencies [Hz]: ', cf_dmd_spanwise_result['frequency'])
+print('Cf spanwise DMD growth rates [1/s]: ', cf_dmd_spanwise_result['growth_rate'])
+
+print(40*'-')
+print('Plotting Cf spanwise DMD spectrum')
+plot_dmd_spectrum(
+   cf_dmd_spanwise_result,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_spectrum_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf spanwise DMD mode 1 (largest amplitude) on the actual blade geometry')
+plot_dmd_mode(
+   radius_fl[pod_region], chord_fl[pod_region], cf_dmd_spanwise_result, mode_index=0,
+   unit_label='$C_{f,spanwise}$ DMD mode amplitude [-]',
+   figsize=blade_figsize,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_mode1_{case}.png'),
+)

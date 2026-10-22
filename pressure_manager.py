@@ -20,6 +20,11 @@ from bladeprocessor.pod import plot_pod_energy
 from bladeprocessor.pod import plot_pod_temporal_coefficient
 from bladeprocessor.pod import plot_pod_spectrogram
 from bladeprocessor.pod import pod_mode_phase
+from bladeprocessor.spatial_correlation import two_point_correlation
+from bladeprocessor.spatial_correlation import plot_two_point_correlation
+from bladeprocessor.dmd import dmd
+from bladeprocessor.dmd import plot_dmd_spectrum
+from bladeprocessor.dmd import plot_dmd_mode
 
 cfg = load_case_config()
 master_path = cfg.master_path
@@ -547,6 +552,47 @@ for m in modes:
 print(40*'-')
 print(f'Checking {p_label} POD mode 1/2 phase relationship (quadrature check)')
 print(pod_mode_phase(cp_pod_result, mode_a=0, mode_b=1, dt=dt))
+
+# Spatial coherence length of the raw field itself - anchored on the
+# dominant POD mode's own peak location (see two_point_correlation()'s
+# own docstring for why this, rather than the default peak-RMS point, is
+# the right anchor once a specific coherent structure has already been
+# identified).
+cp_ref_index = int(np.argmax(np.abs(cp_pod_result['modes'][0])))
+print(40*'-')
+print(f'Checking {p_label} two-point spatial correlation / coherence length')
+print(two_point_correlation(
+   cp_pod_data, radius_sv[pod_region], chord_sv[pod_region], ref_index=cp_ref_index,
+)['length_scale'])
+plot_two_point_correlation(
+   cp_pod_data, radius_sv[pod_region], chord_sv[pod_region], ref_index=cp_ref_index,
+   savepath=os.path.join(master_path, f'images/cp/pod/cp_two_point_corr_{case}.png'),
+)
+
+# DMD, fit on the (noise-robust, truncated) POD coefficient subspace -
+# see bladeprocessor/dmd.py's own docstring for why this, rather than
+# exact DMD on the raw field, is used here.
+print(40*'-')
+print(f'Running DMD on {p_label} POD coefficient subspace')
+cp_dmd_result = dmd(cp_pod_result, dt=dt, n_modes=6)
+print(f'{p_label} DMD frequencies [Hz]: ', cp_dmd_result['frequency'])
+print(f'{p_label} DMD growth rates [1/s]: ', cp_dmd_result['growth_rate'])
+
+print(40*'-')
+print(f'Plotting {p_label} DMD spectrum')
+plot_dmd_spectrum(
+   cp_dmd_result,
+   savepath=os.path.join(master_path, f'images/cp/pod/cp_dmd_spectrum_{case}.png'),
+)
+
+print(40*'-')
+print(f'Plotting {p_label} DMD mode 1 (largest amplitude) on the actual blade geometry')
+plot_dmd_mode(
+   radius_sv[pod_region], chord_sv[pod_region], cp_dmd_result, mode_index=0,
+   unit_label=f'{p_label} DMD mode amplitude [-]',
+   figsize=blade_figsize,
+   savepath=os.path.join(master_path, f'images/cp/pod/cp_dmd_mode1_{case}.png'),
+)
 
 # # ------------- Cases comparison plotted into a commo grid ------------- #
 # #

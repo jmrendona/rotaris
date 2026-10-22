@@ -2250,6 +2250,190 @@ approaches 1 as the waveform stops changing; there's no `sync='none'`
 equivalent here since there's no notion of a "cycle" to correlate
 without a real period (`dt` and `rpm` are always required).
 
+## Proper Orthogonal Decomposition (POD): `bladeprocessor/pod.py`
+
+Objective, energy-ranked identification of the dominant spatial
+pattern(s) of unsteadiness in a time-resolved scalar surface field
+(Cf or a component of it, Cp) - a complementary question to the
+harmonic decomposition above: POD makes no assumption about frequency
+content at all, and instead asks what single spatial pattern explains
+the largest share of the recorded fluctuation ENERGY. See
+`rotaris-docs/pod_section.tex` for the full mathematical derivation.
+Deliberately standalone, not a method on `FrictionLines` or
+`SurfaceVariable` - fed by whichever class's own
+`cf_time_series()`/`cp_time_series_region()` is appropriate, same
+`(n_frames, n_points)` convention throughout.
+
+```python
+from bladeprocessor.pod import pod, plot_pod_energy, plot_pod_mode
+from bladeprocessor.pod import plot_pod_temporal_coefficient, plot_pod_spectrogram, pod_mode_phase
+
+# restrict to wherever the structure of interest actually lives BEFORE
+# calling pod() - see the memory note below:
+region = (radius > 0.1 * r_tip) & (radius < 1.0 * r_tip)
+cf_data = fl.cf_time_series(surface='Upper', component=None)[:, region]
+
+result = pod(cf_data, n_modes=10, weights=fl._area('Upper')[region])
+plot_pod_energy(result, savepath='pod_energy.png')          # look here first
+plot_pod_mode(radius[region], chord[region], result, mode_index=0,
+              savepath='pod_mode1.png')
+plot_pod_temporal_coefficient(result, mode_index=0, dt=dt, savepath='pod_coeff1.png')
+```
+
+- **Method of snapshots, not direct SVD.** `pod()` eigendecomposes the
+  field's own small `(n_frames, n_frames)` Gram matrix rather than
+  calling `np.linalg.svd()` on the full `(n_frames, n_points)` data
+  matrix directly - confirmed, via a controlled reproduction on a real
+  case, that the direct-SVD route SEGFAULTS non-deterministically
+  inside this cluster's LAPACK at this project's real data scale
+  (hundreds of frames against millions of surfels). Mathematically
+  equivalent either way.
+- **Memory**: use `variable_time_series_region()`/`cp_time_series_region()`
+  (not `variable_time_series()`/`cp_time_series()` plus a post-hoc
+  column crop) to restrict to a region - the crop is then applied
+  PER FRAME-CHUNK during the streamed read, never holding the full,
+  unrestricted array in memory at once.
+- **`weights`**: pass each surfel's own `Area` (e.g. `fl._area(surface)`)
+  for a physically energy-correct decomposition on a non-uniform mesh -
+  unweighted POD (the default) implicitly biases the energy ranking
+  toward whichever region happens to be most finely meshed. Pressure-
+  branch files (`converters/ensight_to_h5.py`) don't currently carry a
+  per-surfel `Area` - `pressure_manager.py` falls back to an unweighted
+  POD on that branch automatically (`sv.areas[surface] is None`).
+- **`plot_pod_spectrogram()`**: every retained mode's own Welch PSD
+  (see `periodogram()` below), contoured together as mode index vs.
+  frequency, each row normalized by its own maximum. A horizontal band
+  (one frequency shared across several mode indices) is the signature
+  of a traveling structure split across a mode pair; a diagonal trend
+  (frequency increasing with mode index) is the usual broadband-
+  turbulence signature.
+- **`pod_mode_phase()`**: the quantitative check for whether two modes
+  sharing a frequency (identified from the spectrogram) actually form a
+  traveling-wave pair. A genuinely traveling structure needs two modes
+  in spatial AND temporal QUADRATURE (~90°), not "opposite phase"
+  (~180°) - see the function's own docstring for the full
+  `cos(kx - wt)` derivation, and `rotaris-docs/pod_section.tex`'s
+  "Phase Relationship Between Two Modes" subsection for the write-up.
+
+```python
+# Does mode 1/mode 2 form a traveling-wave pair (quadrature), or two
+# independently stationary patterns sharing a frequency by coincidence?
+pod_mode_phase(result, mode_a=0, mode_b=1, dt=dt)
+# {'frequency': ..., 'phase_deg': ..., 'coherence': ...,
+#  'deviation_from_quadrature_deg': ...}  # 0 = quadrature, 90 = in/out of phase
+```
+
+## Spatial two-point correlation and coherence length: `bladeprocessor/spatial_correlation.py`
+
+A different question from POD's own energy ranking, asked of the RAW
+field directly rather than through any modal decomposition: how large,
+in physical space, is the region over which a fluctuating field stays
+correlated with itself. The spatial analogue of
+`bladeprocessor.convergence.autocorrelation()`/`integral_timescale()`
+(temporal correlation structure, lag in time) - see
+`rotaris-docs/two_point_correlation_section.tex` for the full
+derivation, built by exchanging the roles of time and space in that
+same machinery.
+
+```python
+from bladeprocessor.spatial_correlation import two_point_correlation, plot_two_point_correlation
+
+# ref_index=None (default): the point of largest fluctuation RMS is
+# used automatically - see "which point to use" below.
+result = two_point_correlation(cf_data, radius[region], chord[region])
+print(result['length_scale'])  # coherence length [m]
+
+plot_two_point_correlation(cf_data, radius[region], chord[region],
+                            savepath='two_point_correlation.png')
+```
+
+- **Which reference point to use**: the default (largest fluctuation
+  RMS) anchors the estimate on whichever point is most energetic
+  overall - appropriate when no specific structure has been identified
+  yet. Once a POD mode has already identified a specific coherent
+  structure, anchor on THAT structure's own peak instead, otherwise the
+  default may pick a point dominated by broadband turbulence rather
+  than the structure of interest:
+
+  ```python
+  ref_index = int(np.argmax(np.abs(pod_result['modes'][0])))
+  two_point_correlation(cf_data, radius[region], chord[region], ref_index=ref_index)
+  ```
+
+  Calling this at a few different reference points spaced along a
+  structure's own direction of travel (e.g. several chordwise stations
+  along the reattachment line) is also how to check whether the
+  coherence length itself GROWS downstream - the spatial signature of a
+  vortex-pairing cascade (merging, growing eddies) rather than a single,
+  fixed-size structure.
+- Correlation is computed from ONE reference point against every other
+  (not every pair of points against each other - an `n_points^2`
+  problem, intractable at this project's real surfel counts), then
+  binned by separation distance for a smoother `R(r)` (an unstructured
+  CFD mesh has no regular spacing, so the raw per-surfel scatter is
+  noisy at a given distance). `length_scale` integrates the binned
+  `R(r)` from `r=0` to its first zero crossing, mirroring
+  `integral_timescale()`'s own "integrate to the first zero crossing"
+  definition exactly.
+- The Pearson correlation coefficient already subtracts each point's
+  own time mean internally - pass the SAME raw `data` array `pod()`
+  itself would receive, no separate mean-removal step needed first.
+
+## Dynamic Mode Decomposition (DMD): `bladeprocessor/dmd.py`
+
+Fits a best-approximating LINEAR operator directly to the recorded
+dynamics, in exchange obtaining, for every retained mode, a well-
+defined complex frequency AND growth/decay rate in one step - the one
+piece of information POD's own frequency checks (`plot_pod_spectrogram()`/
+`pod_mode_phase()`, both PSD/cross-spectrum-based) cannot give at all,
+since a power spectral density has no concept of growth or decay, only
+of relative power. See `rotaris-docs/dmd_section.tex` for the full
+derivation.
+
+```python
+from bladeprocessor.dmd import dmd, plot_dmd_spectrum, plot_dmd_mode
+
+dmd_result = dmd(pod_result, dt=dt, n_modes=6)
+print(dmd_result['frequency'])     # [Hz], one per retained mode
+print(dmd_result['growth_rate'])   # [1/s] - ~0 = sustained, <0 = decaying, >0 = suspicious
+
+plot_dmd_spectrum(dmd_result, savepath='dmd_spectrum.png')   # frequency vs. growth rate, sized by amplitude
+plot_dmd_mode(radius[region], chord[region], dmd_result, mode_index=0, part='real',
+              savepath='dmd_mode1.png')
+```
+
+- **Fit ON an existing POD result, not on the raw field.** "Exact" DMD
+  needs the economy SVD of the full `(n_points, n_frames-1)` snapshot
+  matrix - the exact same large, dense decomposition `pod()`'s own
+  method-of-snapshots trick exists to avoid (see above). `dmd()`
+  instead fits its linear operator to `pod_result['coefficients']`
+  directly - a tiny, always-safe `(k, k)` problem regardless of how
+  large `n_frames`/`n_points` are. This also happens to be the
+  standard practical remedy for DMD's own well-known sensitivity to
+  broadband noise (more severe than POD's own) - restrict the fit to
+  the subspace already identified as energetically significant, via
+  `n_modes`, rather than to directions a finite record cannot
+  meaningfully constrain.
+- **Reading the spectrum** (`plot_dmd_spectrum()`): growth rate near
+  zero marks a genuinely sustained, repeatable oscillation (the
+  signature of a real coherent structure, e.g. a locked-in vortex-
+  shedding cycle); growth rate well below zero marks a decaying/noise-
+  dominated mode (check its `amplitude` - small supports "noise"); a
+  growing mode (growth rate above zero) on an otherwise statistically
+  stationary signal is usually a fitting artifact and should not be
+  trusted without confirming it reappears on a different time window of
+  the same record. Every genuinely physical oscillatory mode appears as
+  a complex-conjugate pair (matching growth rate/amplitude, opposite-
+  signed frequency) - a single, unpaired nonzero-frequency mode is a
+  numerical artifact.
+- **`plot_dmd_mode(..., part=...)`**: a DMD mode is complex-valued even
+  for a real field - `'real'`/`'imag'` (symmetric color scale, like
+  `plot_pod_mode()`), `'abs'` (magnitude), or `'phase'` (cyclic, degrees).
+- Modes are returned sorted by descending `|amplitude|` - already a fair
+  ranking with no separate mode-norm correction needed, since every DMD
+  mode here automatically inherits unit norm from the POD modes' own
+  orthonormality (see `rotaris-docs/dmd_section.tex`).
+
 ## What's still open
 
 - Iso-radius / (r/R, x/c) resampling directly from raw `.snc` surfel
