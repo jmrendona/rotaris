@@ -59,6 +59,53 @@ plt.rcParams.update({
 })
 
 
+def _fit_dmd_operator(coeff, dt):
+
+    '''
+    The core DMD fit - k x k normal-equations least squares plus an
+    eigendecomposition - factored out of dmd() so joint_dmd() (fit on a
+    STACKED, multi-field coefficient array) can reuse the exact same,
+    already-safe math instead of duplicating it. See dmd()'s own
+    docstring for the full derivation; this only takes the already-
+    assembled (n_frames, k) coefficient array and a timestep, with no
+    assumption about where `coeff`'s own columns came from (a single
+    field's POD coefficients, or several fields' stacked together).
+
+    Returns
+    -------
+    mu, frequency, growth_rate, b, W : each sorted by DESCENDING |b| -
+        see dmd()'s own Returns section for what each one is. W's
+        columns are the (unit-norm) eigenvectors, in the SAME coefficient
+        basis/order `coeff`'s own columns were given in.
+    '''
+
+    n_frames, k = coeff.shape
+    if n_frames < 3:
+        raise ValueError(f"Need at least 3 frames to fit a one-step DMD operator - got {n_frames}.")
+
+    Z1 = coeff[:-1, :].T  # (k, n_frames-1) - snapshots a(t_0) .. a(t_{N-2})
+    Z2 = coeff[1:, :].T   # (k, n_frames-1) - the one-step-later snapshots a(t_1) .. a(t_{N-1})
+
+    # Least-squares fit of Atilde (Z2 ~= Atilde @ Z1) via the k x k normal
+    # equations - always safe regardless of n_frames, since the matrix
+    # actually inverted here is only (k, k), never (n_frames, n_frames)
+    # or (n_points, n_points).
+    G1 = Z1 @ Z1.T
+    Atilde = (Z2 @ Z1.T) @ np.linalg.pinv(G1)
+
+    mu, W = np.linalg.eig(Atilde)  # W's columns are unit-norm eigenvectors (numpy's own eig() convention)
+
+    omega = np.log(mu) / dt
+    growth_rate = omega.real
+    frequency = omega.imag / (2.0 * np.pi)
+
+    b = np.linalg.solve(W, coeff[0, :])
+
+    order = np.argsort(-np.abs(b))
+
+    return mu[order], frequency[order], growth_rate[order], b[order], W[:, order]
+
+
 def dmd(pod_result: dict, dt: float = None, fs: float = None, n_modes: int = None):
 
     '''
@@ -95,10 +142,11 @@ def dmd(pod_result: dict, dt: float = None, fs: float = None, n_modes: int = Non
     frame's own coefficient vector in the eigenvector basis,
     b = W^{-1} @ a(t_0) (W's columns are the w_j) - the standard "exact
     DMD" amplitude definition (Tu et al., 2014), used here to RANK modes
-    (descending |b_j|; see 'amplitude' below) rather than to reconstruct
-    the full field (no reconstruct_from_dmd()-style function is provided
-    here - not currently needed, and straightforward to add from
-    g(p, t_n) ~= sum_j b_j * mu_j^n * Phi_j(p) if it becomes useful).
+    (descending |b_j|; see 'amplitude' below). The same b_j, mu_j (and
+    'eigenvectors' below) also let the fitted dynamics be replayed
+    forward in time, independent of rank - see dmd_reconstruct(), the
+    standard way to check how well (or how quickly not) this fit
+    actually describes the recorded signal.
 
     Reading the result (see plot_dmd_spectrum()):
         growth_rate ~= 0 : a genuinely SUSTAINED oscillation - the
@@ -154,6 +202,13 @@ def dmd(pod_result: dict, dt: float = None, fs: float = None, n_modes: int = Non
             DMD spatial modes Phi_j, one per row (same row-per-mode
             convention as pod_result['modes']) - see plot_dmd_mode() to
             visualize one on the actual blade geometry.
+        eigenvectors : np.ndarray, shape (k, k), complex
+            W, columns = w_j, in POD-COEFFICIENT space (not yet
+            projected through pod_result['modes']) - needed by
+            dmd_reconstruct() to replay the fitted coefficient
+            trajectory a_DMD(t) for comparison against
+            pod_result['coefficients'] itself; not generally needed
+            otherwise (use 'modes' for the physical-space shape).
         dt : float [s]
     '''
 
@@ -167,38 +222,80 @@ def dmd(pod_result: dict, dt: float = None, fs: float = None, n_modes: int = Non
         if fs is None:
             raise ValueError("dmd() needs fs or dt - growth rates/frequencies are meaningless without one.")
         dt = 1.0 / fs
-    if n_frames < 3:
-        raise ValueError(f"Need at least 3 frames to fit a one-step DMD operator - got {n_frames}.")
 
-    Z1 = a[:-1, :].T  # (k, n_frames-1) - snapshots a(t_0) .. a(t_{N-2})
-    Z2 = a[1:, :].T   # (k, n_frames-1) - the one-step-later snapshots a(t_1) .. a(t_{N-1})
-
-    # Least-squares fit of Atilde (Z2 ~= Atilde @ Z1) via the k x k normal
-    # equations - always safe regardless of n_frames, since the matrix
-    # actually inverted here is only (k, k) (k = a handful of retained
-    # POD modes), never (n_frames, n_frames) or (n_points, n_points).
-    G1 = Z1 @ Z1.T
-    Atilde = (Z2 @ Z1.T) @ np.linalg.pinv(G1)
-
-    mu, W = np.linalg.eig(Atilde)  # W's columns are unit-norm eigenvectors (numpy's own eig() convention)
-
-    omega = np.log(mu) / dt
-    growth_rate = omega.real
-    frequency = omega.imag / (2.0 * np.pi)
-
-    b = np.linalg.solve(W, a[0, :])
+    mu, frequency, growth_rate, b, W = _fit_dmd_operator(a, dt)
     modes = W.T @ psi
 
-    order = np.argsort(-np.abs(b))
-
     return {
-        'eigenvalues': mu[order],
-        'frequency': frequency[order],
-        'growth_rate': growth_rate[order],
-        'amplitude': b[order],
-        'modes': modes[order],
+        'eigenvalues': mu,
+        'frequency': frequency,
+        'growth_rate': growth_rate,
+        'amplitude': b,
+        'modes': modes,
+        'eigenvectors': W,
         'dt': dt,
     }
+
+
+def dmd_reconstruct(dmd_result: dict, n_frames: int):
+
+    '''
+    Replays DMD's own fitted linear dynamics forward in time from its
+    eigenvalues, amplitudes, and (POD-coefficient-space) eigenvectors
+    alone, g(t_n)'s reduced-coordinate counterpart
+    a_DMD(t_n) = sum_j b_j * mu_j^n * w_j, directly comparable to the
+    ORIGINAL pod_result['coefficients'] dmd() was fit from (see
+    plot_dmd_reconstruction()) - the standard way to check how well a
+    DMD fit actually describes the recorded signal, not just read that
+    off indirectly from its growth rates.
+
+    The reconstruction is EXACT at n=0 by construction (that is exactly
+    how the amplitudes b_j were derived - solving a(t_0) = W @ b) and
+    then evolves purely from the fitted dynamics onward; this is honest
+    behavior, not a bug - a reconstruction that matches at t=0 and then
+    rapidly diverges from (or decays faster than) the real recorded
+    signal is itself the direct, visual demonstration that a linear fit
+    does not sustain the recorded behavior, exactly as a strongly
+    negative growth_rate already indicates numerically. Conversely, a
+    reconstruction that keeps tracking the real signal for a long
+    stretch of the record is direct, visual evidence of a genuinely
+    well-described, persistent oscillator.
+
+    Parameters
+    ----------
+    dmd_result : dict
+        dmd()'s own return value - needs 'eigenvalues', 'amplitude', and
+        'eigenvectors' (NOT provided by joint_dmd(), which returns
+        'modes_a'/'modes_b' instead of a single POD-coefficient space -
+        this function is for a single-field dmd() result only).
+    n_frames : int
+        How many frames to replay forward - pass
+        pod_result['coefficients'].shape[0] to reconstruct across the
+        SAME record dmd() was fit from (the usual case, for a direct,
+        frame-by-frame comparison).
+
+    Returns
+    -------
+    coeff_recon : np.ndarray, shape (n_frames, k), complex
+        a_DMD(t_n), one column per retained POD coefficient, in the SAME
+        order as dmd_result['eigenvectors']'s own rows (i.e. the
+        original POD mode order, NOT re-sorted by DMD amplitude - take
+        .real for comparison/plotting; for a real input field, the
+        imaginary part should already be negligible (machine precision)
+        as a direct consequence of every oscillatory mode's complex-
+        conjugate pairing (see dmd()'s own docstring) - a non-negligible
+        imaginary part here would indicate something upstream (an
+        unpaired mode, a bug) rather than real physics.
+    '''
+
+    mu = dmd_result['eigenvalues']
+    b = dmd_result['amplitude']
+    W = dmd_result['eigenvectors']
+
+    powers = mu[None, :] ** np.arange(n_frames)[:, None]  # (n_frames, k) - mu_j^n
+    coeff_recon = (powers * b[None, :]) @ W.T
+
+    return coeff_recon
 
 
 def plot_dmd_spectrum(dmd_result: dict, ax=None, cmap: str = 'cividis', savepath: str = None, dpi: int = 600):
@@ -236,6 +333,64 @@ def plot_dmd_spectrum(dmd_result: dict, ax=None, cmap: str = 'cividis', savepath
     ax.set_ylabel('Growth rate [1/s]')
     ax.grid(True, alpha=0.3)
     fig.colorbar(sc, ax=ax, label='DMD amplitude $|b|$ [-]')
+    fig.tight_layout()
+
+    if savepath:
+        fig.savefig(savepath, dpi=dpi)
+
+    return fig, ax
+
+
+def plot_dmd_reconstruction(pod_result: dict, dmd_result: dict, mode_index: int = 0, dt: float = None,
+                             ax=None, color: str = 'black', recon_color: str = 'tab:red',
+                             savepath: str = None, dpi: int = 600):
+
+    '''
+    Overlays dmd_reconstruct()'s own replayed coefficient trajectory
+    against the ACTUAL recorded POD coefficient a_ell(t) for one mode -
+    the direct, visual DMD-fit-quality check (see dmd_reconstruct()'s
+    own docstring): agreement over a long stretch of the record means
+    the fitted dynamics genuinely describe the signal; the reconstruction
+    peeling away from the real trace (typically decaying toward zero,
+    given every growth rate found so far in this project's own data has
+    been negative) is the same "not a persistent linear oscillator"
+    conclusion already read off growth_rate, now shown directly rather
+    than inferred from a single number.
+
+    mode_index here indexes pod_result['coefficients']'s OWN mode order
+    (0 = POD's most energetic mode) - NOT dmd_result's own DMD-amplitude
+    ranking (dmd_reconstruct() returns every retained coefficient
+    reconstructed at once, in POD's original order, by design, so this
+    plot can be made for whichever POD mode is of interest).
+
+    Returns
+    -------
+    (fig, ax)
+    '''
+
+    coeff = pod_result['coefficients']
+    n_frames = coeff.shape[0]
+    if mode_index >= coeff.shape[1]:
+        raise ValueError(f"mode_index={mode_index} out of range - only {coeff.shape[1]} mode(s) available.")
+
+    coeff_recon = dmd_reconstruct(dmd_result, n_frames)
+
+    t = np.arange(n_frames) * dt if dt is not None else np.arange(n_frames)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(9, 4))
+    else:
+        fig = ax.figure
+
+    ax.plot(t, coeff[:, mode_index], color=color, linewidth=1.2, label='Recorded $a(t)$')
+    ax.plot(t, coeff_recon[:, mode_index].real, color=recon_color, linewidth=1.2,
+            linestyle='--', label='DMD reconstruction')
+    ax.axhline(0, color='k', linewidth=0.8, alpha=0.4, linestyle=':')
+    ax.set_xlabel('Time [s]' if dt is not None else 'Frame index')
+    ax.set_ylabel(f'$a_{{{mode_index + 1}}}(t)$')
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+
     fig.tight_layout()
 
     if savepath:
@@ -337,6 +492,272 @@ def plot_dmd_mode(radius, chord, dmd_result: dict, mode_index: int = 0, part: st
     fig.colorbar(sc, ax=ax, orientation='horizontal', pad=0.18, aspect=30,
                  label=unit_label or f'DMD mode amplitude ({part}) [-]')
 
+    fig.tight_layout()
+
+    if savepath:
+        fig.savefig(savepath, dpi=dpi)
+
+    return fig, ax
+
+
+def resample_coefficients(coeff, dt_from, t_target):
+
+    '''
+    Linear-interpolates a POD coefficient trajectory, recorded on its
+    own native, regularly-spaced time grid (spacing dt_from), onto an
+    externally given target time grid `t_target` - the resampling step
+    joint_dmd() needs before two fields recorded at DIFFERENT native
+    sampling rates (e.g. this project's own dt_forces != dt_pressure)
+    can be stacked into one shared state and fit with a single DMD
+    operator, which only makes sense once both share a common, single
+    notion of "one step forward". Same plain np.interp-based approach
+    already used by bladeprocessor.convergence.cycle_correlation() to
+    resample onto a shared phase grid - standalone here rather than
+    imported from there, since that function's own resampling is
+    specific to one revolution's worth of phase, not an arbitrary
+    external time grid.
+
+    Interpolating is only ever safe DOWN in rate - t_target should be a
+    COARSER (larger-spacing) grid than dt_from's own native one (see
+    joint_dmd(), which enforces this); interpolating a signal onto a
+    FINER grid than it was actually sampled at cannot recover content
+    that was never recorded, it only manufactures smooth-looking values
+    between real samples.
+
+    Parameters
+    ----------
+    coeff : array-like, shape (n_frames, k)
+        A POD coefficient trajectory on its own native, regular grid
+        t_native = arange(n_frames) * dt_from.
+    dt_from : float
+        `coeff`'s own native timestep [s].
+    t_target : array-like, shape (n_target,)
+        The time values [s] to resample onto - must lie within
+        `coeff`'s own recorded time span (t_native[0] to t_native[-1]);
+        values outside that range are not extrapolated meaningfully by
+        np.interp (it holds the nearest endpoint constant instead), so
+        joint_dmd() restricts t_target to the actual overlap of both
+        records before calling this.
+
+    Returns
+    -------
+    coeff_resampled : np.ndarray, shape (n_target, k)
+    '''
+
+    coeff = np.asarray(coeff)
+    t_target = np.asarray(t_target)
+    n_frames = coeff.shape[0]
+    t_native = np.arange(n_frames) * dt_from
+
+    coeff_resampled = np.empty((len(t_target), coeff.shape[1]), dtype=coeff.dtype)
+    for j in range(coeff.shape[1]):
+        coeff_resampled[:, j] = np.interp(t_target, t_native, coeff[:, j])
+
+    return coeff_resampled
+
+
+def joint_dmd(pod_result_a: dict, dt_a: float, pod_result_b: dict, dt_b: float,
+              n_modes_a: int = None, n_modes_b: int = None):
+
+    '''
+    Multi-variable ("coupled") DMD: fits ONE shared linear operator
+    across the STACKED POD coefficients of two DIFFERENT fields at once
+    (e.g. this project's own Cf and Cp) - a fundamentally different
+    question from calling dmd() separately on each field and comparing
+    the two fits side by side (as skin_friction_manager.py/
+    pressure_manager.py already do). Two separate fits can only ever
+    show that both fields happen to share a similar frequency; a joint
+    fit instead directly tests whether a SINGLE, COMBINED linear
+    operator meaningfully mixes both fields' own dynamics together -
+    i.e. whether their fluctuations are coupled, not merely coincident.
+
+    Mechanically: let a(t) be field A's own first n_modes_a retained POD
+    coefficients and c(t) field B's own first n_modes_b, each a plain
+    pod()['coefficients'] array. The combined state is their
+    concatenation at each shared time instant, [a(t), c(t)], and
+    _fit_dmd_operator() (the SAME normal-equations fit dmd() itself
+    uses, see that function's own docstring) is applied to this single,
+    wider coefficient array - A and B are not treated specially by the
+    fit itself, only by how the result is unpacked afterward (see
+    Returns below).
+
+    Resampling onto a common time grid: "one step forward" is only
+    well-defined once both fields share a single timeline, which they
+    generally do NOT at this project's own native sampling (dt_forces
+    != dt_pressure). Whichever field has the SMALLER dt (the finer,
+    higher-frequency sampling) is linearly interpolated DOWN
+    (resample_coefficients()) onto the OTHER field's own, coarser native
+    grid, truncated to the two records' overlapping duration - never the
+    other direction, since interpolating a coarse signal onto a finer
+    grid cannot recover content it was never sampled at in the first
+    place. This necessarily discards whatever content in the finer-
+    sampled field sits above the COARSER field's own Nyquist frequency
+    (half its sampling rate) - if that field's own plain dmd()/
+    periodogram already identified a characteristic frequency above that
+    limit, treat any result here involving that field with proportionally
+    more caution; which field paid this cost is reported explicitly (see
+    'resampled_field').
+
+    Reading 'fraction_a'/'fraction_b': unlike dmd()'s own single-field
+    modes (which automatically carry unit norm - see that function's own
+    docstring), a joint mode's eigenvector splits across the A-block and
+    B-block of the combined state, and the two pieces' own squared norms
+    (which sum to exactly 1, since the full eigenvector is unit-norm) say
+    how much of that particular mode's dynamics live in each field.
+    fraction_a (or fraction_b) near 1 means that mode is essentially
+    A-only (or B-only) dynamics incidentally present in the joint fit,
+    not evidence of coupling; fraction_a/fraction_b both near 0.5 is the
+    signature actually worth reporting - a mode whose fitted dynamics
+    genuinely mix both fields together.
+
+    Parameters
+    ----------
+    pod_result_a, pod_result_b : dict
+        bladeprocessor.pod.pod()'s own return value, one per field.
+    dt_a, dt_b : float
+        Each field's own native timestep [s] (e.g. cfg.dt_forces,
+        cfg.dt_pressure) - REQUIRED, both, since resampling needs a real
+        physical time axis for each field individually, unlike dmd()'s
+        own fs/dt alternative.
+    n_modes_a, n_modes_b : int, optional
+        How many of each field's own POD modes to include - all modes
+        present in that field's own pod_result by default; see dmd()'s
+        own `n_modes` docstring for why keeping these small is a
+        deliberate noise-mitigation choice, now doubly so with two
+        fields' worth of modes combined into one fit.
+
+    Returns
+    -------
+    dict with keys, each sorted by DESCENDING |amplitude|:
+        eigenvalues, frequency, growth_rate, amplitude : see dmd()'s own
+            Returns section - now describing the JOINT fit.
+        modes_a : np.ndarray, shape (k, n_points_a), complex
+            Each joint mode's own spatial pattern projected through
+            field A's POD modes alone (pod_result_a['modes']) - pass a
+            dict like {'modes': result['modes_a'], 'frequency':
+            result['frequency'], 'growth_rate': result['growth_rate']}
+            to plot_dmd_mode() directly to visualize one, exactly as for
+            a plain dmd() result.
+        modes_b : np.ndarray, shape (k, n_points_b), complex
+            Same, for field B.
+        fraction_a, fraction_b : np.ndarray, shape (k,), real, in [0, 1]
+            fraction_a + fraction_b == 1 for every mode - see above.
+        eigenvectors : np.ndarray, shape (k_a + k_b, k), complex
+            The full, stacked eigenvectors (rows 0:k_a are field A's own
+            block, rows k_a: are field B's) - not generally needed
+            directly; 'modes_a'/'modes_b' are already the physical-space
+            projection most uses want.
+        dt : float [s]
+            The common (coarser) timestep the joint fit was actually
+            computed at.
+        resampled_field : 'a' or 'b'
+            Which field was interpolated down onto the other's grid.
+    '''
+
+    k_a_total = pod_result_a['coefficients'].shape[1]
+    k_b_total = pod_result_b['coefficients'].shape[1]
+    k_a = k_a_total if n_modes_a is None else min(n_modes_a, k_a_total)
+    k_b = k_b_total if n_modes_b is None else min(n_modes_b, k_b_total)
+
+    coeff_a = pod_result_a['coefficients'][:, :k_a]
+    coeff_b = pod_result_b['coefficients'][:, :k_b]
+
+    # Whichever field has the LARGER dt (coarser/lower-frequency
+    # sampling) sets the common grid; the OTHER (finer) field is
+    # resampled down onto it, truncated to their overlapping duration -
+    # see this function's own docstring for why this direction only.
+    if dt_a >= dt_b:
+        dt_common = dt_a
+        t_common = np.arange(coeff_a.shape[0]) * dt_common
+        t_overlap_end = (coeff_b.shape[0] - 1) * dt_b
+        t_common = t_common[t_common <= t_overlap_end]
+        coeff_a_use = coeff_a[:len(t_common), :]
+        coeff_b_use = resample_coefficients(coeff_b, dt_b, t_common)
+        resampled_field = 'b'
+    else:
+        dt_common = dt_b
+        t_common = np.arange(coeff_b.shape[0]) * dt_common
+        t_overlap_end = (coeff_a.shape[0] - 1) * dt_a
+        t_common = t_common[t_common <= t_overlap_end]
+        coeff_b_use = coeff_b[:len(t_common), :]
+        coeff_a_use = resample_coefficients(coeff_a, dt_a, t_common)
+        resampled_field = 'a'
+
+    if len(t_common) < 3:
+        raise ValueError(
+            f"Only {len(t_common)} overlapping, common-grid frame(s) between the two records at "
+            f"dt_common={dt_common} - need at least 3 to fit a one-step DMD operator. Check dt_a/dt_b "
+            "and each field's own recorded duration."
+        )
+
+    combined = np.concatenate([coeff_a_use, coeff_b_use], axis=1)  # (n_common, k_a + k_b)
+
+    mu, frequency, growth_rate, b, W = _fit_dmd_operator(combined, dt_common)
+
+    W_a = W[:k_a, :]
+    W_b = W[k_a:, :]
+    norm_a_sq = np.sum(np.abs(W_a) ** 2, axis=0)
+    norm_b_sq = np.sum(np.abs(W_b) ** 2, axis=0)
+    total = norm_a_sq + norm_b_sq
+    fraction_a = norm_a_sq / total
+    fraction_b = norm_b_sq / total
+
+    psi_a = pod_result_a['modes'][:k_a, :]
+    psi_b = pod_result_b['modes'][:k_b, :]
+    modes_a = W_a.T @ psi_a
+    modes_b = W_b.T @ psi_b
+
+    return {
+        'eigenvalues': mu,
+        'frequency': frequency,
+        'growth_rate': growth_rate,
+        'amplitude': b,
+        'modes_a': modes_a,
+        'modes_b': modes_b,
+        'fraction_a': fraction_a,
+        'fraction_b': fraction_b,
+        'eigenvectors': W,
+        'dt': dt_common,
+        'resampled_field': resampled_field,
+    }
+
+
+def plot_joint_dmd_spectrum(joint_result: dict, ax=None, cmap: str = 'coolwarm',
+                             savepath: str = None, dpi: int = 600):
+
+    '''
+    joint_dmd()'s own version of plot_dmd_spectrum() - frequency vs.
+    growth rate, marker SIZE set by |amplitude| as before, but marker
+    COLOR now set by fraction_a instead of amplitude, on a DIVERGING
+    colormap centered at 0.5 - 0 (one end) is a B-only mode, 1 (other
+    end) an A-only mode, and the pale/neutral midpoint colors are the
+    modes actually worth reporting: dynamics the fit found genuinely
+    mixing both fields together, not just the two fields' independent
+    content coexisting in one combined matrix.
+
+    Returns
+    -------
+    (fig, ax)
+    '''
+
+    freq = joint_result['frequency']
+    growth = joint_result['growth_rate']
+    amp = np.abs(joint_result['amplitude'])
+    amp_max = amp.max() if amp.max() > 0 else 1.0
+    size = np.clip(300 * amp / amp_max, 15, None)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 5))
+    else:
+        fig = ax.figure
+
+    sc = ax.scatter(freq, growth, s=size, c=joint_result['fraction_a'], cmap=cmap,
+                     vmin=0, vmax=1, edgecolors='k', linewidths=0.5)
+    ax.axhline(0, color='k', linewidth=1.0, linestyle='--', alpha=0.6)
+    ax.set_xlabel('Frequency [Hz]')
+    ax.set_ylabel('Growth rate [1/s]')
+    ax.grid(True, alpha=0.3)
+    fig.colorbar(sc, ax=ax, label='Fraction in field A [-] (0 = all B, 1 = all A, 0.5 = shared)')
     fig.tight_layout()
 
     if savepath:

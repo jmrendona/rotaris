@@ -21,6 +21,7 @@ from bladeprocessor.spatial_correlation import plot_two_point_correlation
 from bladeprocessor.dmd import dmd
 from bladeprocessor.dmd import plot_dmd_spectrum
 from bladeprocessor.dmd import plot_dmd_mode
+from bladeprocessor.dmd import plot_dmd_reconstruction
 
 # ------------- Wall shear / friction lines ------------- #
 #
@@ -778,6 +779,13 @@ plot_dmd_mode(
    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_dmd_mode1_{case}.png'),
 )
 
+print(40*'-')
+print('Plotting Cf magnitude DMD reconstruction vs. the recorded POD coefficient (mode 1)')
+plot_dmd_reconstruction(
+   cf_pod_mag_result, cf_dmd_mag_result, mode_index=0, dt=dt,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_dmd_reconstruction_{case}.png'),
+)
+
 # Chordwise component specifically - the signed quantity whose sign
 # reversal actually DEFINES separation/the LSB (see
 # rotaris-docs/cf_computations_section.tex, "Directional Components
@@ -873,6 +881,13 @@ plot_dmd_mode(
    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_mode1_{case}.png'),
 )
 
+print(40*'-')
+print('Plotting Cf chordwise DMD reconstruction vs. the recorded POD coefficient (mode 1)')
+plot_dmd_reconstruction(
+   cf_pod_chordwise_result, cf_dmd_chordwise_result, mode_index=0, dt=dt,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_reconstruction_{case}.png'),
+)
+
 # Spanwise component specifically - the signed quantity whose sign
 # reversal actually DEFINES separation/the LSB (see
 # rotaris-docs/cf_computations_section.tex, "Directional Components
@@ -966,4 +981,11 @@ plot_dmd_mode(
    unit_label='$C_{f,spanwise}$ DMD mode amplitude [-]',
    figsize=blade_figsize,
    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_mode1_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf spanwise DMD reconstruction vs. the recorded POD coefficient (mode 1)')
+plot_dmd_reconstruction(
+   cf_pod_spanwise_result, cf_dmd_spanwise_result, mode_index=0, dt=dt,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_reconstruction_{case}.png'),
 )

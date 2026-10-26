@@ -25,6 +25,7 @@ from bladeprocessor.spatial_correlation import plot_two_point_correlation
 from bladeprocessor.dmd import dmd
 from bladeprocessor.dmd import plot_dmd_spectrum
 from bladeprocessor.dmd import plot_dmd_mode
+from bladeprocessor.dmd import plot_dmd_reconstruction
 
 cfg = load_case_config()
 master_path = cfg.master_path
@@ -592,6 +593,13 @@ plot_dmd_mode(
    unit_label=f'{p_label} DMD mode amplitude [-]',
    figsize=blade_figsize,
    savepath=os.path.join(master_path, f'images/cp/pod/cp_dmd_mode1_{case}.png'),
+)
+
+print(40*'-')
+print(f'Plotting {p_label} DMD reconstruction vs. the recorded POD coefficient (mode 1)')
+plot_dmd_reconstruction(
+   cp_pod_result, cp_dmd_result, mode_index=0, dt=dt,
+   savepath=os.path.join(master_path, f'images/cp/pod/cp_dmd_reconstruction_{case}.png'),
 )
 
 # # ------------- Cases comparison plotted into a commo grid ------------- #
