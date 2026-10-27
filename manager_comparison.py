@@ -80,63 +80,63 @@ STRIPS = (0, N_SPAN_BINS // 2, N_SPAN_BINS - 1)
 os.makedirs(os.path.join(MASTER_PATH, 'images/forces/comparison'), exist_ok=True)
 
 
-def _resolve(path):
-    '''Relative CASES paths are resolved against this file's own directory - same convention as manager.py.'''
-    if os.path.isabs(path):
-        return path
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
+# def _resolve(path):
+#     '''Relative CASES paths are resolved against this file's own directory - same convention as manager.py.'''
+#     if os.path.isabs(path):
+#         return path
+#     return os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
 
 
-def load_case(case_label, case_cfg):
+# def load_case(case_label, case_cfg):
 
-    '''
-    Build one case's StripForces instance, its compute() result (for the
-    raw time-trace comparison), and its phase_lock() result (for the
-    phase-locked/polar comparison) - the two inputs plot_time_trace_compare()/
-    plot_vs_angle_compare() need, one dict entry per case.
-    '''
+#     '''
+#     Build one case's StripForces instance, its compute() result (for the
+#     raw time-trace comparison), and its phase_lock() result (for the
+#     phase-locked/polar comparison) - the two inputs plot_time_trace_compare()/
+#     plot_vs_angle_compare() need, one dict entry per case.
+#     '''
 
-    print(40 * '-')
-    print(f"Loading case '{case_label}': {case_cfg['inst_force_file']}")
+#     print(40 * '-')
+#     print(f"Loading case '{case_label}': {case_cfg['inst_force_file']}")
 
-    sf = StripForces(
-        _resolve(case_cfg['inst_force_file']),
-        r_tip=case_cfg.get('r_tip', R_TIP), rpm=case_cfg.get('rpm', RPM),
-        span_min=case_cfg.get('span_min', SPAN_MIN),
-        span_axis=case_cfg.get('span_axis', SPAN_AXIS), chord_axis=case_cfg.get('chord_axis', CHORD_AXIS),
-        thickness_axis=case_cfg.get('thickness_axis', THICKNESS_AXIS),
-        validate_axes=case_cfg.get('validate_axes', VALIDATE_AXES),
-    )
+#     sf = StripForces(
+#         _resolve(case_cfg['inst_force_file']),
+#         r_tip=case_cfg.get('r_tip', R_TIP), rpm=case_cfg.get('rpm', RPM),
+#         span_min=case_cfg.get('span_min', SPAN_MIN),
+#         span_axis=case_cfg.get('span_axis', SPAN_AXIS), chord_axis=case_cfg.get('chord_axis', CHORD_AXIS),
+#         thickness_axis=case_cfg.get('thickness_axis', THICKNESS_AXIS),
+#         validate_axes=case_cfg.get('validate_axes', VALIDATE_AXES),
+#     )
 
-    result = sf.compute(span_min=case_cfg.get('span_min', SPAN_MIN), n_span_bins=case_cfg.get('n_span_bins', N_SPAN_BINS))
-    phase_locked = sf.phase_lock(result, dt=case_cfg.get('dt', DT), n_azimuth_bins=72)
+#     result = sf.compute(span_min=case_cfg.get('span_min', SPAN_MIN), n_span_bins=case_cfg.get('n_span_bins', N_SPAN_BINS))
+#     phase_locked = sf.phase_lock(result, dt=case_cfg.get('dt', DT), n_azimuth_bins=72)
 
-    return result, phase_locked
+#     return result, phase_locked
 
 
-def main():
+# def main():
 
-    results = {}
-    phase_locked_all = {}
+#     results = {}
+#     phase_locked_all = {}
 
-    for case_label, case_cfg in CASES.items():
-        result, phase_locked = load_case(case_label, case_cfg)
-        results[case_label] = result
-        phase_locked_all[case_label] = phase_locked
+#     for case_label, case_cfg in CASES.items():
+#         result, phase_locked = load_case(case_label, case_cfg)
+#         results[case_label] = result
+#         phase_locked_all[case_label] = phase_locked
 
-    print(40 * '-')
-    print('Plotting cross-case raw time-trace comparison (Fig. 5.6 redesign)')
-    plot_time_trace_compare(
-        results, dt=DT, strips=STRIPS,
-        savepath=os.path.join(MASTER_PATH, 'images/forces/comparison/force_time_trace_compare.png'),
-    )
+#     print(40 * '-')
+#     print('Plotting cross-case raw time-trace comparison (Fig. 5.6 redesign)')
+#     plot_time_trace_compare(
+#         results, dt=DT, strips=STRIPS,
+#         savepath=os.path.join(MASTER_PATH, 'images/forces/comparison/force_time_trace_compare.png'),
+#     )
 
-    print(40 * '-')
-    print('Plotting cross-case phase-locked/polar comparison (Fig. 5.7 redesign)')
-    plot_vs_angle_compare(
-        phase_locked_all, strips=STRIPS,
-        savepath=os.path.join(MASTER_PATH, 'images/forces/comparison/force_vs_angle_compare.png'),
-    )
+#     print(40 * '-')
+#     print('Plotting cross-case phase-locked/polar comparison (Fig. 5.7 redesign)')
+#     plot_vs_angle_compare(
+#         phase_locked_all, strips=STRIPS,
+#         savepath=os.path.join(MASTER_PATH, 'images/forces/comparison/force_vs_angle_compare.png'),
+#     )
 
 
 # ------------- Cross-QUANTITY (Cf vs Cp) joint DMD, ONE case ------------- #
@@ -170,15 +170,15 @@ def main():
 # (see those files' own identically-named variables) - this section
 # deliberately does NOT re-derive a good region from scratch, since that
 # work was already done there.
-JOINT_DMD_CF_SPAN_MIN, JOINT_DMD_CF_SPAN_MAX = None, None  # TODO: copy from skin_friction_manager.py
+JOINT_DMD_CF_SPAN_MIN, JOINT_DMD_CF_SPAN_MAX = 0.1 * R_TIP, 1 * R_TIP  # TODO: copy from skin_friction_manager.py
 JOINT_DMD_CF_CHORD_MIN, JOINT_DMD_CF_CHORD_MAX = None, None  # TODO
 JOINT_DMD_CF_POINT_STRIDE = None  # TODO
 JOINT_DMD_CP_SPAN_MIN, JOINT_DMD_CP_SPAN_MAX = None, None  # TODO: copy from pressure_manager.py
 JOINT_DMD_CP_CHORD_MIN, JOINT_DMD_CP_CHORD_MAX = None, None  # TODO
-JOINT_DMD_CP_POINT_STRIDE = None  # TODO
+JOINT_DMD_CP_POINT_STRIDE = 10  # TODO
 
-JOINT_DMD_N_MODES_CF = 6  # TODO: match skin_friction_manager.py's own dmd() n_modes for this case
-JOINT_DMD_N_MODES_CP = 6  # TODO: match pressure_manager.py's own dmd() n_modes for this case
+JOINT_DMD_N_MODES_CF = 10  # TODO: match skin_friction_manager.py's own dmd() n_modes for this case
+JOINT_DMD_N_MODES_CP = 10  # TODO: match pressure_manager.py's own dmd() n_modes for this case
 
 
 def _crop_region(radius, chord, span_min, span_max, chord_min, chord_max, point_stride):

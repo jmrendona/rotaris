@@ -642,7 +642,7 @@ pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own find
 # otherwise, same spirit as pod_span_min/pod_span_max/pod_chord_min/
 # pod_chord_max above - an explicit, deliberate reduction, not a silent
 # default.
-pod_point_stride = None  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
+pod_point_stride = 2  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
 
 span_fl, chord_fl = fl._span_chord('Upper')
 radius_fl = fl._radius('Upper')

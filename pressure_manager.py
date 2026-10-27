@@ -322,39 +322,30 @@ sv_pressure_inst = SurfaceVariable(
 span_pcts = np.arange(98, 98, 2)  # % of r/R
 chord_pcts = np.arange(0, 101, 10)  # % of x/c
 
-for span in span_pcts:
-  for chord in chord_pcts:
-    print(40*'-')
-    print(f'Plotting pressure time trace at span {span}% and chord {chord}%')
-    sv_pressure_inst.plot_timetrace(
-      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
-      ylabel='$C_p$ [-]' if normalize else 'Static pressure [Pa]', dt=dt,
-      normalize=normalize,
-      savepath=os.path.join(master_path, f'images/pfluct/spectra/p_timetrace_s{span:03d}_c{chord:03d}_{case}.png'),
-    )
-    print(40*'-')
-    print(f'Plotting pressure periodogram at span {span}% and chord {chord}%')
-    sv_pressure_inst.plot_periodogram(
-      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
-      normalize=normalize, db=not normalize,
-      savepath=os.path.join(master_path, f'images/pfluct/spectra/p_periodogram_s{span:03d}_c{chord:03d}_{case}.png'),
-    )
-    print(40*'-')
-    print(f'Exporting pressure time trace at span {span}% and chord {chord}%')
-    sv_pressure_inst.export_timetrace(
-      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
-      savepath=os.path.join(master_path, f'data/pfluct/p_timetrace_s{span:03d}_c{chord:03d}_{case}.h5'),
-    )
-    # plot_timetrace()/plot_periodogram() each return (fig, ax) that's never
-    # captured here, so each one stays open until the WHOLE script exits -
-    # 10 span_pcts x 11 chord_pcts = 110 iterations x 2 plots/iteration =
-    # 220 never-closed figures by the end of this loop alone, on top of
-    # every OTHER plot already made above it. Confirmed to actually crash
-    # (segfault, not a clean MemoryError) on a real large case - the
-    # "More than 20 figures" RuntimeWarning earlier in the log was already
-    # flagging exactly this. plt.close('all') is safe here since nothing
-    # later needs an EARLIER iteration's figure still open.
-    plt.close('all')
+# for span in span_pcts:
+#   for chord in chord_pcts:
+#     print(40*'-')
+#     print(f'Plotting pressure time trace at span {span}% and chord {chord}%')
+#     sv_pressure_inst.plot_timetrace(
+#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
+#       ylabel='$C_p$ [-]' if normalize else 'Static pressure [Pa]', dt=dt,
+#       normalize=normalize,
+#       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_timetrace_s{span:03d}_c{chord:03d}_{case}.png'),
+#     )
+#     print(40*'-')
+#     print(f'Plotting pressure periodogram at span {span}% and chord {chord}%')
+#     sv_pressure_inst.plot_periodogram(
+#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
+#       normalize=normalize, db=not normalize,
+#       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_periodogram_s{span:03d}_c{chord:03d}_{case}.png'),
+#     )
+#     print(40*'-')
+#     print(f'Exporting pressure time trace at span {span}% and chord {chord}%')
+#     sv_pressure_inst.export_timetrace(
+#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
+#       savepath=os.path.join(master_path, f'data/pfluct/p_timetrace_s{span:03d}_c{chord:03d}_{case}.h5'),
+#     )
+#     plt.close('all')
 
 # # ------------- Leading-edge stagnation point ------------- #
 # #
@@ -414,7 +405,7 @@ p_label = '$C_p$' if normalize else 'Pressure'  # POD's own label - NOT dependen
 # (commented-out above) convergence block's own p_label, which this section used to rely
 # on - confirmed a real NameError once that block was commented out on its own.
 
-pod_span_min, pod_span_max = 0.2 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
+pod_span_min, pod_span_max = 0.17 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
 # pod_chord_min/pod_chord_max: set these (e.g. pod_chord_min = -0.02) if
 # plot_pod_mode()'s own output shows a stray point sitting far from the
 # rest of the selected region - confirmed a real degenerate/edge surfel
@@ -441,7 +432,7 @@ pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own find
 # otherwise, same spirit as pod_span_min/pod_span_max/pod_chord_min/
 # pod_chord_max above - an explicit, deliberate reduction, not a silent
 # default.
-pod_point_stride = 6  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
+pod_point_stride = 10  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
 
 span_sv, chord_sv = sv_pressure_inst._span_chord('Upper')
 radius_sv = sv_pressure_inst._radius('Upper')
@@ -601,28 +592,4 @@ plot_dmd_reconstruction(
    cp_pod_result, cp_dmd_result, mode_index=0, dt=dt,
    savepath=os.path.join(master_path, f'images/cp/pod/cp_dmd_reconstruction_{case}.png'),
 )
-
-# # ------------- Cases comparison plotted into a commo grid ------------- #
-# #
-# # Cp resampled onto a common (r/R, x/c) grid, compared against a second
-# # case with the same geometry (c_ref must be passed explicitly - see
-# # README.md for why):
-#sv_2025 = SurfaceVariable(
-#    '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/pressure/pressure_rotor.h5',
-#    r_tip=0.125, rho_ref=1.22523, rpm=6000, pref=101325,
-#)
-#sv_2026 = SurfaceVariable(
-#    '/storage/renj3003/rotor-alone/15e-6_6000rpm/data/pressure/pressure_rotor.h5',
-#    r_tip=0.125, rho_ref=1.22523, rpm=6000, pref=101325,
-#)
-
-#field_2025 = sv_2025.field(lambda s: sv_2025.cp(surface=s, stat='mean'),
-#                            var_name='Cp 2025', c_ref=0.025, span_min=0.03)
-#field_2026 = sv_2026.field(lambda s: sv_2026.cp(surface=s, stat='mean'),
-#                            var_name='Cp 2026', c_ref=0.025, span_min=0.03)
-
-#comparator_sv = SurfaceFieldComparator({'2025': field_2025, '2026': field_2026})
-#comparator_sv.plot_cases(cbar_label='Cp', savepath=os.path.join(master_path, 'images/cp/cp_comparison.png'))
-#comparator_sv.plot_delta('2025', '2026', cbar_label='Cp delta', savepath=os.path.join(master_path, 'images/cp/cp_delta.png'))
-
 
