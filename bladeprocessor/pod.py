@@ -89,6 +89,7 @@ assumed in advance:
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
+from matplotlib.ticker import MaxNLocator
 from scipy.signal import csd, coherence
 
 from bladeprocessor.convergence import periodogram
@@ -515,7 +516,14 @@ def plot_pod_energy(pod_result: dict, n_modes: int = None, ax=None, savepath: st
     ax.set_yscale('log')
     ax.set_xlabel('POD mode')
     ax.set_ylabel('Energy fraction [\\%]', color='tab:blue')
-    ax.set_xticks(mode_idx)
+    # A tick at EVERY mode (the previous behavior) is only legible for
+    # a handful of modes - it overlaps into an unreadable black smear
+    # once n_modes reaches the dozens-to-hundreds a DNS-resolution case
+    # can have (confirmed a real case: n_modes~100 produced solid
+    # overlapping tick labels). MaxNLocator picks a sensible, integer-
+    # only tick COUNT regardless of n_modes, same convention as every
+    # other auto-ticked axis in this project.
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.tick_params(axis='y', colors='tab:blue')
     ax.grid(True, which='both', axis='y', alpha=0.3)
 
