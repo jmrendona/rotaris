@@ -170,7 +170,7 @@ os.makedirs(os.path.join(MASTER_PATH, 'images/forces/comparison'), exist_ok=True
 # (see those files' own identically-named variables) - this section
 # deliberately does NOT re-derive a good region from scratch, since that
 # work was already done there.
-JOINT_DMD_CF_SPAN_MIN, JOINT_DMD_CF_SPAN_MAX = 0.1 * R_TIP, 1 * R_TIP  # TODO: copy from skin_friction_manager.py
+JOINT_DMD_CF_SPAN_MIN, JOINT_DMD_CF_SPAN_MAX = 0.17 * 0.125, 1 * 0.125  # TODO: copy from skin_friction_manager.py
 JOINT_DMD_CF_CHORD_MIN, JOINT_DMD_CF_CHORD_MAX = None, None  # TODO
 JOINT_DMD_CF_POINT_STRIDE = None  # TODO
 JOINT_DMD_CP_SPAN_MIN, JOINT_DMD_CP_SPAN_MAX = None, None  # TODO: copy from pressure_manager.py
@@ -306,8 +306,8 @@ def main_joint_dmd():
 
 
 if __name__ == '__main__':
-    main()                  # cross-case StripForces comparison (CASES dict above)
-    # main_joint_dmd()      # cross-quantity Cf/Cp joint DMD for ONE case - needs --case
+    # main()                  # cross-case StripForces comparison (CASES dict above)
+    main_joint_dmd()      # cross-quantity Cf/Cp joint DMD for ONE case - needs --case
                             # (fill in JOINT_DMD_CF_*/JOINT_DMD_CP_* above first); comment
                             # out main() above and uncomment this to run it instead - both
                             # share this file's own argparse (via load_case_config()), so

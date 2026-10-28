@@ -483,7 +483,7 @@ if normalize:
    cp_pod_data = sv_pressure_inst.cp_time_series_region(surface='Upper', region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
 else:
    cp_pod_data = sv_pressure_inst.variable_time_series_region('static_pressure', surface='Upper', region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
-cp_pod_result = pod(cp_pod_data, n_modes=10, weights=pod_weights)
+cp_pod_result = pod(cp_pod_data, n_modes=100, weights=pod_weights)
 print(f'{p_label} POD energy fractions (first 5): ', cp_pod_result['energy_fraction'][:5])
 
 print(40*'-')
@@ -566,7 +566,7 @@ plot_two_point_correlation(
 # exact DMD on the raw field, is used here.
 print(40*'-')
 print(f'Running DMD on {p_label} POD coefficient subspace')
-cp_dmd_result = dmd(cp_pod_result, dt=dt, n_modes=6)
+cp_dmd_result = dmd(cp_pod_result, dt=dt, n_modes=1)
 print(f'{p_label} DMD frequencies [Hz]: ', cp_dmd_result['frequency'])
 print(f'{p_label} DMD growth rates [1/s]: ', cp_dmd_result['growth_rate'])
 

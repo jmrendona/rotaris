@@ -681,7 +681,7 @@ modes = [0,1]
 print(40*'-')
 print(f'Running POD on Cf magnitude, Upper surface, {int(pod_region.sum())} points in the selected region')
 cf_pod_mag_data = fl.cf_time_series(surface='Upper', component=None)[:, pod_region]
-cf_pod_mag_result = pod(cf_pod_mag_data, n_modes=10, weights=area_fl[pod_region])
+cf_pod_mag_result = pod(cf_pod_mag_data, n_modes=100, weights=area_fl[pod_region])
 print('Cf magnitude POD energy fractions (first 5): ', cf_pod_mag_result['energy_fraction'][:5])
 
 print(40*'-')
@@ -759,7 +759,7 @@ plot_two_point_correlation(
 # exact DMD on the raw field, is used here.
 print(40*'-')
 print('Running DMD on Cf magnitude POD coefficient subspace')
-cf_dmd_mag_result = dmd(cf_pod_mag_result, dt=dt, n_modes=6)
+cf_dmd_mag_result = dmd(cf_pod_mag_result, dt=dt, n_modes=1)
 print('Cf magnitude DMD frequencies [Hz]: ', cf_dmd_mag_result['frequency'])
 print('Cf magnitude DMD growth rates [1/s]: ', cf_dmd_mag_result['growth_rate'])
 
@@ -794,7 +794,7 @@ plot_dmd_reconstruction(
 print(40*'-')
 print(f'Running POD on Cf chordwise component, Upper surface, {int(pod_region.sum())} points in the selected region')
 cf_pod_chordwise_data = fl.cf_time_series(surface='Upper', component='chordwise')[:, pod_region]
-cf_pod_chordwise_result = pod(cf_pod_chordwise_data, n_modes=10, weights=area_fl[pod_region])
+cf_pod_chordwise_result = pod(cf_pod_chordwise_data, n_modes=100, weights=area_fl[pod_region])
 print('Cf chordwise POD energy fractions (first 5): ', cf_pod_chordwise_result['energy_fraction'][:5])
 
 print(40*'-')
@@ -861,7 +861,7 @@ plot_two_point_correlation(
 
 print(40*'-')
 print('Running DMD on Cf chordwise POD coefficient subspace')
-cf_dmd_chordwise_result = dmd(cf_pod_chordwise_result, dt=dt, n_modes=6)
+cf_dmd_chordwise_result = dmd(cf_pod_chordwise_result, dt=dt, n_modes=1)
 print('Cf chordwise DMD frequencies [Hz]: ', cf_dmd_chordwise_result['frequency'])
 print('Cf chordwise DMD growth rates [1/s]: ', cf_dmd_chordwise_result['growth_rate'])
 
@@ -896,7 +896,7 @@ plot_dmd_reconstruction(
 print(40*'-')
 print(f'Running POD on Cf spanwise component, Upper surface, {int(pod_region.sum())} points in the selected region')
 cf_pod_spanwise_data = fl.cf_time_series(surface='Upper', component='spanwise')[:, pod_region]
-cf_pod_spanwise_result = pod(cf_pod_spanwise_data, n_modes=10, weights=area_fl[pod_region])
+cf_pod_spanwise_result = pod(cf_pod_spanwise_data, n_modes=100, weights=area_fl[pod_region])
 print('Cf spanwise POD energy fractions (first 5): ', cf_pod_spanwise_result['energy_fraction'][:5])
 
 print(40*'-')
@@ -963,7 +963,7 @@ plot_two_point_correlation(
 
 print(40*'-')
 print('Running DMD on Cf spanwise POD coefficient subspace')
-cf_dmd_spanwise_result = dmd(cf_pod_spanwise_result, dt=dt, n_modes=6)
+cf_dmd_spanwise_result = dmd(cf_pod_spanwise_result, dt=dt, n_modes=1)
 print('Cf spanwise DMD frequencies [Hz]: ', cf_dmd_spanwise_result['frequency'])
 print('Cf spanwise DMD growth rates [1/s]: ', cf_dmd_spanwise_result['growth_rate'])
 
