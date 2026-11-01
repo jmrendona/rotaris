@@ -1,12 +1,12 @@
 # Config file for ISAE2 simulations of isolated rotor in hover
 
-master_path: /scratch/jmrendon/Rotor-alone/1e-5_6000rpm-dns
-case: 2026DNS
+master_path: /scratch/jmrendon/Rotor-alone/6e-5_6000rpm
+case: 2025
 
 files:
-  inst_force: 2026DNS_forces_rotor.h5
+  inst_force: 2025_forces_rotor.h5
   avg_force: RA-beam-no-interaction_avg_forces_rotor.h5
-  inst_pressure: 2026DNS_pressure_rotor.h5
+  inst_pressure: 2025_pressure_rotor.h5
   avg_pressure: RA-beam_avg_pressure_rotor.h5
 
 rotor:

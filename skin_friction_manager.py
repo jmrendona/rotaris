@@ -759,7 +759,7 @@ plot_two_point_correlation(
 # exact DMD on the raw field, is used here.
 print(40*'-')
 print('Running DMD on Cf magnitude POD coefficient subspace')
-cf_dmd_mag_result = dmd(cf_pod_mag_result, dt=dt, n_modes=1)
+cf_dmd_mag_result = dmd(cf_pod_mag_result, dt=dt, n_modes=6)
 print('Cf magnitude DMD frequencies [Hz]: ', cf_dmd_mag_result['frequency'])
 print('Cf magnitude DMD growth rates [1/s]: ', cf_dmd_mag_result['growth_rate'])
 
@@ -861,7 +861,7 @@ plot_two_point_correlation(
 
 print(40*'-')
 print('Running DMD on Cf chordwise POD coefficient subspace')
-cf_dmd_chordwise_result = dmd(cf_pod_chordwise_result, dt=dt, n_modes=1)
+cf_dmd_chordwise_result = dmd(cf_pod_chordwise_result, dt=dt, n_modes=6)
 print('Cf chordwise DMD frequencies [Hz]: ', cf_dmd_chordwise_result['frequency'])
 print('Cf chordwise DMD growth rates [1/s]: ', cf_dmd_chordwise_result['growth_rate'])
 
@@ -963,7 +963,7 @@ plot_two_point_correlation(
 
 print(40*'-')
 print('Running DMD on Cf spanwise POD coefficient subspace')
-cf_dmd_spanwise_result = dmd(cf_pod_spanwise_result, dt=dt, n_modes=1)
+cf_dmd_spanwise_result = dmd(cf_pod_spanwise_result, dt=dt, n_modes=6)
 print('Cf spanwise DMD frequencies [Hz]: ', cf_dmd_spanwise_result['frequency'])
 print('Cf spanwise DMD growth rates [1/s]: ', cf_dmd_spanwise_result['growth_rate'])
 

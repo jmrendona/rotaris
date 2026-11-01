@@ -173,12 +173,12 @@ os.makedirs(os.path.join(MASTER_PATH, 'images/forces/comparison'), exist_ok=True
 JOINT_DMD_CF_SPAN_MIN, JOINT_DMD_CF_SPAN_MAX = 0.17 * 0.125, 1 * 0.125  # TODO: copy from skin_friction_manager.py
 JOINT_DMD_CF_CHORD_MIN, JOINT_DMD_CF_CHORD_MAX = None, None  # TODO
 JOINT_DMD_CF_POINT_STRIDE = None  # TODO
-JOINT_DMD_CP_SPAN_MIN, JOINT_DMD_CP_SPAN_MAX = None, None  # TODO: copy from pressure_manager.py
+JOINT_DMD_CP_SPAN_MIN, JOINT_DMD_CP_SPAN_MAX = 0.17 * 0.125, 1 * 0.125  # TODO: copy from pressure_manager.py
 JOINT_DMD_CP_CHORD_MIN, JOINT_DMD_CP_CHORD_MAX = None, None  # TODO
 JOINT_DMD_CP_POINT_STRIDE = 10  # TODO
 
-JOINT_DMD_N_MODES_CF = 10  # TODO: match skin_friction_manager.py's own dmd() n_modes for this case
-JOINT_DMD_N_MODES_CP = 10  # TODO: match pressure_manager.py's own dmd() n_modes for this case
+JOINT_DMD_N_MODES_CF = 6  # TODO: match skin_friction_manager.py's own dmd() n_modes for this case
+JOINT_DMD_N_MODES_CP = 6  # TODO: match pressure_manager.py's own dmd() n_modes for this case
 
 
 def _crop_region(radius, chord, span_min, span_max, chord_min, chord_max, point_stride):

@@ -566,7 +566,7 @@ plot_two_point_correlation(
 # exact DMD on the raw field, is used here.
 print(40*'-')
 print(f'Running DMD on {p_label} POD coefficient subspace')
-cp_dmd_result = dmd(cp_pod_result, dt=dt, n_modes=1)
+cp_dmd_result = dmd(cp_pod_result, dt=dt, n_modes=6)
 print(f'{p_label} DMD frequencies [Hz]: ', cp_dmd_result['frequency'])
 print(f'{p_label} DMD growth rates [1/s]: ', cp_dmd_result['growth_rate'])
 
