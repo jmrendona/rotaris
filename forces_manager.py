@@ -292,7 +292,17 @@ sf_inst.plot_harmonic_polar(
 # content on a shared radius axis, so a feature visible in one (e.g. an
 # impulsive event concentrated near the tip) can be read off directly
 # against the other. Styled after Wu, Kingan, & Go (2022)'s own Fig. 20
-# pairing - reuses the SAME h_phase_axial computed just above.
+# pairing. Each call needs its OWN component-matched harmonics_result -
+# plot_harmonics_contour()'s own docstring warns this isn't checked (a
+# harmonics_result from a different component silently mislabels the
+# right panel) - so h_phase_tangential/h_phase_radial are computed here
+# the same way h_phase_axial was above, instead of reusing h_phase_axial
+# for all three (a real, shipped bug: every "tangential"/"radial"
+# strip_harmonics_contour*.png ended up showing the SAME axial harmonics
+# signature on its right panel).
+h_phase_tangential = sf_inst.harmonics(result_inst, dt=dt, component='tangential', n_harmonics=17, return_phase=True)
+h_phase_radial = sf_inst.harmonics(result_inst, dt=dt, component='radial', n_harmonics=17, return_phase=True)
+
 print(40*'-')
 print('Plotting paired time/harmonic contour for the axial component')
 sf_inst.plot_harmonics_contour(
@@ -304,7 +314,7 @@ sf_inst.plot_harmonics_contour(
 print(40*'-')
 print('Plotting paired time/harmonic contour for the tangential component')
 sf_inst.plot_harmonics_contour(
-   result_inst, h_phase_axial, dt=dt, component='tangential',
+   result_inst, h_phase_tangential, dt=dt, component='tangential',
    normalize=normalize,
    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_contour_tangential_{case}.png'),
 )
@@ -312,7 +322,7 @@ sf_inst.plot_harmonics_contour(
 print(40*'-')
 print('Plotting paired time/harmonic contour for the radial component')
 sf_inst.plot_harmonics_contour(
-   result_inst, h_phase_axial, dt=dt, component='radial',
+   result_inst, h_phase_radial, dt=dt, component='radial',
    normalize=normalize,
    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_contour_radial_{case}.png'),
 )
@@ -336,7 +346,7 @@ sf_inst.plot_harmonics_contour(
 print(40*'-')
 print('Plotting paired phase-locked/harmonic contour for the tangential component')
 sf_inst.plot_harmonics_contour(
-   result_inst, h_phase_axial, dt=dt, component='tangential',
+   result_inst, h_phase_tangential, dt=dt, component='tangential',
    phase_locked=phase_locked, normalize=normalize,
    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_contour_phaselocked_tangential_{case}.png'),
 )
@@ -344,7 +354,7 @@ sf_inst.plot_harmonics_contour(
 print(40*'-')
 print('Plotting paired phase-locked/harmonic contour for the radial component')
 sf_inst.plot_harmonics_contour(
-   result_inst, h_phase_axial, dt=dt, component='radial',
+   result_inst, h_phase_radial, dt=dt, component='radial',
    phase_locked=phase_locked, normalize=normalize,
    savepath=os.path.join(master_path, f'images/forces/hanson/strip_harmonics_contour_phaselocked_radial_{case}.png'),
 )

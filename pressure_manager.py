@@ -268,16 +268,16 @@ sv_pressure_inst = SurfaceVariable(
 # savepath=os.path.join(master_path, f'images/cp/rms/cp_surface_rms_upper_{case}.png'),
 # )
 
-# for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
-#   print(40*'-')
-#   print('Plotting -Cp surface scatter, instantaneous frame ', frame)
-#   sv_pressure_inst.plot_variable_surface(
-#     lambda s: -sv_pressure_inst.cp(surface=s, frame=frame),
-#     cbar_label='-Cp', span_min=span_min, surface='Upper',
-#     figsize=blade_figsize,
-#     normalize=normalize,
-#     savepath=os.path.join(master_path, f'images/cp/inst/cp_surface_upper_frame{frame:03d}_{case}.png'),
-#   )
+for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
+  print(40*'-')
+  print('Plotting -Cp surface scatter, instantaneous frame ', frame)
+  sv_pressure_inst.plot_variable_surface(
+    lambda s: -sv_pressure_inst.cp(surface=s, frame=frame),
+    cbar_label='-Cp', span_min=span_min, surface='Upper',
+    figsize=blade_figsize,
+    normalize=normalize,
+    savepath=os.path.join(master_path, f'images/cp/inst/cp_surface_upper_frame{frame:03d}_{case}.png'),
+  )
 
 # # ------------- Computation with instatenous files containing pressure ------------- #
 
@@ -377,219 +377,219 @@ chord_pcts = np.arange(0, 101, 10)  # % of x/c
 #    savepath=os.path.join(master_path, f'images/cp/cp_surface_with_stagnation_{case}.png'),
 # )
 
-# ------------- Proper Orthogonal Decomposition (POD) of Cp ------------- #
-#
-# Objective, energy-ranked check of the spatial coherent structure
-# identified from the pressure/separation analysis above (e.g. an
-# LSB/leading-edge-vortex-like structure and its migration with span -
-# see rotaris-docs/pod_section.tex for the full derivation). Computed on
-# ONE surface at a time (Upper/suction side here, where that structure
-# was identified - NOT both surfaces combined, matching how
-# cp_time_series()/variable_time_series() are already surface-specific),
-# restricted to the span window where the structure actually lives - NOT
-# assumed to be the tip; pod_span_min/pod_span_max below are a
-# placeholder and must be set from this case's own findings above before
-# the result means anything.
-#
-# cp_time_series_region()/variable_time_series_region() (not
-# cp_time_series()/variable_time_series() + a post-hoc column crop) -
-# the crop is applied PER FRAME-CHUNK, during the streamed read itself,
-# never holding the full (n_frames, n_points) array in memory at once
-# (confirmed a real OOM on a DNS-resolution case otherwise - see those
-# methods' docstrings). The OUTPUT is still held in full, though - if
-# pod_span_min/pod_span_max below select too much of the blade for that
-# to fit, the fix is a SMALLER region, not a different reading strategy;
-# they're a placeholder and must be set from this case's own findings
-# above before the result means anything either way.
-p_label = '$C_p$' if normalize else 'Pressure'  # POD's own label - NOT dependent on the
-# (commented-out above) convergence block's own p_label, which this section used to rely
-# on - confirmed a real NameError once that block was commented out on its own.
+# # ------------- Proper Orthogonal Decomposition (POD) of Cp ------------- #
+# #
+# # Objective, energy-ranked check of the spatial coherent structure
+# # identified from the pressure/separation analysis above (e.g. an
+# # LSB/leading-edge-vortex-like structure and its migration with span -
+# # see rotaris-docs/pod_section.tex for the full derivation). Computed on
+# # ONE surface at a time (Upper/suction side here, where that structure
+# # was identified - NOT both surfaces combined, matching how
+# # cp_time_series()/variable_time_series() are already surface-specific),
+# # restricted to the span window where the structure actually lives - NOT
+# # assumed to be the tip; pod_span_min/pod_span_max below are a
+# # placeholder and must be set from this case's own findings above before
+# # the result means anything.
+# #
+# # cp_time_series_region()/variable_time_series_region() (not
+# # cp_time_series()/variable_time_series() + a post-hoc column crop) -
+# # the crop is applied PER FRAME-CHUNK, during the streamed read itself,
+# # never holding the full (n_frames, n_points) array in memory at once
+# # (confirmed a real OOM on a DNS-resolution case otherwise - see those
+# # methods' docstrings). The OUTPUT is still held in full, though - if
+# # pod_span_min/pod_span_max below select too much of the blade for that
+# # to fit, the fix is a SMALLER region, not a different reading strategy;
+# # they're a placeholder and must be set from this case's own findings
+# # above before the result means anything either way.
+# p_label = '$C_p$' if normalize else 'Pressure'  # POD's own label - NOT dependent on the
+# # (commented-out above) convergence block's own p_label, which this section used to rely
+# # on - confirmed a real NameError once that block was commented out on its own.
 
-pod_span_min, pod_span_max = 0.17 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
-# pod_chord_min/pod_chord_max: set these (e.g. pod_chord_min = -0.02) if
-# plot_pod_mode()'s own output shows a stray point sitting far from the
-# rest of the selected region - confirmed a real degenerate/edge surfel
-# on a real case, visible as a single dot that also drags the plot's own
-# axis range out to accommodate it, squeezing the actual structure into
-# a sliver. None (default, either one): no crop - check the printed
-# chord min/max below first; only add a bound once you've confirmed
-# there's a genuine single-point (or near-single-point) outlier, not
-# real edge data (see FrictionLines/SurfaceVariable's own chord_percentile
-# docstrings for the same caution about assuming something is an
-# artifact rather than real physics).
-pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own findings below, if needed
-# pod_point_stride: keep only every Nth point of pod_region (e.g. 2 or 3),
-# AFTER the span/chord crop above - for a case where even the physically-
-# justified region is still too many points to fit in memory (confirmed a
-# real OOM on a real DNS-resolution case: narrowing pod_span_min/
-# pod_span_max alone cut the region to 38% of the surface's total points,
-# which was still ~477GB materialized - point density only falls off
-# roughly linearly with a narrower span band, not steeply, so region
-# narrowing alone may not be enough on its own for an unusually
-# fine-resolution case). None/1 (default): no decimation, every point in
-# the selected region kept - this is what every OTHER case in this
-# project should leave it as; only set this for a case too large to fit
-# otherwise, same spirit as pod_span_min/pod_span_max/pod_chord_min/
-# pod_chord_max above - an explicit, deliberate reduction, not a silent
-# default.
-pod_point_stride = 10  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
+# pod_span_min, pod_span_max = 0.17 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
+# # pod_chord_min/pod_chord_max: set these (e.g. pod_chord_min = -0.02) if
+# # plot_pod_mode()'s own output shows a stray point sitting far from the
+# # rest of the selected region - confirmed a real degenerate/edge surfel
+# # on a real case, visible as a single dot that also drags the plot's own
+# # axis range out to accommodate it, squeezing the actual structure into
+# # a sliver. None (default, either one): no crop - check the printed
+# # chord min/max below first; only add a bound once you've confirmed
+# # there's a genuine single-point (or near-single-point) outlier, not
+# # real edge data (see FrictionLines/SurfaceVariable's own chord_percentile
+# # docstrings for the same caution about assuming something is an
+# # artifact rather than real physics).
+# pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own findings below, if needed
+# # pod_point_stride: keep only every Nth point of pod_region (e.g. 2 or 3),
+# # AFTER the span/chord crop above - for a case where even the physically-
+# # justified region is still too many points to fit in memory (confirmed a
+# # real OOM on a real DNS-resolution case: narrowing pod_span_min/
+# # pod_span_max alone cut the region to 38% of the surface's total points,
+# # which was still ~477GB materialized - point density only falls off
+# # roughly linearly with a narrower span band, not steeply, so region
+# # narrowing alone may not be enough on its own for an unusually
+# # fine-resolution case). None/1 (default): no decimation, every point in
+# # the selected region kept - this is what every OTHER case in this
+# # project should leave it as; only set this for a case too large to fit
+# # otherwise, same spirit as pod_span_min/pod_span_max/pod_chord_min/
+# # pod_chord_max above - an explicit, deliberate reduction, not a silent
+# # default.
+# pod_point_stride = 10  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
 
-span_sv, chord_sv = sv_pressure_inst._span_chord('Upper')
-radius_sv = sv_pressure_inst._radius('Upper')
-# radius_sv (TRUE physical radius, [0, r_tip]) - NOT span_sv (the raw,
-# CENTERED Cartesian span coordinate _span_chord() returns, roughly
-# [-half_extent, +half_extent]) - pod_span_min/pod_span_max are fractions
-# of r_tip, so they only mean "10%-100% of the blade" when compared
-# against radius_sv. Comparing them against span_sv instead (an earlier
-# version of this line did) silently selected some arbitrary narrow
-# sliver near whichever end has positive centered-span values instead -
-# confirmed on a real case (the Cf-POD equivalent in
-# skin_friction_manager.py): 0.1*r_tip to 1*r_tip was intended to cover
-# nearly the whole blade, but the plotted region only ever showed the
-# last ~15% near the tip.
-pod_region = (radius_sv >= pod_span_min) & (radius_sv <= pod_span_max)
-print(f'pod_region chord range BEFORE any pod_chord_min/pod_chord_max crop: '
-      f'[{chord_sv[pod_region].min():.4f}, {chord_sv[pod_region].max():.4f}] '
-      f'({int(pod_region.sum())} points) - check this for a stray outlier before trusting the plot/POD below')
-if pod_chord_min is not None:
-   pod_region &= chord_sv >= pod_chord_min
-if pod_chord_max is not None:
-   pod_region &= chord_sv <= pod_chord_max
+# span_sv, chord_sv = sv_pressure_inst._span_chord('Upper')
+# radius_sv = sv_pressure_inst._radius('Upper')
+# # radius_sv (TRUE physical radius, [0, r_tip]) - NOT span_sv (the raw,
+# # CENTERED Cartesian span coordinate _span_chord() returns, roughly
+# # [-half_extent, +half_extent]) - pod_span_min/pod_span_max are fractions
+# # of r_tip, so they only mean "10%-100% of the blade" when compared
+# # against radius_sv. Comparing them against span_sv instead (an earlier
+# # version of this line did) silently selected some arbitrary narrow
+# # sliver near whichever end has positive centered-span values instead -
+# # confirmed on a real case (the Cf-POD equivalent in
+# # skin_friction_manager.py): 0.1*r_tip to 1*r_tip was intended to cover
+# # nearly the whole blade, but the plotted region only ever showed the
+# # last ~15% near the tip.
+# pod_region = (radius_sv >= pod_span_min) & (radius_sv <= pod_span_max)
+# print(f'pod_region chord range BEFORE any pod_chord_min/pod_chord_max crop: '
+#       f'[{chord_sv[pod_region].min():.4f}, {chord_sv[pod_region].max():.4f}] '
+#       f'({int(pod_region.sum())} points) - check this for a stray outlier before trusting the plot/POD below')
+# if pod_chord_min is not None:
+#    pod_region &= chord_sv >= pod_chord_min
+# if pod_chord_max is not None:
+#    pod_region &= chord_sv <= pod_chord_max
 
-if pod_point_stride is not None and pod_point_stride > 1:
-   # Thin out the ALREADY-selected region's own points, in their existing
-   # order - not a re-crop by position, so it keeps points spread across
-   # the whole span_min/span_max x chord_min/chord_max box rather than
-   # cutting off one side of it.
-   kept_indices = np.flatnonzero(pod_region)[::pod_point_stride]
-   pod_region = np.zeros_like(pod_region)
-   pod_region[kept_indices] = True
-   print(f'pod_point_stride={pod_point_stride}: region thinned to {int(pod_region.sum())} points')
+# if pod_point_stride is not None and pod_point_stride > 1:
+#    # Thin out the ALREADY-selected region's own points, in their existing
+#    # order - not a re-crop by position, so it keeps points spread across
+#    # the whole span_min/span_max x chord_min/chord_max box rather than
+#    # cutting off one side of it.
+#    kept_indices = np.flatnonzero(pod_region)[::pod_point_stride]
+#    pod_region = np.zeros_like(pod_region)
+#    pod_region[kept_indices] = True
+#    print(f'pod_point_stride={pod_point_stride}: region thinned to {int(pod_region.sum())} points')
 
-# Pressure-branch files (converters/ensight_to_h5.py) don't currently
-# carry a per-surfel Area (unlike the forces branch - see
-# SurfaceVariable._area()'s docstring), so fall back to an unweighted
-# POD on this file rather than crash; the forces-branch Cf POD in
-# skin_friction_manager.py is unaffected and stays area-weighted.
-if sv_pressure_inst.areas['Upper'] is not None:
-   pod_weights = sv_pressure_inst._area('Upper')[pod_region]
-else:
-   print(f"No per-surfel Area in '{inst_pressure_file}' (pressure-branch file) - running an UNWEIGHTED POD.")
-   pod_weights = None
+# # Pressure-branch files (converters/ensight_to_h5.py) don't currently
+# # carry a per-surfel Area (unlike the forces branch - see
+# # SurfaceVariable._area()'s docstring), so fall back to an unweighted
+# # POD on this file rather than crash; the forces-branch Cf POD in
+# # skin_friction_manager.py is unaffected and stays area-weighted.
+# if sv_pressure_inst.areas['Upper'] is not None:
+#    pod_weights = sv_pressure_inst._area('Upper')[pod_region]
+# else:
+#    print(f"No per-surfel Area in '{inst_pressure_file}' (pressure-branch file) - running an UNWEIGHTED POD.")
+#    pod_weights = None
 
-print(40*'-')
-print(f'Running POD on {p_label}, Upper surface, {int(pod_region.sum())} points in the selected region')
-if normalize:
-   cp_pod_data = sv_pressure_inst.cp_time_series_region(surface='Upper', region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
-else:
-   cp_pod_data = sv_pressure_inst.variable_time_series_region('static_pressure', surface='Upper', region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
-cp_pod_result = pod(cp_pod_data, n_modes=100, weights=pod_weights)
-print(f'{p_label} POD energy fractions (first 5): ', cp_pod_result['energy_fraction'][:5])
+# print(40*'-')
+# print(f'Running POD on {p_label}, Upper surface, {int(pod_region.sum())} points in the selected region')
+# if normalize:
+#    cp_pod_data = sv_pressure_inst.cp_time_series_region(surface='Upper', region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
+# else:
+#    cp_pod_data = sv_pressure_inst.variable_time_series_region('static_pressure', surface='Upper', region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
+# cp_pod_result = pod(cp_pod_data, n_modes=100, weights=pod_weights)
+# print(f'{p_label} POD energy fractions (first 5): ', cp_pod_result['energy_fraction'][:5])
 
-print(40*'-')
-print(f'Plotting {p_label} POD energy spectrum')
-plot_pod_energy(
-   cp_pod_result,
-   savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_energy_{case}.png'),
-)
+# print(40*'-')
+# print(f'Plotting {p_label} POD energy spectrum')
+# plot_pod_energy(
+#    cp_pod_result,
+#    savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_energy_{case}.png'),
+# )
 
-print(40*'-')
-print(f'Plotting {p_label} POD spectrogram (every retained mode\'s own PSD)')
-plot_pod_spectrogram(
-   cp_pod_result, dt=dt,
-   savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_spectrogram_{case}.png'),
-)
-modes = [0,1]
+# print(40*'-')
+# print(f'Plotting {p_label} POD spectrogram (every retained mode\'s own PSD)')
+# plot_pod_spectrogram(
+#    cp_pod_result, dt=dt,
+#    savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_spectrogram_{case}.png'),
+# )
+# modes = [0,1]
 
-for m in modes:
-   print(40*'-')
-   print(f'Plotting {p_label} POD mode {m+1} (most energetic) on the actual blade geometry')
-   plot_pod_mode(
-      radius_sv[pod_region], chord_sv[pod_region], cp_pod_result, mode_index=m,
-      unit_label=f'{p_label} mode amplitude [-]',
-      figsize=blade_figsize,
-      savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_{case}.png'),
-   )
+# for m in modes:
+#    print(40*'-')
+#    print(f'Plotting {p_label} POD mode {m+1} (most energetic) on the actual blade geometry')
+#    plot_pod_mode(
+#       radius_sv[pod_region], chord_sv[pod_region], cp_pod_result, mode_index=m,
+#       unit_label=f'{p_label} mode amplitude [-]',
+#       figsize=blade_figsize,
+#       savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_{case}.png'),
+#    )
 
-   print(40*'-')
-   print(f'Plotting {p_label} POD mode {m+1} temporal coefficient')
-   plot_pod_temporal_coefficient(
-      cp_pod_result, mode_index=m, dt=dt,
-      savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_coeff_{case}.png'),
-   )
+#    print(40*'-')
+#    print(f'Plotting {p_label} POD mode {m+1} temporal coefficient')
+#    plot_pod_temporal_coefficient(
+#       cp_pod_result, mode_index=m, dt=dt,
+#       savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_coeff_{case}.png'),
+#    )
 
-   # Is mode 1's own temporal coefficient a_1(t) tied to the rotor's own
-   # rotation (a peak at an integer multiple of f_rot, and/or a clean
-   # phase-locked curve vs azimuth), or does it carry an independent
-   # frequency of its own - see rotaris-docs/pod_section.tex's own
-   # discussion of this in relation to the harmonic decomposition, and the
-   # equivalent check already done on the Cf POD mode in
-   # skin_friction_manager.py.
-   print(40*'-')
-   print(f'Plotting {p_label} POD mode {m+1} temporal coefficient PSD')
-   plot_periodogram(
-      cp_pod_result['coefficients'][:, m], dt=dt,
-      ylabel=f'$a_{m+1}(t)$ PSD',
-      savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_coeff_psd_{case}.png'),
-   )
+#    # Is mode 1's own temporal coefficient a_1(t) tied to the rotor's own
+#    # rotation (a peak at an integer multiple of f_rot, and/or a clean
+#    # phase-locked curve vs azimuth), or does it carry an independent
+#    # frequency of its own - see rotaris-docs/pod_section.tex's own
+#    # discussion of this in relation to the harmonic decomposition, and the
+#    # equivalent check already done on the Cf POD mode in
+#    # skin_friction_manager.py.
+#    print(40*'-')
+#    print(f'Plotting {p_label} POD mode {m+1} temporal coefficient PSD')
+#    plot_periodogram(
+#       cp_pod_result['coefficients'][:, m], dt=dt,
+#       ylabel=f'$a_{m+1}(t)$ PSD',
+#       savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_coeff_psd_{case}.png'),
+#    )
 
-   print(40*'-')
-   print(f'Plotting {p_label} POD mode {m+1} temporal coefficient, phase-locked to rotor azimuth')
-   plot_phase_lock(
-      cp_pod_result['coefficients'][:, m], dt, rpm,
-      ylabel=f'$a_{m+1}(t)$ phase-locked mean',
-      savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_coeff_phaselock_{case}.png'),
-   )
+#    print(40*'-')
+#    print(f'Plotting {p_label} POD mode {m+1} temporal coefficient, phase-locked to rotor azimuth')
+#    plot_phase_lock(
+#       cp_pod_result['coefficients'][:, m], dt, rpm,
+#       ylabel=f'$a_{m+1}(t)$ phase-locked mean',
+#       savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_coeff_phaselock_{case}.png'),
+#    )
 
-print(40*'-')
-print(f'Checking {p_label} POD mode 1/2 phase relationship (quadrature check)')
-print(pod_mode_phase(cp_pod_result, mode_a=0, mode_b=1, dt=dt))
+# print(40*'-')
+# print(f'Checking {p_label} POD mode 1/2 phase relationship (quadrature check)')
+# print(pod_mode_phase(cp_pod_result, mode_a=0, mode_b=1, dt=dt))
 
-# Spatial coherence length of the raw field itself - anchored on the
-# dominant POD mode's own peak location (see two_point_correlation()'s
-# own docstring for why this, rather than the default peak-RMS point, is
-# the right anchor once a specific coherent structure has already been
-# identified).
-cp_ref_index = int(np.argmax(np.abs(cp_pod_result['modes'][0])))
-print(40*'-')
-print(f'Checking {p_label} two-point spatial correlation / coherence length')
-print(two_point_correlation(
-   cp_pod_data, radius_sv[pod_region], chord_sv[pod_region], ref_index=cp_ref_index,
-)['length_scale'])
-plot_two_point_correlation(
-   cp_pod_data, radius_sv[pod_region], chord_sv[pod_region], ref_index=cp_ref_index,
-   savepath=os.path.join(master_path, f'images/cp/pod/cp_two_point_corr_{case}.png'),
-)
+# # Spatial coherence length of the raw field itself - anchored on the
+# # dominant POD mode's own peak location (see two_point_correlation()'s
+# # own docstring for why this, rather than the default peak-RMS point, is
+# # the right anchor once a specific coherent structure has already been
+# # identified).
+# cp_ref_index = int(np.argmax(np.abs(cp_pod_result['modes'][0])))
+# print(40*'-')
+# print(f'Checking {p_label} two-point spatial correlation / coherence length')
+# print(two_point_correlation(
+#    cp_pod_data, radius_sv[pod_region], chord_sv[pod_region], ref_index=cp_ref_index,
+# )['length_scale'])
+# plot_two_point_correlation(
+#    cp_pod_data, radius_sv[pod_region], chord_sv[pod_region], ref_index=cp_ref_index,
+#    savepath=os.path.join(master_path, f'images/cp/pod/cp_two_point_corr_{case}.png'),
+# )
 
-# DMD, fit on the (noise-robust, truncated) POD coefficient subspace -
-# see bladeprocessor/dmd.py's own docstring for why this, rather than
-# exact DMD on the raw field, is used here.
-print(40*'-')
-print(f'Running DMD on {p_label} POD coefficient subspace')
-cp_dmd_result = dmd(cp_pod_result, dt=dt, n_modes=6)
-print(f'{p_label} DMD frequencies [Hz]: ', cp_dmd_result['frequency'])
-print(f'{p_label} DMD growth rates [1/s]: ', cp_dmd_result['growth_rate'])
+# # DMD, fit on the (noise-robust, truncated) POD coefficient subspace -
+# # see bladeprocessor/dmd.py's own docstring for why this, rather than
+# # exact DMD on the raw field, is used here.
+# print(40*'-')
+# print(f'Running DMD on {p_label} POD coefficient subspace')
+# cp_dmd_result = dmd(cp_pod_result, dt=dt, n_modes=6)
+# print(f'{p_label} DMD frequencies [Hz]: ', cp_dmd_result['frequency'])
+# print(f'{p_label} DMD growth rates [1/s]: ', cp_dmd_result['growth_rate'])
 
-print(40*'-')
-print(f'Plotting {p_label} DMD spectrum')
-plot_dmd_spectrum(
-   cp_dmd_result,
-   savepath=os.path.join(master_path, f'images/cp/pod/cp_dmd_spectrum_{case}.png'),
-)
+# print(40*'-')
+# print(f'Plotting {p_label} DMD spectrum')
+# plot_dmd_spectrum(
+#    cp_dmd_result,
+#    savepath=os.path.join(master_path, f'images/cp/pod/cp_dmd_spectrum_{case}.png'),
+# )
 
-print(40*'-')
-print(f'Plotting {p_label} DMD mode 1 (largest amplitude) on the actual blade geometry')
-plot_dmd_mode(
-   radius_sv[pod_region], chord_sv[pod_region], cp_dmd_result, mode_index=0,
-   unit_label=f'{p_label} DMD mode amplitude [-]',
-   figsize=blade_figsize,
-   savepath=os.path.join(master_path, f'images/cp/pod/cp_dmd_mode1_{case}.png'),
-)
+# print(40*'-')
+# print(f'Plotting {p_label} DMD mode 1 (largest amplitude) on the actual blade geometry')
+# plot_dmd_mode(
+#    radius_sv[pod_region], chord_sv[pod_region], cp_dmd_result, mode_index=0,
+#    unit_label=f'{p_label} DMD mode amplitude [-]',
+#    figsize=blade_figsize,
+#    savepath=os.path.join(master_path, f'images/cp/pod/cp_dmd_mode1_{case}.png'),
+# )
 
-print(40*'-')
-print(f'Plotting {p_label} DMD reconstruction vs. the recorded POD coefficient (mode 1)')
-plot_dmd_reconstruction(
-   cp_pod_result, cp_dmd_result, mode_index=0, dt=dt,
-   savepath=os.path.join(master_path, f'images/cp/pod/cp_dmd_reconstruction_{case}.png'),
-)
+# print(40*'-')
+# print(f'Plotting {p_label} DMD reconstruction vs. the recorded POD coefficient (mode 1)')
+# plot_dmd_reconstruction(
+#    cp_pod_result, cp_dmd_result, mode_index=0, dt=dt,
+#    savepath=os.path.join(master_path, f'images/cp/pod/cp_dmd_reconstruction_{case}.png'),
+# )
 

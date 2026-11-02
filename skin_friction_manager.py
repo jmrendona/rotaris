@@ -2,6 +2,7 @@ import os
 import numpy as np
 
 from case_config import load_case_config
+from bladeprocessor.strip_forces import StripForces
 from bladeprocessor.friction_lines import FrictionLines
 from bladeprocessor.surface_variable import SurfaceVariable
 from bladeprocessor.convergence import plot_cumulative_stats
@@ -64,14 +65,6 @@ for _sub in ('cf/avg', 'cf/inst', 'cf/rms', 'cf/convergence/global', 'cf/converg
 # ------------- Friction related post-processing ------------- #
 print(40*'-')
 print('Opening FrictionLines file: ', os.path.join(master_path, inst_force_file))
-# span_min=span_min here (not just on every call below) - for a whole-rotor
-# case with no separate blade parts to select via face_name at
-# conversion time, every single call below already passes span_min=span_min
-# anyway (to isolate one blade - see the note further down), so cropping
-# at load time means the (potentially huge) force field is only ever
-# read for the surviving ~half of the points, not the whole rotor - see
-# FrictionLines.__init__'s span_min/span_max docstring. Fixed a real OOM
-# on a ~660 GB case this way.
 fl = FrictionLines(
    os.path.join(master_path, inst_force_file),
    r_tip=r_tip,
@@ -81,6 +74,7 @@ fl = FrictionLines(
    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
    span_min=span_min, validate_axes=validate_axes
 )
+
 
 # Dimensional wall shear vector (tau = F - (F.n)n), no rho_ref/rpm needed:
 # tau = fl.wall_shear(surface='Upper', frame=None)  # frame=None -> average over every frame in the file
@@ -287,16 +281,14 @@ fl = FrictionLines(
 # # file (the forces branch, same as fl above), for the raw Skin_Friction
 # # variable rather than the tau-derived Cf FrictionLines computes:
 
-# print(40*'-')
-# print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_force_file))
-# sv_inst_forces = SurfaceVariable(
-#    os.path.join(master_path, inst_force_file),
-#    r_tip=r_tip,
-#    rho_ref=rho_ref,
-#    rpm=rpm,
-#    c_ref=c_ref,
-#    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
-# )
+
+print(40*'-')
+print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_force_file))
+sf_inst_forces = SurfaceVariable(
+  os.path.join(master_path, inst_force_file),
+  r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, c_ref=c_ref,
+  span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
+)
 
 # print(40*'-')
 # print('Plotting Skin Friction surface scatter, average over all frames')
@@ -318,17 +310,16 @@ fl = FrictionLines(
 #    savepath=os.path.join(master_path, f'images/cf/rms/cf_surface_rms_upper_{case}.png'),
 # )
 
-# for frame in range(0,sv_inst_forces.n_frames,frame_loop_step):
-   
-#    print(40*'-')
-#    print('Plotting Skin Friction surface scatter, average over all frames')
-#    sv_inst_forces.plot_variable_surface(
-#       lambda s: sv_inst_forces.variable('Skin_Friction', surface=s, frame=frame),
-#       cbar_label='Skin Friction [Pa]', span_min=span_min, surface='Upper',
-#       figsize=blade_figsize,
-#       normalize=normalize,
-#       savepath=os.path.join(master_path, f'images/cf/inst/cf_surface_inst_upper_frame{frame:03d}_{case}.png'),
-#    )
+for frame in range(0,fl.n_frames,frame_loop_step):   
+   print(40*'-')
+   print('Plotting Skin Friction surface scatter, average over all frames')
+   sf_inst_forces.plot_variable_surface(
+      lambda s: sf_inst_forces.variable('Skin_Friction', surface=s, frame=frame),
+      cbar_label='Skin Friction [Pa]', span_min=span_min, surface='Upper',
+      figsize=blade_figsize,
+      normalize=normalize,
+      savepath=os.path.join(master_path, f'images/cf/inst/cf_surface_inst_upper_frame{frame:03d}_{case}.png'),
+   )
 
 # # Convergence checking: Cf phase portrait (see README.md, "Convergence
 # # checking: wall-shear/Cf phase portraits") - near-wall/viscous
@@ -602,390 +593,390 @@ fl = FrictionLines(
 #       savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_spanwise_point_integral_timescale_s{span:03d}_c{chord:03d}_{case}.png'),
 #       )
 
-# ------------- Proper Orthogonal Decomposition (POD) of Cf ------------- #
-#
-# Objective, energy-ranked check of the spatial coherent structure
-# identified from the friction-line/critical-point analysis above (e.g.
-# an LSB/leading-edge-vortex-like structure and its migration with span -
-# see rotaris-docs/pod_section.tex for the full derivation). Computed on
-# ONE surface at a time (Upper/suction side here, where that structure
-# was identified - NOT both surfaces combined, matching how
-# cf_time_series() is already surface-specific), restricted to the span
-# window where the structure actually lives - NOT assumed to be the tip;
-# pod_span_min/pod_span_max below are a placeholder and must be set from
-# this case's own friction-line/critical-point findings above before the
-# result means anything.
-pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
-# pod_chord_min/pod_chord_max: set these (e.g. pod_chord_min = -0.02) if
-# plot_pod_mode()'s own output shows a stray point sitting far from the
-# rest of the selected region - confirmed a real degenerate/edge surfel
-# on a real case, visible as a single dot that also drags the plot's own
-# axis range out to accommodate it, squeezing the actual structure into
-# a sliver. None (default, either one): no crop - check the printed
-# chord min/max below first; only add a bound once you've confirmed
-# there's a genuine single-point (or near-single-point) outlier, not
-# real edge data (see FrictionLines/SurfaceVariable's own chord_percentile
-# docstrings for the same caution about assuming something is an
-# artifact rather than real physics).
-pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own findings below, if needed
-# pod_point_stride: keep only every Nth point of pod_region (e.g. 2 or 3),
-# AFTER the span/chord crop above - for a case where even the physically-
-# justified region is still too many points to fit in memory (confirmed a
-# real OOM on a real DNS-resolution case, pressure branch: narrowing
-# pod_span_min/pod_span_max alone cut the region to 38% of the surface's
-# total points, which was still ~477GB materialized - point density only
-# falls off roughly linearly with a narrower span band, not steeply, so
-# region narrowing alone may not be enough on its own for an unusually
-# fine-resolution case). None/1 (default): no decimation, every point in
-# the selected region kept - this is what every OTHER case in this
-# project should leave it as; only set this for a case too large to fit
-# otherwise, same spirit as pod_span_min/pod_span_max/pod_chord_min/
-# pod_chord_max above - an explicit, deliberate reduction, not a silent
-# default.
-pod_point_stride = 2  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
+# # ------------- Proper Orthogonal Decomposition (POD) of Cf ------------- #
+# #
+# # Objective, energy-ranked check of the spatial coherent structure
+# # identified from the friction-line/critical-point analysis above (e.g.
+# # an LSB/leading-edge-vortex-like structure and its migration with span -
+# # see rotaris-docs/pod_section.tex for the full derivation). Computed on
+# # ONE surface at a time (Upper/suction side here, where that structure
+# # was identified - NOT both surfaces combined, matching how
+# # cf_time_series() is already surface-specific), restricted to the span
+# # window where the structure actually lives - NOT assumed to be the tip;
+# # pod_span_min/pod_span_max below are a placeholder and must be set from
+# # this case's own friction-line/critical-point findings above before the
+# # result means anything.
+# pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
+# # pod_chord_min/pod_chord_max: set these (e.g. pod_chord_min = -0.02) if
+# # plot_pod_mode()'s own output shows a stray point sitting far from the
+# # rest of the selected region - confirmed a real degenerate/edge surfel
+# # on a real case, visible as a single dot that also drags the plot's own
+# # axis range out to accommodate it, squeezing the actual structure into
+# # a sliver. None (default, either one): no crop - check the printed
+# # chord min/max below first; only add a bound once you've confirmed
+# # there's a genuine single-point (or near-single-point) outlier, not
+# # real edge data (see FrictionLines/SurfaceVariable's own chord_percentile
+# # docstrings for the same caution about assuming something is an
+# # artifact rather than real physics).
+# pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own findings below, if needed
+# # pod_point_stride: keep only every Nth point of pod_region (e.g. 2 or 3),
+# # AFTER the span/chord crop above - for a case where even the physically-
+# # justified region is still too many points to fit in memory (confirmed a
+# # real OOM on a real DNS-resolution case, pressure branch: narrowing
+# # pod_span_min/pod_span_max alone cut the region to 38% of the surface's
+# # total points, which was still ~477GB materialized - point density only
+# # falls off roughly linearly with a narrower span band, not steeply, so
+# # region narrowing alone may not be enough on its own for an unusually
+# # fine-resolution case). None/1 (default): no decimation, every point in
+# # the selected region kept - this is what every OTHER case in this
+# # project should leave it as; only set this for a case too large to fit
+# # otherwise, same spirit as pod_span_min/pod_span_max/pod_chord_min/
+# # pod_chord_max above - an explicit, deliberate reduction, not a silent
+# # default.
+# pod_point_stride = 2  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
 
-span_fl, chord_fl = fl._span_chord('Upper')
-radius_fl = fl._radius('Upper')
-area_fl = fl._area('Upper')
-# radius_fl (TRUE physical radius, [0, r_tip]) - NOT span_fl (the raw,
-# CENTERED Cartesian span coordinate _span_chord() returns, roughly
-# [-half_extent, +half_extent]) - pod_span_min/pod_span_max are fractions
-# of r_tip, so they only mean "10%-100% of the blade" when compared
-# against radius_fl. Comparing them against span_fl instead (an earlier
-# version of this line did) silently selected some arbitrary narrow
-# sliver near whichever end has positive centered-span values instead -
-# confirmed on a real case: 0.1*r_tip to 1*r_tip was intended to cover
-# nearly the whole blade, but the plotted region only ever showed the
-# last ~15% near the tip.
-pod_region = (radius_fl >= pod_span_min) & (radius_fl <= pod_span_max)
-print(f'pod_region chord range BEFORE any pod_chord_min/pod_chord_max crop: '
-      f'[{chord_fl[pod_region].min():.4f}, {chord_fl[pod_region].max():.4f}] '
-      f'({int(pod_region.sum())} points) - check this for a stray outlier before trusting the plot/POD below')
-if pod_chord_min is not None:
-   pod_region &= chord_fl >= pod_chord_min
-if pod_chord_max is not None:
-   pod_region &= chord_fl <= pod_chord_max
+# span_fl, chord_fl = fl._span_chord('Upper')
+# radius_fl = fl._radius('Upper')
+# area_fl = fl._area('Upper')
+# # radius_fl (TRUE physical radius, [0, r_tip]) - NOT span_fl (the raw,
+# # CENTERED Cartesian span coordinate _span_chord() returns, roughly
+# # [-half_extent, +half_extent]) - pod_span_min/pod_span_max are fractions
+# # of r_tip, so they only mean "10%-100% of the blade" when compared
+# # against radius_fl. Comparing them against span_fl instead (an earlier
+# # version of this line did) silently selected some arbitrary narrow
+# # sliver near whichever end has positive centered-span values instead -
+# # confirmed on a real case: 0.1*r_tip to 1*r_tip was intended to cover
+# # nearly the whole blade, but the plotted region only ever showed the
+# # last ~15% near the tip.
+# pod_region = (radius_fl >= pod_span_min) & (radius_fl <= pod_span_max)
+# print(f'pod_region chord range BEFORE any pod_chord_min/pod_chord_max crop: '
+#       f'[{chord_fl[pod_region].min():.4f}, {chord_fl[pod_region].max():.4f}] '
+#       f'({int(pod_region.sum())} points) - check this for a stray outlier before trusting the plot/POD below')
+# if pod_chord_min is not None:
+#    pod_region &= chord_fl >= pod_chord_min
+# if pod_chord_max is not None:
+#    pod_region &= chord_fl <= pod_chord_max
 
-if pod_point_stride is not None and pod_point_stride > 1:
-   # Thin out the ALREADY-selected region's own points, in their existing
-   # order - not a re-crop by position, so it keeps points spread across
-   # the whole span_min/span_max x chord_min/chord_max box rather than
-   # cutting off one side of it.
-   kept_indices = np.flatnonzero(pod_region)[::pod_point_stride]
-   pod_region = np.zeros_like(pod_region)
-   pod_region[kept_indices] = True
-   print(f'pod_point_stride={pod_point_stride}: region thinned to {int(pod_region.sum())} points')
+# if pod_point_stride is not None and pod_point_stride > 1:
+#    # Thin out the ALREADY-selected region's own points, in their existing
+#    # order - not a re-crop by position, so it keeps points spread across
+#    # the whole span_min/span_max x chord_min/chord_max box rather than
+#    # cutting off one side of it.
+#    kept_indices = np.flatnonzero(pod_region)[::pod_point_stride]
+#    pod_region = np.zeros_like(pod_region)
+#    pod_region[kept_indices] = True
+#    print(f'pod_point_stride={pod_point_stride}: region thinned to {int(pod_region.sum())} points')
 
-modes = [0,1]
+# modes = [0,1]
 
-print(40*'-')
-print(f'Running POD on Cf magnitude, Upper surface, {int(pod_region.sum())} points in the selected region')
-cf_pod_mag_data = fl.cf_time_series(surface='Upper', component=None)[:, pod_region]
-cf_pod_mag_result = pod(cf_pod_mag_data, n_modes=100, weights=area_fl[pod_region])
-print('Cf magnitude POD energy fractions (first 5): ', cf_pod_mag_result['energy_fraction'][:5])
+# print(40*'-')
+# print(f'Running POD on Cf magnitude, Upper surface, {int(pod_region.sum())} points in the selected region')
+# cf_pod_mag_data = fl.cf_time_series(surface='Upper', component=None)[:, pod_region]
+# cf_pod_mag_result = pod(cf_pod_mag_data, n_modes=100, weights=area_fl[pod_region])
+# print('Cf magnitude POD energy fractions (first 5): ', cf_pod_mag_result['energy_fraction'][:5])
 
-print(40*'-')
-print('Plotting Cf magnitude POD energy spectrum')
-plot_pod_energy(
-   cf_pod_mag_result,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_energy_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf magnitude POD energy spectrum')
+# plot_pod_energy(
+#    cf_pod_mag_result,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_energy_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting Cf magnitude POD spectrogram (every retained mode\'s own PSD)')
-plot_pod_spectrogram(
-   cf_pod_mag_result, dt=dt,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_spectrogram_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf magnitude POD spectrogram (every retained mode\'s own PSD)')
+# plot_pod_spectrogram(
+#    cf_pod_mag_result, dt=dt,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_spectrogram_{case}.png'),
+# )
 
-for m in modes:
-   print(40*'-')
-   print('Plotting Cf magnitude POD mode 1 (most energetic) on the actual blade geometry')
-   plot_pod_mode(
-      radius_fl[pod_region], chord_fl[pod_region], cf_pod_mag_result, mode_index=m,
-      unit_label='$C_f$ mode amplitude [-]',
-      figsize=blade_figsize,
-      savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_{case}.png'),
-   )
+# for m in modes:
+#    print(40*'-')
+#    print('Plotting Cf magnitude POD mode 1 (most energetic) on the actual blade geometry')
+#    plot_pod_mode(
+#       radius_fl[pod_region], chord_fl[pod_region], cf_pod_mag_result, mode_index=m,
+#       unit_label='$C_f$ mode amplitude [-]',
+#       figsize=blade_figsize,
+#       savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_{case}.png'),
+#    )
 
-   print(40*'-')
-   print('Plotting Cf magnitude POD mode 1 temporal coefficient')
-   plot_pod_temporal_coefficient(
-      cf_pod_mag_result, mode_index=m, dt=dt,
-      savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_{case}.png'),
-   )
+#    print(40*'-')
+#    print('Plotting Cf magnitude POD mode 1 temporal coefficient')
+#    plot_pod_temporal_coefficient(
+#       cf_pod_mag_result, mode_index=m, dt=dt,
+#       savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_{case}.png'),
+#    )
    
-   print(40*'-')
-   print('Plotting Cf magnitude POD mode 1 temporal coefficient PSD')
-   plot_periodogram(
-      cf_pod_mag_result['coefficients'][:, m], dt=dt,
-      ylabel='$a_1(t)$ PSD',
-      savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_psd_{case}.png'),
-   )
+#    print(40*'-')
+#    print('Plotting Cf magnitude POD mode 1 temporal coefficient PSD')
+#    plot_periodogram(
+#       cf_pod_mag_result['coefficients'][:, m], dt=dt,
+#       ylabel='$a_1(t)$ PSD',
+#       savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_psd_{case}.png'),
+#    )
 
-   print(40*'-')
-   print('Plotting Cf magnitude POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
-   plot_phase_lock(
-      cf_pod_mag_result['coefficients'][:, m], dt, rpm,
-      ylabel='$a_1(t)$ phase-locked mean',
-      savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_phaselock_{case}.png'),
-   )
+#    print(40*'-')
+#    print('Plotting Cf magnitude POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
+#    plot_phase_lock(
+#       cf_pod_mag_result['coefficients'][:, m], dt, rpm,
+#       ylabel='$a_1(t)$ phase-locked mean',
+#       savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_phaselock_{case}.png'),
+#    )
 
-# Do modes 1 and 2 form a traveling-wave pair? Quadrature (~90 deg), not
-# opposite phase (~180 deg), is the expected signature - see
-# pod_mode_phase()'s own docstring.
-print(40*'-')
-print('Checking Cf magnitude POD mode 1/2 phase relationship (quadrature check)')
-print(pod_mode_phase(cf_pod_mag_result, mode_a=0, mode_b=1, dt=dt))
+# # Do modes 1 and 2 form a traveling-wave pair? Quadrature (~90 deg), not
+# # opposite phase (~180 deg), is the expected signature - see
+# # pod_mode_phase()'s own docstring.
+# print(40*'-')
+# print('Checking Cf magnitude POD mode 1/2 phase relationship (quadrature check)')
+# print(pod_mode_phase(cf_pod_mag_result, mode_a=0, mode_b=1, dt=dt))
 
-# Spatial coherence length of the raw Cf magnitude field itself -
-# anchored on the dominant POD mode's own peak location (see
-# two_point_correlation()'s own docstring for why this, rather than the
-# default peak-RMS point, is the right anchor once a specific coherent
-# structure has already been identified).
-cf_mag_ref_index = int(np.argmax(np.abs(cf_pod_mag_result['modes'][0])))
-print(40*'-')
-print('Checking Cf magnitude two-point spatial correlation / coherence length')
-print(two_point_correlation(
-   cf_pod_mag_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_mag_ref_index,
-)['length_scale'])
-plot_two_point_correlation(
-   cf_pod_mag_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_mag_ref_index,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_two_point_corr_{case}.png'),
-)
+# # Spatial coherence length of the raw Cf magnitude field itself -
+# # anchored on the dominant POD mode's own peak location (see
+# # two_point_correlation()'s own docstring for why this, rather than the
+# # default peak-RMS point, is the right anchor once a specific coherent
+# # structure has already been identified).
+# cf_mag_ref_index = int(np.argmax(np.abs(cf_pod_mag_result['modes'][0])))
+# print(40*'-')
+# print('Checking Cf magnitude two-point spatial correlation / coherence length')
+# print(two_point_correlation(
+#    cf_pod_mag_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_mag_ref_index,
+# )['length_scale'])
+# plot_two_point_correlation(
+#    cf_pod_mag_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_mag_ref_index,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_two_point_corr_{case}.png'),
+# )
 
-# DMD, fit on the (noise-robust, truncated) POD coefficient subspace -
-# see bladeprocessor/dmd.py's own docstring for why this, rather than
-# exact DMD on the raw field, is used here.
-print(40*'-')
-print('Running DMD on Cf magnitude POD coefficient subspace')
-cf_dmd_mag_result = dmd(cf_pod_mag_result, dt=dt, n_modes=6)
-print('Cf magnitude DMD frequencies [Hz]: ', cf_dmd_mag_result['frequency'])
-print('Cf magnitude DMD growth rates [1/s]: ', cf_dmd_mag_result['growth_rate'])
+# # DMD, fit on the (noise-robust, truncated) POD coefficient subspace -
+# # see bladeprocessor/dmd.py's own docstring for why this, rather than
+# # exact DMD on the raw field, is used here.
+# print(40*'-')
+# print('Running DMD on Cf magnitude POD coefficient subspace')
+# cf_dmd_mag_result = dmd(cf_pod_mag_result, dt=dt, n_modes=6)
+# print('Cf magnitude DMD frequencies [Hz]: ', cf_dmd_mag_result['frequency'])
+# print('Cf magnitude DMD growth rates [1/s]: ', cf_dmd_mag_result['growth_rate'])
 
-print(40*'-')
-print('Plotting Cf magnitude DMD spectrum')
-plot_dmd_spectrum(
-   cf_dmd_mag_result,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_dmd_spectrum_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf magnitude DMD spectrum')
+# plot_dmd_spectrum(
+#    cf_dmd_mag_result,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_dmd_spectrum_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting Cf magnitude DMD mode 1 (largest amplitude) on the actual blade geometry')
-plot_dmd_mode(
-   radius_fl[pod_region], chord_fl[pod_region], cf_dmd_mag_result, mode_index=0,
-   unit_label='$C_f$ DMD mode amplitude [-]',
-   figsize=blade_figsize,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_dmd_mode1_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf magnitude DMD mode 1 (largest amplitude) on the actual blade geometry')
+# plot_dmd_mode(
+#    radius_fl[pod_region], chord_fl[pod_region], cf_dmd_mag_result, mode_index=0,
+#    unit_label='$C_f$ DMD mode amplitude [-]',
+#    figsize=blade_figsize,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_dmd_mode1_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting Cf magnitude DMD reconstruction vs. the recorded POD coefficient (mode 1)')
-plot_dmd_reconstruction(
-   cf_pod_mag_result, cf_dmd_mag_result, mode_index=0, dt=dt,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_dmd_reconstruction_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf magnitude DMD reconstruction vs. the recorded POD coefficient (mode 1)')
+# plot_dmd_reconstruction(
+#    cf_pod_mag_result, cf_dmd_mag_result, mode_index=0, dt=dt,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_dmd_reconstruction_{case}.png'),
+# )
 
-# Chordwise component specifically - the signed quantity whose sign
-# reversal actually DEFINES separation/the LSB (see
-# rotaris-docs/cf_computations_section.tex, "Directional Components
-# versus Magnitude"), so the most direct POD counterpart to the
-# friction-line/critical-point story above:
-print(40*'-')
-print(f'Running POD on Cf chordwise component, Upper surface, {int(pod_region.sum())} points in the selected region')
-cf_pod_chordwise_data = fl.cf_time_series(surface='Upper', component='chordwise')[:, pod_region]
-cf_pod_chordwise_result = pod(cf_pod_chordwise_data, n_modes=100, weights=area_fl[pod_region])
-print('Cf chordwise POD energy fractions (first 5): ', cf_pod_chordwise_result['energy_fraction'][:5])
+# # Chordwise component specifically - the signed quantity whose sign
+# # reversal actually DEFINES separation/the LSB (see
+# # rotaris-docs/cf_computations_section.tex, "Directional Components
+# # versus Magnitude"), so the most direct POD counterpart to the
+# # friction-line/critical-point story above:
+# print(40*'-')
+# print(f'Running POD on Cf chordwise component, Upper surface, {int(pod_region.sum())} points in the selected region')
+# cf_pod_chordwise_data = fl.cf_time_series(surface='Upper', component='chordwise')[:, pod_region]
+# cf_pod_chordwise_result = pod(cf_pod_chordwise_data, n_modes=100, weights=area_fl[pod_region])
+# print('Cf chordwise POD energy fractions (first 5): ', cf_pod_chordwise_result['energy_fraction'][:5])
 
-print(40*'-')
-print('Plotting Cf chordwise POD energy spectrum')
-plot_pod_energy(
-   cf_pod_chordwise_result,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_energy_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf chordwise POD energy spectrum')
+# plot_pod_energy(
+#    cf_pod_chordwise_result,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_energy_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting Cf chordwise POD spectrogram (every retained mode\'s own PSD)')
-plot_pod_spectrogram(
-   cf_pod_chordwise_result, dt=dt,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_spectrogram_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf chordwise POD spectrogram (every retained mode\'s own PSD)')
+# plot_pod_spectrogram(
+#    cf_pod_chordwise_result, dt=dt,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_spectrogram_{case}.png'),
+# )
 
-for m in modes:
-   print(40*'-')
-   print('Plotting Cf chordwise POD mode 1 (most energetic) on the actual blade geometry')
-   plot_pod_mode(
-      radius_fl[pod_region], chord_fl[pod_region], cf_pod_chordwise_result, mode_index=m,
-      unit_label='$C_{f,chordwise}$ mode amplitude [-]',
-      figsize=blade_figsize,
-      savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_{case}.png'),
-   )
+# for m in modes:
+#    print(40*'-')
+#    print('Plotting Cf chordwise POD mode 1 (most energetic) on the actual blade geometry')
+#    plot_pod_mode(
+#       radius_fl[pod_region], chord_fl[pod_region], cf_pod_chordwise_result, mode_index=m,
+#       unit_label='$C_{f,chordwise}$ mode amplitude [-]',
+#       figsize=blade_figsize,
+#       savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_{case}.png'),
+#    )
 
-   print(40*'-')
-   print('Plotting Cf chordwise POD mode 1 temporal coefficient')
-   plot_pod_temporal_coefficient(
-      cf_pod_chordwise_result, mode_index=m, dt=dt,
-      savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_{case}.png'),
-   )
+#    print(40*'-')
+#    print('Plotting Cf chordwise POD mode 1 temporal coefficient')
+#    plot_pod_temporal_coefficient(
+#       cf_pod_chordwise_result, mode_index=m, dt=dt,
+#       savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_{case}.png'),
+#    )
 
-   print(40*'-')
-   print('Plotting Cf chordwise POD mode 1 temporal coefficient PSD')
-   plot_periodogram(
-      cf_pod_chordwise_result['coefficients'][:, m], dt=dt,
-      ylabel='$a_1(t)$ PSD',
-      savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_psd_{case}.png'),
-   )
+#    print(40*'-')
+#    print('Plotting Cf chordwise POD mode 1 temporal coefficient PSD')
+#    plot_periodogram(
+#       cf_pod_chordwise_result['coefficients'][:, m], dt=dt,
+#       ylabel='$a_1(t)$ PSD',
+#       savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_psd_{case}.png'),
+#    )
 
-   print(40*'-')
-   print('Plotting Cf chordwise POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
-   plot_phase_lock(
-      cf_pod_chordwise_result['coefficients'][:, m], dt, rpm,
-      ylabel='$a_1(t)$ phase-locked mean',
-      savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_phaselock_{case}.png'),
-   )
+#    print(40*'-')
+#    print('Plotting Cf chordwise POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
+#    plot_phase_lock(
+#       cf_pod_chordwise_result['coefficients'][:, m], dt, rpm,
+#       ylabel='$a_1(t)$ phase-locked mean',
+#       savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_phaselock_{case}.png'),
+#    )
 
-print(40*'-')
-print('Checking Cf chordwise POD mode 1/2 phase relationship (quadrature check)')
-print(pod_mode_phase(cf_pod_chordwise_result, mode_a=0, mode_b=1, dt=dt))
+# print(40*'-')
+# print('Checking Cf chordwise POD mode 1/2 phase relationship (quadrature check)')
+# print(pod_mode_phase(cf_pod_chordwise_result, mode_a=0, mode_b=1, dt=dt))
 
-cf_chordwise_ref_index = int(np.argmax(np.abs(cf_pod_chordwise_result['modes'][0])))
-print(40*'-')
-print('Checking Cf chordwise two-point spatial correlation / coherence length')
-print(two_point_correlation(
-   cf_pod_chordwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_chordwise_ref_index,
-)['length_scale'])
-plot_two_point_correlation(
-   cf_pod_chordwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_chordwise_ref_index,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_two_point_corr_{case}.png'),
-)
+# cf_chordwise_ref_index = int(np.argmax(np.abs(cf_pod_chordwise_result['modes'][0])))
+# print(40*'-')
+# print('Checking Cf chordwise two-point spatial correlation / coherence length')
+# print(two_point_correlation(
+#    cf_pod_chordwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_chordwise_ref_index,
+# )['length_scale'])
+# plot_two_point_correlation(
+#    cf_pod_chordwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_chordwise_ref_index,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_two_point_corr_{case}.png'),
+# )
 
-print(40*'-')
-print('Running DMD on Cf chordwise POD coefficient subspace')
-cf_dmd_chordwise_result = dmd(cf_pod_chordwise_result, dt=dt, n_modes=6)
-print('Cf chordwise DMD frequencies [Hz]: ', cf_dmd_chordwise_result['frequency'])
-print('Cf chordwise DMD growth rates [1/s]: ', cf_dmd_chordwise_result['growth_rate'])
+# print(40*'-')
+# print('Running DMD on Cf chordwise POD coefficient subspace')
+# cf_dmd_chordwise_result = dmd(cf_pod_chordwise_result, dt=dt, n_modes=6)
+# print('Cf chordwise DMD frequencies [Hz]: ', cf_dmd_chordwise_result['frequency'])
+# print('Cf chordwise DMD growth rates [1/s]: ', cf_dmd_chordwise_result['growth_rate'])
 
-print(40*'-')
-print('Plotting Cf chordwise DMD spectrum')
-plot_dmd_spectrum(
-   cf_dmd_chordwise_result,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_spectrum_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf chordwise DMD spectrum')
+# plot_dmd_spectrum(
+#    cf_dmd_chordwise_result,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_spectrum_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting Cf chordwise DMD mode 1 (largest amplitude) on the actual blade geometry')
-plot_dmd_mode(
-   radius_fl[pod_region], chord_fl[pod_region], cf_dmd_chordwise_result, mode_index=0,
-   unit_label='$C_{f,chordwise}$ DMD mode amplitude [-]',
-   figsize=blade_figsize,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_mode1_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf chordwise DMD mode 1 (largest amplitude) on the actual blade geometry')
+# plot_dmd_mode(
+#    radius_fl[pod_region], chord_fl[pod_region], cf_dmd_chordwise_result, mode_index=0,
+#    unit_label='$C_{f,chordwise}$ DMD mode amplitude [-]',
+#    figsize=blade_figsize,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_mode1_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting Cf chordwise DMD reconstruction vs. the recorded POD coefficient (mode 1)')
-plot_dmd_reconstruction(
-   cf_pod_chordwise_result, cf_dmd_chordwise_result, mode_index=0, dt=dt,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_reconstruction_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf chordwise DMD reconstruction vs. the recorded POD coefficient (mode 1)')
+# plot_dmd_reconstruction(
+#    cf_pod_chordwise_result, cf_dmd_chordwise_result, mode_index=0, dt=dt,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_reconstruction_{case}.png'),
+# )
 
-# Spanwise component specifically - the signed quantity whose sign
-# reversal actually DEFINES separation/the LSB (see
-# rotaris-docs/cf_computations_section.tex, "Directional Components
-# versus Magnitude"), so the most direct POD counterpart to the
-# friction-line/critical-point story above:
-print(40*'-')
-print(f'Running POD on Cf spanwise component, Upper surface, {int(pod_region.sum())} points in the selected region')
-cf_pod_spanwise_data = fl.cf_time_series(surface='Upper', component='spanwise')[:, pod_region]
-cf_pod_spanwise_result = pod(cf_pod_spanwise_data, n_modes=100, weights=area_fl[pod_region])
-print('Cf spanwise POD energy fractions (first 5): ', cf_pod_spanwise_result['energy_fraction'][:5])
+# # Spanwise component specifically - the signed quantity whose sign
+# # reversal actually DEFINES separation/the LSB (see
+# # rotaris-docs/cf_computations_section.tex, "Directional Components
+# # versus Magnitude"), so the most direct POD counterpart to the
+# # friction-line/critical-point story above:
+# print(40*'-')
+# print(f'Running POD on Cf spanwise component, Upper surface, {int(pod_region.sum())} points in the selected region')
+# cf_pod_spanwise_data = fl.cf_time_series(surface='Upper', component='spanwise')[:, pod_region]
+# cf_pod_spanwise_result = pod(cf_pod_spanwise_data, n_modes=100, weights=area_fl[pod_region])
+# print('Cf spanwise POD energy fractions (first 5): ', cf_pod_spanwise_result['energy_fraction'][:5])
 
-print(40*'-')
-print('Plotting Cf spanwise POD energy spectrum')
-plot_pod_energy(
-   cf_pod_spanwise_result,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_energy_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf spanwise POD energy spectrum')
+# plot_pod_energy(
+#    cf_pod_spanwise_result,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_energy_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting Cf spanwise POD spectrogram (every retained mode\'s own PSD)')
-plot_pod_spectrogram(
-   cf_pod_spanwise_result, dt=dt,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_spectrogram_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf spanwise POD spectrogram (every retained mode\'s own PSD)')
+# plot_pod_spectrogram(
+#    cf_pod_spanwise_result, dt=dt,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_spectrogram_{case}.png'),
+# )
 
-for m in modes:
-   print(40*'-')
-   print('Plotting Cf spanwise POD mode 1 (most energetic) on the actual blade geometry')
-   plot_pod_mode(
-      radius_fl[pod_region], chord_fl[pod_region], cf_pod_spanwise_result, mode_index=m,
-      unit_label='$C_{f,spanwise}$ mode amplitude [-]',
-      figsize=blade_figsize,
-      savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_{case}.png'),
-   )
+# for m in modes:
+#    print(40*'-')
+#    print('Plotting Cf spanwise POD mode 1 (most energetic) on the actual blade geometry')
+#    plot_pod_mode(
+#       radius_fl[pod_region], chord_fl[pod_region], cf_pod_spanwise_result, mode_index=m,
+#       unit_label='$C_{f,spanwise}$ mode amplitude [-]',
+#       figsize=blade_figsize,
+#       savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_{case}.png'),
+#    )
 
-   print(40*'-')
-   print('Plotting Cf spanwise POD mode 1 temporal coefficient')
-   plot_pod_temporal_coefficient(
-      cf_pod_spanwise_result, mode_index=m, dt=dt,
-      savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_{case}.png'),
-   )
+#    print(40*'-')
+#    print('Plotting Cf spanwise POD mode 1 temporal coefficient')
+#    plot_pod_temporal_coefficient(
+#       cf_pod_spanwise_result, mode_index=m, dt=dt,
+#       savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_{case}.png'),
+#    )
 
-   print(40*'-')
-   print('Plotting Cf spanwise POD mode 1 temporal coefficient PSD')
-   plot_periodogram(
-      cf_pod_spanwise_result['coefficients'][:, m], dt=dt,
-      ylabel=f'$a_{m+1}(t)$ PSD',
-      savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_psd_{case}.png'),
-   )
+#    print(40*'-')
+#    print('Plotting Cf spanwise POD mode 1 temporal coefficient PSD')
+#    plot_periodogram(
+#       cf_pod_spanwise_result['coefficients'][:, m], dt=dt,
+#       ylabel=f'$a_{m+1}(t)$ PSD',
+#       savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_psd_{case}.png'),
+#    )
 
-   print(40*'-')
-   print('Plotting Cf spanwise POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
-   plot_phase_lock(
-      cf_pod_spanwise_result['coefficients'][:, m], dt, rpm,
-      ylabel=f'$a_{m+1}(t)$ phase-locked mean',
-      savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_phaselock_{case}.png'),
-   )
+#    print(40*'-')
+#    print('Plotting Cf spanwise POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
+#    plot_phase_lock(
+#       cf_pod_spanwise_result['coefficients'][:, m], dt, rpm,
+#       ylabel=f'$a_{m+1}(t)$ phase-locked mean',
+#       savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_phaselock_{case}.png'),
+#    )
 
-print(40*'-')
-print('Checking Cf spanwise POD mode 1/2 phase relationship (quadrature check)')
-print(pod_mode_phase(cf_pod_spanwise_result, mode_a=0, mode_b=1, dt=dt))
+# print(40*'-')
+# print('Checking Cf spanwise POD mode 1/2 phase relationship (quadrature check)')
+# print(pod_mode_phase(cf_pod_spanwise_result, mode_a=0, mode_b=1, dt=dt))
 
-cf_spanwise_ref_index = int(np.argmax(np.abs(cf_pod_spanwise_result['modes'][0])))
-print(40*'-')
-print('Checking Cf spanwise two-point spatial correlation / coherence length')
-print(two_point_correlation(
-   cf_pod_spanwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_spanwise_ref_index,
-)['length_scale'])
-plot_two_point_correlation(
-   cf_pod_spanwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_spanwise_ref_index,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_two_point_corr_{case}.png'),
-)
+# cf_spanwise_ref_index = int(np.argmax(np.abs(cf_pod_spanwise_result['modes'][0])))
+# print(40*'-')
+# print('Checking Cf spanwise two-point spatial correlation / coherence length')
+# print(two_point_correlation(
+#    cf_pod_spanwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_spanwise_ref_index,
+# )['length_scale'])
+# plot_two_point_correlation(
+#    cf_pod_spanwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_spanwise_ref_index,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_two_point_corr_{case}.png'),
+# )
 
-print(40*'-')
-print('Running DMD on Cf spanwise POD coefficient subspace')
-cf_dmd_spanwise_result = dmd(cf_pod_spanwise_result, dt=dt, n_modes=6)
-print('Cf spanwise DMD frequencies [Hz]: ', cf_dmd_spanwise_result['frequency'])
-print('Cf spanwise DMD growth rates [1/s]: ', cf_dmd_spanwise_result['growth_rate'])
+# print(40*'-')
+# print('Running DMD on Cf spanwise POD coefficient subspace')
+# cf_dmd_spanwise_result = dmd(cf_pod_spanwise_result, dt=dt, n_modes=6)
+# print('Cf spanwise DMD frequencies [Hz]: ', cf_dmd_spanwise_result['frequency'])
+# print('Cf spanwise DMD growth rates [1/s]: ', cf_dmd_spanwise_result['growth_rate'])
 
-print(40*'-')
-print('Plotting Cf spanwise DMD spectrum')
-plot_dmd_spectrum(
-   cf_dmd_spanwise_result,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_spectrum_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf spanwise DMD spectrum')
+# plot_dmd_spectrum(
+#    cf_dmd_spanwise_result,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_spectrum_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting Cf spanwise DMD mode 1 (largest amplitude) on the actual blade geometry')
-plot_dmd_mode(
-   radius_fl[pod_region], chord_fl[pod_region], cf_dmd_spanwise_result, mode_index=0,
-   unit_label='$C_{f,spanwise}$ DMD mode amplitude [-]',
-   figsize=blade_figsize,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_mode1_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf spanwise DMD mode 1 (largest amplitude) on the actual blade geometry')
+# plot_dmd_mode(
+#    radius_fl[pod_region], chord_fl[pod_region], cf_dmd_spanwise_result, mode_index=0,
+#    unit_label='$C_{f,spanwise}$ DMD mode amplitude [-]',
+#    figsize=blade_figsize,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_mode1_{case}.png'),
+# )
 
-print(40*'-')
-print('Plotting Cf spanwise DMD reconstruction vs. the recorded POD coefficient (mode 1)')
-plot_dmd_reconstruction(
-   cf_pod_spanwise_result, cf_dmd_spanwise_result, mode_index=0, dt=dt,
-   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_reconstruction_{case}.png'),
-)
+# print(40*'-')
+# print('Plotting Cf spanwise DMD reconstruction vs. the recorded POD coefficient (mode 1)')
+# plot_dmd_reconstruction(
+#    cf_pod_spanwise_result, cf_dmd_spanwise_result, mode_index=0, dt=dt,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_reconstruction_{case}.png'),
+# )

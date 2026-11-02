@@ -1,0 +1,43 @@
+# Config file for ISAE2 simulations of isolated rotor in hover
+
+master_path: /scratch/jmrendon/Rotor-strut/14mm/diametral
+case: RS-14mm-diametral
+
+files:
+  inst_force: RS-14mm-diametral_inst-forces.h5
+  avg_force: RA-beam-no-interaction_avg_forces_rotor.h5
+  inst_pressure: RS-14mm-diametral_inst-pressure.h5
+  avg_pressure: RA-beam_avg_pressure_rotor.h5
+
+rotor:
+  r_tip: 0.125
+  rho_ref: 1.22523
+  rpm: 6420
+  pref: 101325
+  c_ref: 0.025 # reference chord [m], used only when normalize is true below
+
+# No NDA on this case - plots show actual physical radius/chord/units.
+normalize: false
+
+# Raw Cartesian axis (0=X, 1=Y, 2=Z) for each blade direction (this
+# project's original isolated-rotor convention).
+axes:
+  span: 0
+  chord: 2
+  thickness: 1
+  skip_validation: true # set True if you have a highly swept blade
+
+crop:
+  span_min: null
+
+friction:
+  reverse_chord: true
+  radii: [0.045, 0.072, 0.100, 0.117, 0.122]
+
+convergence:
+  dt_pressure: 0.000005
+  dt_forces: 0.0000556 
+
+blade_figsize: null # null for ISAWE2 case
+
+frame_loop_step: 1000
