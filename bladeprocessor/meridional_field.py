@@ -9,18 +9,42 @@ Axis convention (confirmed for this project's isolated-rotor-in-hover
 cases, e.g. 6e-5_6000rpm - see HANDOFF.md's meridional-plane
 investigation): at the 0deg-azimuth plane, raw X-Velocity is RADIAL,
 Y-Velocity is AXIAL, Z-Velocity is TANGENTIAL (matches cases/*.yaml's
-own axes.thickness: 1 - the rotor's rotation/axial axis is Y). That
-alignment is a coincidence of 0deg specifically: the plane's local
-radial/tangential directions are the lab X/Z axes ONLY when azimuth=0.
-Any OTHER azimuth file (e.g. x_vel_30deg.txt) still stores the same raw
-lab-frame Cartesian vx/vy/vz - NOT yet projected onto that plane's own
-local radial/tangential basis - so plotting those directly as if
-X=radial/Z=tangential (the way plot_meridional_component() below does
-for convenience) is wrong for anything but 0deg.
-meridional_cylindrical_components() fixes this by rotating any azimuth
-plane's raw vx/vy/vz back onto the common (v_r, v_theta, v_z) basis,
-reusing this project's own validated tip_vortex_tracking.cylindrical_velocity()
-rather than re-deriving the same rotation a second time.
+own axes.thickness: 1 - the rotor's rotation/axial axis is Y).
+
+For 6e-5_6000rpm's own txt/*_Ndeg.txt files, "Ndeg" DOES mean the plane
+was physically swept to that azimuth, and raw X/Y/Z-Velocity need
+meridional_cylindrical_components() before comparing/overlaying across
+angle files - confirmed empirically (X-Velocity taken naively as
+"radial" at every angle, with no rotation at all, visibly looks
+tangential rather than radial by 60/90/120deg).
+
+Two dead ends hit while pinning this down, worth knowing about before
+trusting either kind of "proof" again on a future dataset:
+- Each file's own header (Slice Normal / Red Direction / Green
+  Direction / Center Point) looks numerically IDENTICAL (~1e-17) across
+  every "Ndeg" file, which looks like strong evidence the plane never
+  moves - it isn't. That header is apparently reported in each slice's
+  own local in-plane basis, so it trivially looks the same regardless
+  of the slice's true orientation; it says nothing about whether the
+  plane is swept. Don't use it to decide either way.
+- txt/azimuth_vel_Ndeg.txt looks like it should be PowerVIZ's own
+  independently-computed ground-truth tangential velocity, useful for
+  checking the rotation sign against. It isn't, for this dataset at
+  least: azimuth_vel_30deg.txt is bit-identical to z_vel_30deg.txt
+  (confirmed via direct array comparison, not just a text diff - a
+  first check misread a piped `diff | head`'s exit code as diff's own
+  and got this backwards). Don't treat it as an independent check.
+
+Rotation SIGN needs meridional_cylindrical_components(..., angle_deg=
+-angle_deg) for this dataset (negated, not the raw "Ndeg" value) -
+confirmed empirically by which sign makes Ur/Ut visually keep their own
+identity (dipole-at-vortex-core vs. broad antisymmetric swirl) across
+angles instead of swapping - see tip_vortex_manager.py's own usage.
+This sign is this dataset's own finding (PowerVIZ's sweep direction vs.
+cylindrical_velocity's rotation sense), not a general property of
+meridional_cylindrical_components() - re-check against a reference
+figure for any other dataset rather than assuming -angle_deg carries
+over.
 '''
 
 import os
@@ -100,6 +124,20 @@ def meridional_cylindrical_components(x_vel_file: str, y_vel_file: str, z_vel_fi
     v_z) via tip_vortex_tracking.cylindrical_velocity(), so this plane
     can be directly compared/overlaid against the 0deg plane (or any
     other azimuth) on the same physical radial/axial basis.
+
+    Before trusting this on a NEW set of "_Ndeg.txt" files, verify the
+    rotation empirically against a reference figure - don't rely on the
+    files' own header (Slice Normal / Red Direction / Green Direction /
+    Center Point) to decide whether the planes are swept; that header is
+    apparently reported in each slice's own local basis and looks
+    numerically identical across every angle regardless of the plane's
+    true orientation (confirmed misleading for 6e-5_6000rpm's own
+    txt/*_Ndeg.txt files - see this module's own docstring). Also check
+    the rotation SIGN empirically (plot a couple of angles and confirm
+    v_r/v_theta each keep their own character rather than swapping) -
+    6e-5_6000rpm needed angle_deg=-angle_deg, not the raw "Ndeg" value;
+    that sign is dataset-specific, not something this function can get
+    right by construction.
 
     Only the pure coordinate rotation runs here - omega_rad_s is NOT
     exposed (left None in the underlying call), same as
