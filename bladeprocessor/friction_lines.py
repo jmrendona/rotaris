@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from bladeprocessor._axis_validation import validate_chord_span_thickness_axes
+from bladeprocessor._azimuth import azimuth_mask
 
 plt.rcParams.update({
     "text.usetex": True,
@@ -130,11 +131,30 @@ class FrictionLines:
         replaced by it. None (default): no crop, identical behavior/
         performance to before this parameter existed (a plain `[:]` read,
         not boolean fancy-indexing).
+    azimuth_center_deg, azimuth_tol_deg : float, optional
+        Crop to surfels within azimuth_tol_deg of azimuth_center_deg
+        (degrees, around the rotor's OWN rotation axis - see
+        bladeprocessor._azimuth.azimuth_deg for the angle convention) AT
+        LOAD TIME, same mechanism/rationale as span_min/span_max above -
+        for a .snc mesh where MULTIPLE BLADES share one combined face
+        (no per-blade face_name to select at conversion time, confirmed
+        for this project's own Rotor-strut case: a single
+        "rotor.Default-Segment" face holds every blade), span_min/
+        span_max alone can't separate them, since every blade spans the
+        SAME physical radius range - each blade DOES occupy its own
+        tight azimuth band, though, which this crops to instead. Both
+        None (default): no azimuth crop. Must be given together (one
+        without the other raises).
     '''
 
     def __init__(self, filename: str, r_tip: float = None, rho_ref: float = None, rpm: float = None,
                  c_ref: float = None, span_axis: int = 0, chord_axis: int = 2, thickness_axis: int = 1,
-                 span_min: float = None, span_max: float = None, validate_axes: bool = True):
+                 span_min: float = None, span_max: float = None,
+                 azimuth_center_deg: float = None, azimuth_tol_deg: float = None,
+                 validate_axes: bool = True):
+
+        if (azimuth_center_deg is None) != (azimuth_tol_deg is None):
+            raise ValueError("azimuth_center_deg and azimuth_tol_deg must be given together.")
 
         self.filename = filename
         self.r_tip = r_tip
@@ -146,6 +166,8 @@ class FrictionLines:
         self.thickness_axis = thickness_axis
         self.span_min = span_min
         self.span_max = span_max
+        self.azimuth_center_deg = azimuth_center_deg
+        self.azimuth_tol_deg = azimuth_tol_deg
         self._load()
 
         if validate_axes:
@@ -195,17 +217,23 @@ class FrictionLines:
                 self._span_center[label] = (span_full.min() + span_full.max()) / 2
                 self._chord_center[label] = (chord_full.min() + chord_full.max()) / 2
 
-                if self.span_min is not None or self.span_max is not None:
+                if self.span_min is not None or self.span_max is not None or self.azimuth_center_deg is not None:
                     span_centered = span_full - self._span_center[label]
                     mask = np.ones(len(span_centered), dtype=bool)
                     if self.span_min is not None:
                         mask &= span_centered >= self.span_min
                     if self.span_max is not None:
                         mask &= span_centered <= self.span_max
+                    if self.azimuth_center_deg is not None:
+                        mask &= azimuth_mask(
+                            positions_full, self.axis_origin, self.axis_direction,
+                            self.azimuth_center_deg, self.azimuth_tol_deg,
+                        )
                     if not np.any(mask):
                         raise ValueError(
                             f"No points left on '{label}' after span_min={self.span_min}/"
-                            f"span_max={self.span_max} cropping at load time - check span_min/span_max."
+                            f"span_max={self.span_max}/azimuth_center_deg={self.azimuth_center_deg}/"
+                            f"azimuth_tol_deg={self.azimuth_tol_deg} cropping at load time - check those."
                         )
                 else:
                     mask = slice(None)  # no crop - identical to the old plain `[:]` read

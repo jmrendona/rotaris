@@ -69,6 +69,18 @@ def load_case_config():
 
         span_min=cfg['crop']['span_min'],
 
+        # Both None (default, matches every case before these existed):
+        # no azimuth crop. Set both on a case whose .snc mesh combines
+        # multiple blades into one face (no per-blade face_name to
+        # select at conversion time - confirmed for this project's own
+        # Rotor-strut case) - see bladeprocessor._azimuth.azimuth_deg
+        # and FrictionLines/StripForces/SurfaceVariable's own
+        # azimuth_center_deg/azimuth_tol_deg docstrings for the full
+        # mechanism. Optional key - cfg['crop'].get(...), not cfg['crop'][...],
+        # so a case yaml written before this existed still loads unchanged.
+        azimuth_center_deg=cfg['crop'].get('azimuth_center_deg'),
+        azimuth_tol_deg=cfg['crop'].get('azimuth_tol_deg'),
+
         reverse_chord=cfg['friction']['reverse_chord'],
         radii=cfg['friction']['radii'],
 

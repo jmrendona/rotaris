@@ -25,6 +25,8 @@ chord_axis = cfg.chord_axis
 thickness_axis = cfg.thickness_axis
 validate_axes = cfg.validate_axes
 span_min = cfg.span_min
+azimuth_center_deg = cfg.azimuth_center_deg
+azimuth_tol_deg = cfg.azimuth_tol_deg
 dt = cfg.dt_forces
 
 for _sub in ('forces/convergence/global', 'forces/convergence/local', 'forces/hanson'):
@@ -50,7 +52,7 @@ for _sub in ('forces/convergence/global', 'forces/convergence/local', 'forces/ha
 # sf_avg = StripForces(
 #    os.path.join(master_path, avg_force_file),
 #    r_tip=r_tip,
-#    span_min=span_min,
+#    span_min=span_min, azimuth_center_deg=azimuth_center_deg, azimuth_tol_deg=azimuth_tol_deg,
 #    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
 #    validate_axes=validate_axes,
 # )
@@ -112,7 +114,7 @@ print('Opening StripForces file: ', os.path.join(master_path, inst_force_file))
 sf_inst = StripForces(
    os.path.join(master_path, inst_force_file),
    r_tip=r_tip, rpm=rpm, rho_ref=rho_ref,
-   span_min=span_min,
+   span_min=span_min, azimuth_center_deg=azimuth_center_deg, azimuth_tol_deg=azimuth_tol_deg,
    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
    validate_axes=validate_axes,
 )

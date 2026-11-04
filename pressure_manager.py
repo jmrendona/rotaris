@@ -42,6 +42,8 @@ span_axis = cfg.span_axis
 chord_axis = cfg.chord_axis
 thickness_axis = cfg.thickness_axis
 span_min = cfg.span_min
+azimuth_center_deg = cfg.azimuth_center_deg
+azimuth_tol_deg = cfg.azimuth_tol_deg
 reverse_chord = cfg.reverse_chord
 radii = cfg.radii
 dt = cfg.dt_pressure
@@ -72,7 +74,8 @@ os.makedirs(os.path.join(master_path, 'data', 'pfluct'), exist_ok=True)
 #    rpm=rpm,
 #    pref=pref,
 #    c_ref=c_ref,
-#    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
+#    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
+#    azimuth_center_deg=azimuth_center_deg, azimuth_tol_deg=azimuth_tol_deg,
 # )
 
 # "Convergence checking on pressure") - needs an INSTANTANEOUS (multi-
@@ -83,7 +86,8 @@ print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_
 sv_pressure_inst = SurfaceVariable(
   os.path.join(master_path, inst_pressure_file),
   r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref, c_ref=c_ref,
-  span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
+  span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
+  azimuth_center_deg=azimuth_center_deg, azimuth_tol_deg=azimuth_tol_deg,
 )
 
 # # Raw access to any stored variable - instantaneous, mean, or rms/raw_rms:
@@ -447,6 +451,23 @@ chord_pcts = np.arange(0, 101, 10)  # % of x/c
 # # skin_friction_manager.py): 0.1*r_tip to 1*r_tip was intended to cover
 # # nearly the whole blade, but the plotted region only ever showed the
 # # last ~15% near the tip.
+# #
+# # IMPORTANT, found later: radius_sv being UNSIGNED means it can't tell
+# # two blades apart either (both span the SAME physical radius range) -
+# # on a case whose .snc mesh combines multiple blades into one face (no
+# # per-blade face_name to select at conversion time), this pod_region
+# # alone mixed BOTH blades' pressure data into the POD snapshot matrix,
+# # with no warning (span_sv's SIGN had been accidentally preventing
+# # exactly this elsewhere in the pipeline via span_min - see this
+# # case's own cases/*.yaml crop.azimuth_center_deg comment - but radius_sv
+# # throws that sign away). Fixed now at the SOURCE instead of here:
+# # sv_pressure_inst was constructed above with azimuth_center_deg/
+# # azimuth_tol_deg (from this case's own yaml), which crops
+# # sv_pressure_inst.positions['Upper'] - and therefore radius_sv/chord_sv
+# # above, which both read from it - to one blade BEFORE this pod_region
+# # mask ever runs. No further change needed here, but don't drop the
+# # case yaml's azimuth_center_deg/azimuth_tol_deg thinking this pod_region
+# # line alone is enough on a new case - it only works because of that.
 # pod_region = (radius_sv >= pod_span_min) & (radius_sv <= pod_span_max)
 # print(f'pod_region chord range BEFORE any pod_chord_min/pod_chord_max crop: '
 #       f'[{chord_sv[pod_region].min():.4f}, {chord_sv[pod_region].max():.4f}] '

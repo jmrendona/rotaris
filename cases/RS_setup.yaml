@@ -29,6 +29,19 @@ axes:
 
 crop:
   span_min: null
+  # This case's "rotor.Default-Segment" face combines BOTH blades (180
+  # deg apart) - no per-blade face_name exists to select one at
+  # conversion time, and span_min/span_max can't separate them either
+  # (both blades span the SAME physical radius range) - confirmed via
+  # a bimodal azimuth histogram (~745k surfels each at azimuth~0deg and
+  # azimuth~180deg) and visually (cf_surface_inst_upper_frame1000's own
+  # overlapping-blade artifact). Selecting azimuth~0deg here - see
+  # bladeprocessor._azimuth.azimuth_deg for the angle convention
+  # (0deg = toward global +X, measured around the rotor's own rotation
+  # axis) and FrictionLines/StripForces/SurfaceVariable's own
+  # azimuth_center_deg/azimuth_tol_deg docstrings.
+  azimuth_center_deg: 0
+  azimuth_tol_deg: 45
 
 friction:
   reverse_chord: true

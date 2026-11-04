@@ -52,6 +52,8 @@ chord_axis = cfg.chord_axis
 thickness_axis = cfg.thickness_axis
 validate_axes = cfg.validate_axes
 span_min = cfg.span_min
+azimuth_center_deg = cfg.azimuth_center_deg
+azimuth_tol_deg = cfg.azimuth_tol_deg
 reverse_chord = cfg.reverse_chord
 radii = cfg.radii
 dt = cfg.dt_forces
@@ -72,7 +74,8 @@ fl = FrictionLines(
    rpm=rpm,
    c_ref=c_ref,
    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
-   span_min=span_min, validate_axes=validate_axes
+   span_min=span_min, azimuth_center_deg=azimuth_center_deg, azimuth_tol_deg=azimuth_tol_deg,
+   validate_axes=validate_axes
 )
 
 
@@ -287,7 +290,8 @@ print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_force_fil
 sf_inst_forces = SurfaceVariable(
   os.path.join(master_path, inst_force_file),
   r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, c_ref=c_ref,
-  span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis
+  span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
+  azimuth_center_deg=azimuth_center_deg, azimuth_tol_deg=azimuth_tol_deg,
 )
 
 # print(40*'-')

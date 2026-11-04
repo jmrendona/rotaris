@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import welch
 
+from bladeprocessor._azimuth import azimuth_deg, azimuth_mask
+
 plt.rcParams.update({
     "text.usetex": True,
     "font.family": "serif",
@@ -61,11 +63,30 @@ class SurfaceVariable:
         normalize=True (chord/c_ref instead of raw physical chord [m],
         e.g. for an NDA case where the blade's actual size shouldn't be
         shown/inferable). Not needed for anything else.
+    azimuth_center_deg, azimuth_tol_deg : float, optional
+        Crop to surfels within azimuth_tol_deg of azimuth_center_deg
+        (degrees, around the rotor's OWN rotation axis - see
+        bladeprocessor._azimuth.azimuth_deg for the angle convention) AT
+        LOAD TIME - same mechanism/rationale as FrictionLines/StripForces'
+        identical parameter: for a .snc mesh where MULTIPLE BLADES share
+        one combined face (no per-blade face_name to select at
+        conversion time - confirmed for this project's own Rotor-strut
+        case: a single "rotor.Default-Segment" face holds every blade),
+        span_min/span_max (passed per-call to the methods below, not
+        here) can't separate them, since every blade spans the SAME
+        physical radius range - each blade DOES occupy its own tight
+        azimuth band, though, which this crops to instead. Both None
+        (default): no azimuth crop, identical behavior to before this
+        parameter existed. Must be given together (one without the
+        other raises).
     '''
 
     def __init__(self, filename: str, r_tip: float = None, rho_ref: float = None, rpm: float = None,
                  pref: float = None, c_ref: float = None, span_axis: int = 0, chord_axis: int = 2,
-                 thickness_axis: int = 1):
+                 thickness_axis: int = 1, azimuth_center_deg: float = None, azimuth_tol_deg: float = None):
+
+        if (azimuth_center_deg is None) != (azimuth_tol_deg is None):
+            raise ValueError("azimuth_center_deg and azimuth_tol_deg must be given together.")
 
         self.filename = filename
         self.r_tip = r_tip
@@ -76,11 +97,26 @@ class SurfaceVariable:
         self.span_axis = span_axis
         self.chord_axis = chord_axis
         self.thickness_axis = thickness_axis
+        self.azimuth_center_deg = azimuth_center_deg
+        self.azimuth_tol_deg = azimuth_tol_deg
         self._load()
 
     def _load(self):
 
-        '''Load geometry/axis metadata and list available Data/<surface> variable names.'''
+        '''
+        Load geometry/axis metadata and list available Data/<surface>
+        variable names - cropped to azimuth_center_deg/azimuth_tol_deg
+        (see __init__'s docstring) at the point-selection level if set,
+        same mechanism as FrictionLines/StripForces' own azimuth_center_deg/
+        azimuth_tol_deg (and span_min/span_max there). Every method below
+        that reads Data/<surface>/<name> directly off disk (variable(),
+        timetrace(), periodogram(), the *_region() methods, ...) applies
+        this SAME self._surfel_mask[label] to its own read, so it never
+        returns a different length than self.positions[label]/
+        self.areas[label] - a plain `[:]`/`slice(None)` read when no
+        azimuth crop is set, identical to this class's behavior before
+        this parameter existed.
+        '''
 
         with h5py.File(self.filename, 'r') as f:
 
@@ -111,10 +147,28 @@ class SurfaceVariable:
 
             self.positions = {}
             self.areas = {}
+            self._surfel_mask = {}
             self.available_variables = {}
             for label in ('Upper', 'Lower'):
                 geo = f[f'Geometry/{label}']
-                self.positions[label] = np.column_stack([geo['X'][:], geo['Y'][:], geo['Z'][:]])
+                positions_full = np.column_stack([geo['X'][:], geo['Y'][:], geo['Z'][:]])
+
+                if self.azimuth_center_deg is not None:
+                    mask = azimuth_mask(
+                        positions_full, self.axis_origin, self.axis_direction,
+                        self.azimuth_center_deg, self.azimuth_tol_deg,
+                    )
+                    if not np.any(mask):
+                        raise ValueError(
+                            f"No points left on '{label}' after azimuth_center_deg="
+                            f"{self.azimuth_center_deg}/azimuth_tol_deg={self.azimuth_tol_deg} "
+                            "cropping at load time - check those."
+                        )
+                else:
+                    mask = slice(None)  # no crop - identical to the old plain `[:]` read
+
+                self._surfel_mask[label] = mask
+                self.positions[label] = positions_full[mask]
                 # Unlike the forces branch (converters/snc_reader.py,
                 # which writes Geometry/<label>/Area from the raw .snc),
                 # the pressure branch's own
@@ -124,7 +178,7 @@ class SurfaceVariable:
                 # "no per-surfel area available for this file" - see
                 # _area()'s docstring for the resulting error if it's
                 # actually requested (e.g. for an area-weighted POD).
-                self.areas[label] = geo['Area'][:] if 'Area' in geo else None
+                self.areas[label] = geo['Area'][mask] if 'Area' in geo else None
                 self.available_variables[label] = list(f[f'Data/{label}'].keys())
 
     def _radius(self, surface: str):
@@ -137,6 +191,21 @@ class SurfaceVariable:
         radial_vec = rel - along[:, None] * self.axis_direction
 
         return np.linalg.norm(radial_vec, axis=1)
+
+    def _azimuth(self, surface: str):
+
+        '''
+        Azimuth angle [deg] around the rotor's rotation axis, for every
+        surfel - see bladeprocessor._azimuth.azimuth_deg for the angle
+        convention. Used by plot_variable_surface()/at_radii()'s
+        azimuth_center_deg/azimuth_tol_deg, for a .snc mesh where
+        MULTIPLE BLADES share one combined face (no per-blade face_name
+        to select at conversion time - confirmed for this project's own
+        Rotor-strut case) and span_min/span_max alone can't separate
+        them, since every blade spans the SAME physical radius range.
+        '''
+
+        return azimuth_deg(self.positions[surface], self.axis_origin, self.axis_direction)
 
     def _span_chord(self, surface: str):
 
@@ -240,6 +309,8 @@ class SurfaceVariable:
         np.ndarray, shape (n_points,)
         '''
 
+        mask = self._surfel_mask[surface]
+
         with h5py.File(self.filename, 'r') as f:
 
             key = f'Data/{surface}/{name}'
@@ -252,10 +323,11 @@ class SurfaceVariable:
             if frame is not None:
                 if not (0 <= frame < self.n_frames):
                     raise ValueError(f"frame={frame} out of range (n_frames={self.n_frames})")
-                return f[key][frame]
+                return f[key][frame][mask]
 
             dset = f[key]
-            n_frames_total, n_points = dset.shape
+            n_frames_total = dset.shape[0]
+            n_points = len(self.positions[surface])
 
             if stat not in ('mean', 'rms', 'raw_rms'):
                 raise ValueError(f"Unknown stat '{stat}' - use 'mean', 'rms', or 'raw_rms'.")
@@ -263,7 +335,7 @@ class SurfaceVariable:
             total = np.zeros(n_points, dtype='f8')
             for start in range(0, n_frames_total, frame_chunk_size):
                 end = min(start + frame_chunk_size, n_frames_total)
-                chunk = dset[start:end, :]
+                chunk = dset[start:end, mask]
                 total += (chunk.astype('f8') ** 2).sum(axis=0) if stat == 'raw_rms' else chunk.sum(axis=0)
 
             if stat == 'raw_rms':
@@ -277,7 +349,7 @@ class SurfaceVariable:
             total_sq_dev = np.zeros(n_points, dtype='f8')
             for start in range(0, n_frames_total, frame_chunk_size):
                 end = min(start + frame_chunk_size, n_frames_total)
-                total_sq_dev += ((dset[start:end, :] - mean[None, :]) ** 2).sum(axis=0)
+                total_sq_dev += ((dset[start:end, mask] - mean[None, :]) ** 2).sum(axis=0)
 
             return np.sqrt(total_sq_dev / n_frames_total).astype(dset.dtype)
 
@@ -361,7 +433,7 @@ class SurfaceVariable:
                     f"'{name}' not found under Data/{surface} of '{self.filename}' - "
                     f"available: {self.available_variables[surface]}"
                 )
-            return f[key][:]
+            return f[key][:, self._surfel_mask[surface]]
 
     def cp_time_series(self, surface: str = 'Upper', pressure_variable: str = 'static_pressure') -> np.ndarray:
 
@@ -430,10 +502,11 @@ class SurfaceVariable:
                 )
             dset = f[key]
             n_frames = dset.shape[0]
+            mask = self._surfel_mask[surface]
             means = np.empty(n_frames, dtype='f8')
             for start in range(0, n_frames, frame_chunk_size):
                 end = min(start + frame_chunk_size, n_frames)
-                means[start:end] = dset[start:end, :].mean(axis=1)
+                means[start:end] = dset[start:end, mask].mean(axis=1)
 
         return means
 
@@ -469,10 +542,11 @@ class SurfaceVariable:
                 )
             dset = f[key]
             n_frames = dset.shape[0]
+            mask = self._surfel_mask[surface]
             means = np.empty(n_frames, dtype='f8')
             for start in range(0, n_frames, frame_chunk_size):
                 end = min(start + frame_chunk_size, n_frames)
-                cp_chunk = (dset[start:end, :] - self.pref) / q_ref[None, :]
+                cp_chunk = (dset[start:end, mask] - self.pref) / q_ref[None, :]
                 means[start:end] = cp_chunk.mean(axis=1)
 
         return means
@@ -530,11 +604,12 @@ class SurfaceVariable:
                 )
             dset = f[key]
             n_frames = dset.shape[0]
+            mask = self._surfel_mask[surface]
             n_selected = int(region_mask.sum())
             out = np.empty((n_frames, n_selected), dtype=dset.dtype)
             for start in range(0, n_frames, frame_chunk_size):
                 end = min(start + frame_chunk_size, n_frames)
-                out[start:end, :] = dset[start:end, :][:, region_mask]
+                out[start:end, :] = dset[start:end, mask][:, region_mask]
 
         return out
 
@@ -570,11 +645,12 @@ class SurfaceVariable:
                 )
             dset = f[key]
             n_frames = dset.shape[0]
+            mask = self._surfel_mask[surface]
             n_selected = int(region_mask.sum())
             out = np.empty((n_frames, n_selected), dtype='f8')
             for start in range(0, n_frames, frame_chunk_size):
                 end = min(start + frame_chunk_size, n_frames)
-                out[start:end, :] = (dset[start:end, :][:, region_mask] - self.pref) / q_ref[None, :]
+                out[start:end, :] = (dset[start:end, mask][:, region_mask] - self.pref) / q_ref[None, :]
 
         return out
 
@@ -624,6 +700,17 @@ class SurfaceVariable:
             span_pct, chord_pct, surface=surface, tol=tol, chord_percentile=chord_percentile,
             reverse_chord=reverse_chord, span_min=span_min, span_max=span_max)
 
+        # idx is an index into self.positions[surface] (already cropped to
+        # this instance's own azimuth_center_deg/azimuth_tol_deg, if set -
+        # see __init__) - translate to the FULL, on-disk dataset's own
+        # column index before reading, so the single-column read below
+        # still lands on the right physical surfel under a crop, without
+        # reading every column first just to re-select one (which would
+        # reintroduce the exact OOM this method's single-column read was
+        # built to avoid - see its own docstring).
+        mask = self._surfel_mask[surface]
+        full_idx = idx if isinstance(mask, slice) else int(np.flatnonzero(mask)[idx])
+
         with h5py.File(self.filename, 'r') as f:
             key = f'Data/{surface}/{name}'
             if key not in f:
@@ -631,7 +718,7 @@ class SurfaceVariable:
                     f"'{name}' not found under Data/{surface} of '{self.filename}' - "
                     f"available: {self.available_variables[surface]}"
                 )
-            series = f[key][:, idx]
+            series = f[key][:, full_idx]
 
         return series, {'idx': idx, 'r': r_actual, 'xc': xc_actual, 'surface': surface}
 
@@ -1379,6 +1466,11 @@ class SurfaceVariable:
             span_pct, chord_pct, surface=surface, tol=tol, chord_percentile=chord_percentile,
             reverse_chord=reverse_chord, span_min=span_min, span_max=span_max)
 
+        # idx is in cropped self.positions[surface] index-space - see
+        # variable_time_series_at_point()'s identical translation for why.
+        mask = self._surfel_mask[surface]
+        full_idx = idx if isinstance(mask, slice) else int(np.flatnonzero(mask)[idx])
+
         with h5py.File(self.filename, 'r') as f:
 
             key = f'Data/{surface}/{name}'
@@ -1387,7 +1479,7 @@ class SurfaceVariable:
                     f"'{name}' not found under Data/{surface} of '{self.filename}' - "
                     f"available: {self.available_variables[surface]}"
                 )
-            values = f[key][:, idx]
+            values = f[key][:, full_idx]
 
         if dt is not None:
             t = np.arange(self.n_frames) * dt
