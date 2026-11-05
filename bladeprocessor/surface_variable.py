@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import welch
 
 from bladeprocessor._azimuth import azimuth_deg, azimuth_mask
+from bladeprocessor._h5_read import read_masked_columns
 
 plt.rcParams.update({
     "text.usetex": True,
@@ -335,7 +336,7 @@ class SurfaceVariable:
             total = np.zeros(n_points, dtype='f8')
             for start in range(0, n_frames_total, frame_chunk_size):
                 end = min(start + frame_chunk_size, n_frames_total)
-                chunk = dset[start:end, mask]
+                chunk = read_masked_columns(dset, slice(start, end), mask)
                 total += (chunk.astype('f8') ** 2).sum(axis=0) if stat == 'raw_rms' else chunk.sum(axis=0)
 
             if stat == 'raw_rms':
@@ -349,7 +350,7 @@ class SurfaceVariable:
             total_sq_dev = np.zeros(n_points, dtype='f8')
             for start in range(0, n_frames_total, frame_chunk_size):
                 end = min(start + frame_chunk_size, n_frames_total)
-                total_sq_dev += ((dset[start:end, mask] - mean[None, :]) ** 2).sum(axis=0)
+                total_sq_dev += ((read_masked_columns(dset, slice(start, end), mask) - mean[None, :]) ** 2).sum(axis=0)
 
             return np.sqrt(total_sq_dev / n_frames_total).astype(dset.dtype)
 
@@ -433,7 +434,7 @@ class SurfaceVariable:
                     f"'{name}' not found under Data/{surface} of '{self.filename}' - "
                     f"available: {self.available_variables[surface]}"
                 )
-            return f[key][:, self._surfel_mask[surface]]
+            return read_masked_columns(f[key], slice(None), self._surfel_mask[surface])
 
     def cp_time_series(self, surface: str = 'Upper', pressure_variable: str = 'static_pressure') -> np.ndarray:
 
@@ -506,7 +507,7 @@ class SurfaceVariable:
             means = np.empty(n_frames, dtype='f8')
             for start in range(0, n_frames, frame_chunk_size):
                 end = min(start + frame_chunk_size, n_frames)
-                means[start:end] = dset[start:end, mask].mean(axis=1)
+                means[start:end] = read_masked_columns(dset, slice(start, end), mask).mean(axis=1)
 
         return means
 
@@ -546,7 +547,7 @@ class SurfaceVariable:
             means = np.empty(n_frames, dtype='f8')
             for start in range(0, n_frames, frame_chunk_size):
                 end = min(start + frame_chunk_size, n_frames)
-                cp_chunk = (dset[start:end, mask] - self.pref) / q_ref[None, :]
+                cp_chunk = (read_masked_columns(dset, slice(start, end), mask) - self.pref) / q_ref[None, :]
                 means[start:end] = cp_chunk.mean(axis=1)
 
         return means
@@ -609,7 +610,7 @@ class SurfaceVariable:
             out = np.empty((n_frames, n_selected), dtype=dset.dtype)
             for start in range(0, n_frames, frame_chunk_size):
                 end = min(start + frame_chunk_size, n_frames)
-                out[start:end, :] = dset[start:end, mask][:, region_mask]
+                out[start:end, :] = read_masked_columns(dset, slice(start, end), mask)[:, region_mask]
 
         return out
 
@@ -650,7 +651,8 @@ class SurfaceVariable:
             out = np.empty((n_frames, n_selected), dtype='f8')
             for start in range(0, n_frames, frame_chunk_size):
                 end = min(start + frame_chunk_size, n_frames)
-                out[start:end, :] = (dset[start:end, mask][:, region_mask] - self.pref) / q_ref[None, :]
+                chunk = read_masked_columns(dset, slice(start, end), mask)[:, region_mask]
+                out[start:end, :] = (chunk - self.pref) / q_ref[None, :]
 
         return out
 

@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 from bladeprocessor._axis_validation import validate_chord_span_thickness_axes
 from bladeprocessor._azimuth import azimuth_mask
+from bladeprocessor._h5_read import read_masked_columns
 
 plt.rcParams.update({
     "text.usetex": True,
@@ -247,9 +248,9 @@ class FrictionLines:
                     'normals': normals_full[mask],
                     'area': area_full[mask],
                     'force': np.stack([
-                        data['Surface_X-Force'][:, mask],
-                        data['Surface_Y-Force'][:, mask],
-                        data['Surface_Z-Force'][:, mask],
+                        read_masked_columns(data['Surface_X-Force'], slice(None), mask),
+                        read_masked_columns(data['Surface_Y-Force'], slice(None), mask),
+                        read_masked_columns(data['Surface_Z-Force'], slice(None), mask),
                     ], axis=-1),  # shape (n_frames, n_selected, 3)
                 }
 
