@@ -29,26 +29,6 @@ axes:
 
 crop:
   span_min: 0.02
-  # This case's forces file (2026DNS_forces_rotor.h5) also combines BOTH
-  # blades in one Geometry/Upper,Lower group (confirmed: azimuth
-  # histogram peaks at ~0deg and ~180deg, ~23.6M/23.0M points each after
-  # span_min=0.02; the pressure file is presumably the same). span_min
-  # ALONE has been accidentally isolating one blade for span_axis=0 (X)
-  # callers (FrictionLines/StripForces load-time crop, SurfaceVariable's
-  # own per-call span_min on plot_variable_surface/cp/etc.) - a positive
-  # span_min excludes azimuth~180deg's blade entirely, since it sits on
-  # the negative-centered-X side (confirmed: 0 points from that blade
-  # survive span_min=0.02). That's a coincidence of this blade pair's
-  # own orientation relative to span_axis=X, not a general property of
-  # span_min, and it does NOT protect anything built from RADIUS instead
-  # (unsigned - same for both blades) - confirmed to miss exactly this:
-  # pressure_manager.py's own Cp POD pod_region used radius_sv
-  # specifically (switched away from span_sv in a past fix for an
-  # unrelated reason - see that file's own comment), so it had NO blade
-  # separation and was mixing both blades' pressure data together.
-  # azimuth_center_deg/azimuth_tol_deg below give every class an
-  # EXPLICIT, non-accidental blade crop instead - see
-  # bladeprocessor._azimuth.azimuth_deg for the angle convention.
   azimuth_center_deg: 0
   azimuth_tol_deg: 45
 
