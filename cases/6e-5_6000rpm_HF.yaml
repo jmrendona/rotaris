@@ -1,12 +1,12 @@
 # Config file for ISAE2 simulations of isolated rotor in hover
 
-master_path: /scratch/jmrendon/Rotor-alone/6e-5_6000rpm-transition
+master_path: /scratch/jmrendon/Rotor-alone/6e-5_6000rpm-transition_PL
 case: 2025T
 
 files:
-  inst_force: 2025T_forces_rotor.h5
+  inst_force: 2026DNS_forces_rotor.h5
   avg_force: RA-beam-no-interaction_avg_forces_rotor.h5
-  inst_pressure: 2025T_pressure_rotor.h5
+  inst_pressure: 2026DNS_pressure_rotor.h5
   avg_pressure: RA-beam_avg_pressure_rotor.h5
 
 rotor:
@@ -17,7 +17,7 @@ rotor:
   c_ref: 0.025 # reference chord [m], used only when normalize is true below
 
 # No NDA on this case - plots show actual physical radius/chord/units.
-normalize: false
+normalize: true
 
 # Raw Cartesian axis (0=X, 1=Y, 2=Z) for each blade direction (this
 # project's original isolated-rotor convention).

@@ -150,9 +150,29 @@ class SurfaceVariable:
             self.areas = {}
             self._surfel_mask = {}
             self.available_variables = {}
+            self._span_center = {}
+            self._chord_center = {}
             for label in ('Upper', 'Lower'):
                 geo = f[f'Geometry/{label}']
                 positions_full = np.column_stack([geo['X'][:], geo['Y'][:], geo['Z'][:]])
+
+                # Centered on the FULL (pre-crop) surface's own extent - same fix as
+                # FrictionLines._span_chord()/StripForces._span_chord(), applied here too (this
+                # class's own _span_chord() was missed when that fix went in elsewhere). Computing
+                # this from self.positions[label] (below) instead - AFTER any azimuth crop - would
+                # recenter span on whichever single blade's own extent survived the crop instead
+                # of the true hub/rotation-axis center, silently shifting what span_min/span_max
+                # mean: confirmed directly on this project's own 2025T case (azimuth_center_deg=0/
+                # azimuth_tol_deg=45 narrows positions_full to one blade, X in
+                # [9.99285, 10.1178] instead of the full two-blade [9.8678, 10.1178] - centering on
+                # that one-blade range alone shifts span=0 to the MIDDLE of that single blade
+                # rather than the hub, so span_min=0.02 silently discarded everything below
+                # r=0.0825m instead of r=0.02m - exactly the "only shows the outer third of the
+                # blade" symptom in p_rms_surface_upper_2025T.png).
+                span_full = positions_full[:, self.span_axis]
+                chord_full = positions_full[:, self.chord_axis]
+                self._span_center[label] = (span_full.min() + span_full.max()) / 2
+                self._chord_center[label] = (chord_full.min() + chord_full.max()) / 2
 
                 if self.azimuth_center_deg is not None:
                     mask = azimuth_mask(
@@ -210,13 +230,18 @@ class SurfaceVariable:
 
     def _span_chord(self, surface: str):
 
-        '''Raw Cartesian (span, chord) position, centered - see FrictionLines._span_chord().'''
+        '''
+        Raw Cartesian (span, chord) position, centered - see FrictionLines._span_chord().
+        Centered on the FULL surface's own extent (_load()'s _span_center/_chord_center), NOT
+        recomputed from self.positions[surface].min()/.max() - those are only the load-time
+        azimuth-cropped survivors, and using their own bounds would shift what "span" means
+        depending on the crop, breaking span_min/span_max everywhere this is used (plot_variable_
+        surface(), cp(), variable_time_series_at_point(), ...) - see _load()'s own comment.
+        '''
 
         positions = self.positions[surface]
-        span = positions[:, self.span_axis]
-        chord = positions[:, self.chord_axis]
-        span = span - (span.min() + span.max()) / 2
-        chord = chord - (chord.min() + chord.max()) / 2
+        span = positions[:, self.span_axis] - self._span_center[surface]
+        chord = positions[:, self.chord_axis] - self._chord_center[surface]
 
         return span, chord
 

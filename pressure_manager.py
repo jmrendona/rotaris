@@ -298,15 +298,17 @@ sv_pressure_inst = SurfaceVariable(
 #       savepath=os.path.join(master_path, f'images/pfluct/p_fluct_upper_frame{frame:03d}_{case}.png'),
 #    )
 
-# Prms needs no new method - it's already variable(stat='rms'). Normalized,
-# this switches to Cp's own rms (Cp_rms = Prms / q_ref, LOCAL per-point
-# normalization - same as cp()) instead of raw Prms, so the value itself
-# is dimensionless too, not just the axes.
+# Prms needs no new method - it's already variable(stat='rms'). Normalized, this divides by
+# pref directly (Prms/pref) instead of Cp's own q_ref - unlike a MEAN pressure, Cp's local,
+# per-radius q_ref normalization (Cp = (p-pref)/q_ref) has no particular physical meaning for an
+# RMS fluctuation magnitude, so a single global reference (pref) is used instead, matching this
+# project's other p/p_ref dimensionless-pressure convention (see
+# bladeprocessor/vortex_core_tracking.py's plot_fig6_profiles()).
 print(40*'-')
 print('Plotting pressure RMS surface scatter, average over all frames')
 if normalize:
-   prms_get_values = lambda s: sv_pressure_inst.cp(surface=s, stat='rms')
-   prms_cbar_label = '$C_{p,rms}$ [-]'
+   prms_get_values = lambda s: sv_pressure_inst.variable('static_pressure', surface=s, stat='rms') / pref
+   prms_cbar_label = r'$P_{rms}/p_{\rm ref}$ [-]'
 else:
    prms_get_values = lambda s: sv_pressure_inst.variable('static_pressure', surface=s, stat='rms')
    prms_cbar_label = '$P_{rms}$ [Pa]'
@@ -323,33 +325,33 @@ sv_pressure_inst.plot_variable_surface(
 # Needs a real time axis: pass dt explicitly if this file has no usable
 # Metadata/mid_s (see README.md for when that's populated):
 
-span_pcts = np.arange(88, 99, 2)  # % of r/R
-chord_pcts = np.arange(0, 101, 10)  # % of x/c
+# span_pcts = np.arange(88, 99, 2)  # % of r/R
+# chord_pcts = np.arange(0, 101, 10)  # % of x/c
 
-for span in span_pcts:
-  for chord in chord_pcts:
-    print(40*'-')
-    print(f'Plotting pressure time trace at span {span}% and chord {chord}%')
-    sv_pressure_inst.plot_timetrace(
-      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
-      ylabel='$C_p$ [-]' if normalize else 'Static pressure [Pa]', dt=dt,
-      normalize=normalize,
-      savepath=os.path.join(master_path, f'images/pfluct/spectra/p_timetrace_s{span:03d}_c{chord:03d}_{case}.png'),
-    )
-    print(40*'-')
-    print(f'Plotting pressure periodogram at span {span}% and chord {chord}%')
-    sv_pressure_inst.plot_periodogram(
-      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
-      normalize=normalize, db=not normalize,
-      savepath=os.path.join(master_path, f'images/pfluct/spectra/p_periodogram_s{span:03d}_c{chord:03d}_{case}.png'),
-    )
-    print(40*'-')
-    print(f'Exporting pressure time trace at span {span}% and chord {chord}%')
-    sv_pressure_inst.export_timetrace(
-      'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
-      savepath=os.path.join(master_path, f'data/pfluct/p_timetrace_s{span:03d}_c{chord:03d}_{case}.h5'),
-    )
-    plt.close('all')
+# for span in span_pcts:
+#   for chord in chord_pcts:
+#     print(40*'-')
+#     print(f'Plotting pressure time trace at span {span}% and chord {chord}%')
+#     sv_pressure_inst.plot_timetrace(
+#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
+#       ylabel='$C_p$ [-]' if normalize else 'Static pressure [Pa]', dt=dt,
+#       normalize=normalize,
+#       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_timetrace_s{span:03d}_c{chord:03d}_{case}.png'),
+#     )
+#     print(40*'-')
+#     print(f'Plotting pressure periodogram at span {span}% and chord {chord}%')
+#     sv_pressure_inst.plot_periodogram(
+#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
+#       normalize=normalize, db=not normalize,
+#       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_periodogram_s{span:03d}_c{chord:03d}_{case}.png'),
+#     )
+#     print(40*'-')
+#     print(f'Exporting pressure time trace at span {span}% and chord {chord}%')
+#     sv_pressure_inst.export_timetrace(
+#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
+#       savepath=os.path.join(master_path, f'data/pfluct/p_timetrace_s{span:03d}_c{chord:03d}_{case}.h5'),
+#     )
+#     plt.close('all')
 
 # # ------------- Leading-edge stagnation point ------------- #
 # #

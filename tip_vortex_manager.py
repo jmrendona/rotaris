@@ -23,6 +23,7 @@ from bladeprocessor.vortex_core_tracking import (
 
 cfg = load_case_config()
 master_path = cfg.master_path
+case = cfg.case
 r_tip = cfg.r_tip
 rpm = cfg.rpm
 pref = cfg.pref
@@ -34,9 +35,6 @@ normalize = cfg.normalize
 # skin_friction_manager.py use for Cp/Cf (raw physical units when
 # normalize is false, matching cases/*.yaml's own header comment).
 u_tip = rpm * 2 * np.pi / 60 * r_tip
-
-os.makedirs(os.path.join(master_path, 'images', 'tip_vortex'), exist_ok=True)
-os.makedirs(os.path.join(master_path, 'images', 'meridional_field'), exist_ok=True)
 
 # ------------- Tip-vortex tracking: scattered (x,y,z,value) phase-locked sweep (see README.md) ------------- #
 #
@@ -53,7 +51,6 @@ os.makedirs(os.path.join(master_path, 'images', 'meridional_field'), exist_ok=Tr
 # this plane sweep, so r_tip/rpm are given directly here rather than forcing a placeholder case
 # yaml's worth of unrelated required fields (inst_force, friction.radii, ...) that don't apply.
 
-pl_master_path = '/scratch/jmrendon/Rotor-alone/6e-5_6000rpm_PL'
 # Same physical rotor as this case's own yaml (r_tip/rpm/pref/rho_ref all match
 # cases/6e-5_6000rpm_HF.yaml exactly: 0.125 m, 6000 RPM, 101325 Pa, 1.22523 kg/m^3) - just a
 # different CFD run/resolution with no yaml entry of its own (see comment above) - reuse the
@@ -62,13 +59,13 @@ pl_master_path = '/scratch/jmrendon/Rotor-alone/6e-5_6000rpm_PL'
 pl_r_tip = r_tip
 pl_angles = list(range(0, 180, 10))  # 0,10,...,170deg - this dataset's own full set (see data/x-vel/)
 
-os.makedirs(os.path.join(pl_master_path, 'images', 'tip_vortex_pl'), exist_ok=True)
+os.makedirs(os.path.join(master_path, 'images', 'tip_vortex_pl'), exist_ok=True)
 
 for angle in pl_angles:
    angle_str = f'{angle:02d}'
-   x_file = os.path.join(pl_master_path, f'data/x-vel/vel_x_{angle_str}deg_avg.txt')
-   y_file = os.path.join(pl_master_path, f'data/y-vel/vel_y_{angle_str}deg_avg.txt')
-   z_file = os.path.join(pl_master_path, f'data/z-vel/vel_z_{angle_str}deg_avg.txt')
+   x_file = os.path.join(master_path, f'data/x-vel/vel_x_{angle_str}deg_avg.txt')
+   y_file = os.path.join(master_path, f'data/y-vel/vel_y_{angle_str}deg_avg.txt')
+   z_file = os.path.join(master_path, f'data/z-vel/vel_z_{angle_str}deg_avg.txt')
 
    R, Y, v_r, v_a, v_t = scattered_cylindrical_components(x_file, y_file, z_file, angle_deg=float(angle))
 
@@ -77,7 +74,7 @@ for angle in pl_angles:
            R, Y, field,
            variable_label=rf'Mean ${sym}$ [m/s]',
            r_tip=pl_r_tip, vmin=-18, vmax=18,
-           savepath=os.path.join(pl_master_path, f'images/tip_vortex_pl/{prefix}_{angle:02d}deg.png'),
+           savepath=os.path.join(master_path, f'images/tip_vortex_pl/{prefix}_{angle:02d}deg_{case}.png'),
        )
    print(f'{angle_str}deg: done')
 
@@ -112,24 +109,24 @@ q_tip = 0.5 * rho_ref * pl_u_tip ** 2
 print(40 * '-')
 print('Tracking tip-vortex core across the full wake-age sweep')
 track_results, field_cache = track_vortex_core_sweep(
-   pl_master_path, track_angles, pl_r_tip, rho_values, MODELS, MODEL_LABELS, MODEL_STYLES,
-   profile_plot_dir=os.path.join(pl_master_path, 'images/tip_vortex_pl'),
-   results_savepath=os.path.join(pl_master_path, 'images/tip_vortex_pl/vortex_core_results.npz'),
+   master_path, track_angles, pl_r_tip, rho_values, MODELS, MODEL_LABELS, MODEL_STYLES,
+   profile_plot_dir=os.path.join(master_path, 'images/tip_vortex_pl'),
+   results_savepath=os.path.join(master_path, f'images/tip_vortex_pl/vortex_core_results_{case}.npz'),
 )
 
 print(40 * '-')
 print('Plotting core trajectory / circulation / core-radius vs wake age')
 plot_core_trajectory(
    track_results, pl_r_tip,
-   savepath=f'{pl_master_path}/images/tip_vortex_pl/core_trajectory.png',
+   savepath=f'{master_path}/images/tip_vortex_pl/core_trajectory_{case}.png',
 )
 plot_circulation_vs_wakeage(
    track_results, MODELS, MODEL_LABELS, MODEL_STYLES,
-   savepath=f'{pl_master_path}/images/tip_vortex_pl/circulation_vs_wakeage.png',
+   savepath=f'{master_path}/images/tip_vortex_pl/circulation_vs_wakeage_{case}.png',
 )
 plot_coreradius_vs_wakeage(
    track_results, MODELS, MODEL_LABELS, MODEL_STYLES,
-   savepath=f'{pl_master_path}/images/tip_vortex_pl/coreradius_vs_wakeage.png',
+   savepath=f'{master_path}/images/tip_vortex_pl/coreradius_vs_wakeage_{case}.png',
 )
 
 # Combined "all cuts" overview (core trajectory on top of a representative meridional field) +
@@ -138,23 +135,23 @@ plot_coreradius_vs_wakeage(
 angle_mid = angle_at_wake_age(track_results, 90)
 plot_core_trajectory_overlay(
    track_results, field_cache, angle_mid, pl_r_tip,
-   savepath=f'{pl_master_path}/images/tip_vortex_pl/core_trajectory_overlay.png',
+   savepath=f'{master_path}/images/tip_vortex_pl/core_trajectory_overlay_{case}.png',
 )
 plot_core_pressure_vs_wakeage(
    track_results, pref,
-   savepath=f'{pl_master_path}/images/tip_vortex_pl/core_pressure_vs_wakeage.png',
+   savepath=f'{master_path}/images/tip_vortex_pl/core_pressure_vs_wakeage_{case}.png',
 )
 plot_core_pressure_coeff_vs_wakeage(
    track_results, pref, q_tip,
-   savepath=f'{pl_master_path}/images/tip_vortex_pl/core_pressure_coeff_vs_wakeage.png',
+   savepath=f'{master_path}/images/tip_vortex_pl/core_pressure_coeff_vs_wakeage_{case}.png',
 )
 plot_core_spread_vs_wakeage(
    track_results,
-   savepath=f'{pl_master_path}/images/tip_vortex_pl/core_spread_vs_wakeage.png',
+   savepath=f'{master_path}/images/tip_vortex_pl/core_spread_vs_wakeage_{case}.png',
 )
 plot_peak_swirl_vs_wakeage(
    track_results, rpm, pl_u_tip,
-   savepath=f'{pl_master_path}/images/tip_vortex_pl/peak_swirl_vs_wakeage.png',
+   savepath=f'{master_path}/images/tip_vortex_pl/peak_swirl_vs_wakeage_{case}.png',
 )
 
 # Quaglia et al.'s own Fig. 4-8, replicated independently (pick whichever you actually want to
@@ -170,24 +167,24 @@ row_late = next(r for r in track_results if r['angle'] == angle_late)
 core_late = field_cache[angle_late]['core']
 
 plot_core_extraction_mesh(
-   pl_master_path, float(angle_late), core_late['r_core'], core_late['y_core'],
+   master_path, float(angle_late), core_late['r_core'], core_late['y_core'],
    field_folder='pstat', field_prefix='p_stat', variable_label=r'Static pressure [Pa]',
    window=0.012,
-   savepath_mesh=f'{pl_master_path}/images/tip_vortex_pl/fig4a_raw_mesh.png',
-   savepath_polar=f'{pl_master_path}/images/tip_vortex_pl/fig4b_polar_mesh.png',
+   savepath_mesh=f'{master_path}/images/tip_vortex_pl/fig4a_raw_mesh_{case}.png',
+   savepath_polar=f'{master_path}/images/tip_vortex_pl/fig4b_polar_mesh_{case}.png',
 )
 
-profiles_mid = vortex_profiles_at_angle(pl_master_path, field_cache, angle_mid, rho_values)
+profiles_mid = vortex_profiles_at_angle(master_path, field_cache, angle_mid, rho_values)
 plot_fig5_profiles(
    rho_values, *profiles_mid[:4],
-   savepath_tangential=f'{pl_master_path}/images/tip_vortex_pl/fig5a_tangential_profile.png',
-   savepath_axial=f'{pl_master_path}/images/tip_vortex_pl/fig5b_axial_profile.png',
+   savepath_tangential=f'{master_path}/images/tip_vortex_pl/fig5a_tangential_profile_{case}.png',
+   savepath_axial=f'{master_path}/images/tip_vortex_pl/fig5b_axial_profile_{case}.png',
 )
 
 profiles_by_age = {
-   'early': vortex_profiles_at_angle(pl_master_path, field_cache, angle_early, rho_values),
+   'early': vortex_profiles_at_angle(master_path, field_cache, angle_early, rho_values),
    'mid': profiles_mid,
-   'late': vortex_profiles_at_angle(pl_master_path, field_cache, angle_late, rho_values),
+   'late': vortex_profiles_at_angle(master_path, field_cache, angle_late, rho_values),
 }
 wake_age_by_angle = dict(zip((row['angle'] for row in track_results), wake_age_series(track_results)))
 age_labels = {k: f'{int(wake_age_by_angle[a])}' + r'$^\circ$'
@@ -196,19 +193,19 @@ age_markers = {'early': 'x', 'mid': 'o', 'late': '+'}
 
 plot_fig6_profiles(
    rho_values, pl_r_tip, pl_u_tip, pref, profiles_by_age, age_labels, age_markers,
-   savepath_tangential=f'{pl_master_path}/images/tip_vortex_pl/fig6a_tangential_nd.png',
-   savepath_axial_deficit=f'{pl_master_path}/images/tip_vortex_pl/fig6b_axial_deficit_nd.png',
-   savepath_pressure=f'{pl_master_path}/images/tip_vortex_pl/fig6c_pressure_nd.png',
+   savepath_tangential=f'{master_path}/images/tip_vortex_pl/fig6a_tangential_nd_{case}.png',
+   savepath_axial_deficit=f'{master_path}/images/tip_vortex_pl/fig6b_axial_deficit_nd_{case}.png',
+   savepath_pressure=f'{master_path}/images/tip_vortex_pl/fig6c_pressure_nd_{case}.png',
 )
 
 plot_fig7_tangential_models(
    rho_values, pl_r_tip, pl_u_tip, profiles_by_age['late'][0], row_late,
    MODELS, MODEL_LABELS, MODEL_STYLES, model_names=('lo', 'scully', 'taylor'),
-   savepath=f'{pl_master_path}/images/tip_vortex_pl/fig7a_tangential_models.png',
+   savepath=f'{master_path}/images/tip_vortex_pl/fig7a_tangential_models_{case}.png',
 )
 
 plot_fig8_coreradius_and_maxswirl_nd(
    track_results, pl_r_tip, pl_u_tip,
-   savepath_coreradius=f'{pl_master_path}/images/tip_vortex_pl/fig8a_coreradius_nd.png',
-   savepath_maxswirl=f'{pl_master_path}/images/tip_vortex_pl/fig8b_maxswirl_nd.png',
+   savepath_coreradius=f'{master_path}/images/tip_vortex_pl/fig8a_coreradius_nd_{case}.png',
+   savepath_maxswirl=f'{master_path}/images/tip_vortex_pl/fig8b_maxswirl_nd_{case}.png',
 )
