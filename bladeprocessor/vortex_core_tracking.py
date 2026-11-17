@@ -42,14 +42,18 @@ circulation/core-radius quantity below is built from (v_r, v_axial)
 alone.
 '''
 
+import io
+
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from PIL import Image, ImageChops
 from scipy.optimize import curve_fit
 from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator, RegularGridInterpolator
 from scipy.spatial import Delaunay
 from matplotlib.colors import TwoSlopeNorm
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - registers the 'projection=3d' subplot kind
 
 from bladeprocessor.tip_vortex_tracking import cylindrical_velocity
 from bladeprocessor.meridional_field import (
@@ -1023,3 +1027,170 @@ def plot_fig8_coreradius_and_maxswirl_nd(track_results, r_tip, u_tip, savepath_c
     fig.tight_layout()
     fig.savefig(savepath_maxswirl, dpi=300)
     plt.close(fig)
+
+
+def _autocrop_image(img, margin=10, bg=(255, 255, 255)):
+    '''Crop `img` (a PIL Image) down to its own non-background content, plus `margin` px on
+    every side - used to stitch separately-rendered figure pieces together tightly (see
+    plot_core_trajectory_3d()).'''
+    img = img.convert('RGB')
+    bbox = ImageChops.difference(img, Image.new('RGB', img.size, bg)).getbbox()
+    if bbox is None:
+        return img
+    bbox = (max(bbox[0] - margin, 0), max(bbox[1] - margin, 0),
+            min(bbox[2] + margin, img.width), min(bbox[3] + margin, img.height))
+    return img.crop(bbox)
+
+
+def _lab_frame_grid(R, Y, angle_deg):
+    '''
+    Lift a (R, Y) meridional-plane grid (same shape, R SIGNED/full-diameter - see
+    scattered_cylindrical_components()/griddata_scattered_field()) at `angle_deg` into lab-frame
+    (X, Y, Z), same shapes each - the exact inverse of meridional_field.rotate_scattered_position()
+    with thickness=0 (that rotation is orthogonal, so its inverse is just its transpose):
+    X = R*cos(theta), Z = R*sin(theta), Y unchanged (the sweep rotates about the Y axis only, same
+    as every velocity rotation in this module - axis='y' in cylindrical_velocity()).
+    '''
+    theta = np.radians(angle_deg)
+    return R * np.cos(theta), Y, R * np.sin(theta)
+
+
+def plot_core_trajectory_3d(pl_master_path, track_results, r_tip, savepath, plane_angles=None,
+                             vmin=-18, vmax=18, cmap='RdBu_r', n_r=160, n_y=80,
+                             elev=20, azim=-60):
+
+    '''
+    Isometric 3D view of several ACTUAL meridional Ua planes (not a schematic/empty sketch),
+    each rendered as a real textured surface in its own true 3D position, with the tracked
+    tip-vortex core trajectory overlaid on top - modeled directly on this project's own
+    PowerVIZ/EnSight-style "several real cut-planes, each colored by the field measured there, in
+    their true position around the rotor" renders. Answers "how does the vortex actually travel
+    in 3D, relative to the real flow structure, as the blade sweeps from 170deg down to 0deg" -
+    which core_trajectory.png (flat 2D (r, y) only) and core_trajectory_overlay.png (ONE
+    background plane only) don't show.
+
+    Each `plane_angles` entry is gridded FRESH (scattered_cylindrical_components(), same call as
+    the Part-1 Ua/Ur/Ut loop above) at (n_r, n_y) resolution, lifted into lab-frame (X, Y, Z) via
+    _lab_frame_grid() (R kept SIGNED/full-diameter, so each plane shows its own true full-
+    diametral extent, exactly like the existing 2D Ua plots - not clipped to one side), and drawn
+    with plot_surface(facecolors=...) so the actual field values show, not an empty rectangle.
+    ALL planes share the same fixed (vmin, vmax) - unlike a per-plane percentile clip, this keeps
+    every plane's color directly comparable to the others and to the project's own existing 2D Ua
+    plots (same -18/18 m/s convention). The full tracked trajectory (every angle in
+    track_results, not just `plane_angles`) is drawn as a continuous line + scatter on top,
+    colored by wake age (same convention as core_trajectory.png).
+
+    Caveat: matplotlib's 3D axes do not actually depth-sort between different artist types (a
+    plot_surface and a scatter here) - they're drawn in call order, so the trajectory marker can
+    occasionally render in front of a plane it should be behind, or vice versa, depending on the
+    view angle. This is a known mplot3d limitation, not a bug in the reconstructed geometry
+    itself - rotate `elev`/`azim` if a specific angle looks wrong.
+
+    Parameters
+    ----------
+    plane_angles : iterable of float, optional
+        Default: 5 angles evenly spaced across the tracked sweep.
+    vmin, vmax : float
+        Shared Ua color limits across every plane - see above.
+    n_r, n_y : int
+        Per-plane grid resolution (each plane is regridded from the raw scattered export fresh -
+        keep this modest, 5 planes x full Delaunay triangulation is the slow part, not the grid
+        size itself).
+    elev, azim : float
+        matplotlib 3D view angles (degrees) - the defaults give a reasonable isometric view for
+        this sweep; adjust to taste.
+    '''
+
+    angles = [row['angle'] for row in track_results]
+    if plane_angles is None:
+        idx = np.linspace(0, len(angles) - 1, 5).round().astype(int)
+        plane_angles = sorted({angles[i] for i in idx}, reverse=True)
+
+    wake_age = wake_age_series(track_results)
+    theta_traj = np.radians(np.array(angles, dtype=float))
+    r_core = np.array([row['r_core'] for row in track_results])
+    y_core = np.array([row['y_core'] for row in track_results])
+    x3 = r_core * np.cos(theta_traj) / r_tip
+    y3 = y_core / r_tip
+    z3 = r_core * np.sin(theta_traj) / r_tip
+
+    # Crop each plane's own axial (y) extent down to around the trajectory's own range (plus
+    # margin) - scattered_cylindrical_components() otherwise grids each plane's FULL natural
+    # y-extent (several R), which dwarfs the trajectory (confined to a thin band near y=0) and
+    # makes the whole figure mostly empty space. Not cropped radially - the full r extent is kept
+    # so each plane still shows its true, recognizable full-diametral shape.
+    y_span = y3.max() - y3.min() if y3.max() > y3.min() else 1.0
+    y_lo_m = (y3.min() - 0.6 * y_span) * r_tip
+    y_hi_m = (y3.max() + 0.6 * y_span) * r_tip
+
+    fig = plt.figure(figsize=(8, 8))
+    ax = fig.add_axes((0, 0, 1, 1), projection='3d')
+    cmap_obj = plt.get_cmap(cmap)
+
+    for pa in plane_angles:
+        angle_str = f'{int(round(pa)):02d}'
+        x_file = f'{pl_master_path}/data/x-vel/vel_x_{angle_str}deg_avg.txt'
+        y_file = f'{pl_master_path}/data/y-vel/vel_y_{angle_str}deg_avg.txt'
+        z_file = f'{pl_master_path}/data/z-vel/vel_z_{angle_str}deg_avg.txt'
+        R, Y, _, v_a, _ = scattered_cylindrical_components(
+            x_file, y_file, z_file, angle_deg=float(pa), n_r=n_r, n_y=n_y,
+        )
+        rows = (Y[:, 0] >= y_lo_m) & (Y[:, 0] <= y_hi_m)
+        R, Y, v_a = R[rows, :], Y[rows, :], v_a[rows, :]
+        X3, Y3p, Z3 = _lab_frame_grid(R / r_tip, Y / r_tip, pa)
+
+        valid = ~np.isnan(v_a)
+        norm_field = np.clip((np.nan_to_num(v_a, nan=0.0) - vmin) / (vmax - vmin), 0, 1)
+        facecolors = cmap_obj(norm_field)
+        facecolors[..., 3] = np.where(valid, 0.65, 0.0)
+
+        # Matplotlib's OWN 3rd axis (Z) is what actually renders vertically on screen - feed it
+        # the physical AXIAL coordinate (our own Y3p) instead of the in-plane Z3, so the rotor's
+        # own rotation axis appears vertical (matching the reference render this is modeled on),
+        # with X3/Z3 (both in-plane/radial) spanning the horizontal "fan" of planes.
+        ax.plot_surface(X3, Z3, Y3p, facecolors=facecolors, rstride=1, cstride=1,
+                         shade=False, antialiased=False, linewidth=0)
+
+    ax.plot(x3, z3, y3, '-', color='k', alpha=0.9, linewidth=2.5, zorder=10)
+    sc = ax.scatter(x3, z3, y3, c=wake_age, cmap='viridis', s=70, zorder=11,
+                     edgecolors='k', linewidths=0.8, depthshade=False)
+
+    # No coordinate axes/ticks/panes/grid - purely geometric/orientation context (matching the
+    # reference render this is modeled on); the two colorbars carry the actual information.
+    ax.set_box_aspect((np.ptp(ax.get_xlim()), np.ptp(ax.get_ylim()), np.ptp(ax.get_zlim())))
+    ax.view_init(elev=elev, azim=azim)
+    ax.set_axis_off()
+
+    # mplot3d always renders within a roughly square viewport regardless of how thin the actual
+    # (box_aspect-correct) content is, wherever within that viewport its own internal framing
+    # happens to place it - bbox_inches='tight' only trims the OUTER figure margin, not dead
+    # space baked inside the viewport itself. Rendering the 3D view and the two (horizontal, to
+    # stay compact) colorbars as SEPARATE small figures, autocropping each to its own actual
+    # content, then stitching them back together vertically here, sidesteps that entirely instead
+    # of fighting mplot3d's own layout.
+    buf_3d = io.BytesIO()
+    fig.savefig(buf_3d, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+
+    fig_cb, (cax_field, cax_wa) = plt.subplots(1, 2, figsize=(8, 0.6))
+    mappable = plt.cm.ScalarMappable(cmap=cmap_obj, norm=plt.Normalize(vmin, vmax))
+    cbar_field = fig_cb.colorbar(mappable, cax=cax_field, orientation='horizontal')
+    cbar_field.ax.set_xlabel(r'mean $U_a$ [m/s]', fontsize=10)
+    cbar_field.ax.tick_params(labelsize=9)
+    cbar_wa = fig_cb.colorbar(sc, cax=cax_wa, orientation='horizontal')
+    cbar_wa.ax.set_xlabel(r'wake age $\psi_w$ [deg]', fontsize=10)
+    cbar_wa.ax.tick_params(labelsize=9)
+    fig_cb.tight_layout()
+    buf_cb = io.BytesIO()
+    fig_cb.savefig(buf_cb, dpi=300, bbox_inches='tight')
+    plt.close(fig_cb)
+
+    img_3d = _autocrop_image(Image.open(buf_3d))
+    img_cb = _autocrop_image(Image.open(buf_cb))
+    img_cb = img_cb.resize((img_3d.width, round(img_cb.height * img_3d.width / img_cb.width)))
+
+    gap = 20
+    combined = Image.new('RGB', (img_3d.width, img_3d.height + gap + img_cb.height), (255, 255, 255))
+    combined.paste(img_3d, (0, 0))
+    combined.paste(img_cb, (0, img_3d.height + gap))
+    combined.save(savepath)

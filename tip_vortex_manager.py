@@ -14,7 +14,7 @@ from bladeprocessor.meridional_field import (
 from bladeprocessor.vortex_core_tracking import (
     lamb_oseen, scully, vatistas_n2, taylor, plot_core_extraction_mesh,
     track_vortex_core_sweep, angle_at_wake_age, wake_age_series, vortex_profiles_at_angle,
-    plot_core_trajectory, plot_circulation_vs_wakeage, plot_coreradius_vs_wakeage,
+    plot_core_trajectory, plot_core_trajectory_3d, plot_circulation_vs_wakeage, plot_coreradius_vs_wakeage,
     plot_core_trajectory_overlay, plot_core_pressure_vs_wakeage, plot_core_pressure_coeff_vs_wakeage,
     plot_core_spread_vs_wakeage, plot_peak_swirl_vs_wakeage,
     plot_fig5_profiles, plot_fig6_profiles, plot_fig7_tangential_models,
@@ -120,6 +120,15 @@ plot_core_trajectory(
    track_results, pl_r_tip,
    savepath=f'{master_path}/images/tip_vortex_pl/core_trajectory_{case}.png',
 )
+# Lab-frame 3D isometric view: several ACTUAL Ua meridional planes, each in their own true 3D
+# position, with the tracked trajectory threading through them - core_trajectory.png above is
+# confined to the single 2D (r, y) plane the core happens to sit in at each cut, with no sense of
+# how that plane itself is oriented in space, or of the real flow structure around it - see
+# plot_core_trajectory_3d()'s own docstring.
+plot_core_trajectory_3d(
+   master_path, track_results, pl_r_tip,
+   savepath=f'{master_path}/images/tip_vortex_pl/core_trajectory_3d_{case}.png',
+)
 plot_circulation_vs_wakeage(
    track_results, MODELS, MODEL_LABELS, MODEL_STYLES,
    savepath=f'{master_path}/images/tip_vortex_pl/circulation_vs_wakeage_{case}.png',
@@ -170,15 +179,15 @@ plot_core_extraction_mesh(
    master_path, float(angle_late), core_late['r_core'], core_late['y_core'],
    field_folder='pstat', field_prefix='p_stat', variable_label=r'Static pressure [Pa]',
    window=0.012,
-   savepath_mesh=f'{master_path}/images/tip_vortex_pl/fig4a_raw_mesh_{case}.png',
-   savepath_polar=f'{master_path}/images/tip_vortex_pl/fig4b_polar_mesh_{case}.png',
+   savepath_mesh=f'{master_path}/images/tip_vortex_pl/tv_raw_mesh_{case}.png',
+   savepath_polar=f'{master_path}/images/tip_vortex_pl/tv_polar_mesh_{case}.png',
 )
 
 profiles_mid = vortex_profiles_at_angle(master_path, field_cache, angle_mid, rho_values)
 plot_fig5_profiles(
    rho_values, *profiles_mid[:4],
-   savepath_tangential=f'{master_path}/images/tip_vortex_pl/fig5a_tangential_profile_{case}.png',
-   savepath_axial=f'{master_path}/images/tip_vortex_pl/fig5b_axial_profile_{case}.png',
+   savepath_tangential=f'{master_path}/images/tip_vortex_pl/tangential_std_profile_{case}.png',
+   savepath_axial=f'{master_path}/images/tip_vortex_pl/axial_std_profile_{case}.png',
 )
 
 profiles_by_age = {
@@ -193,19 +202,19 @@ age_markers = {'early': 'x', 'mid': 'o', 'late': '+'}
 
 plot_fig6_profiles(
    rho_values, pl_r_tip, pl_u_tip, pref, profiles_by_age, age_labels, age_markers,
-   savepath_tangential=f'{master_path}/images/tip_vortex_pl/fig6a_tangential_nd_{case}.png',
-   savepath_axial_deficit=f'{master_path}/images/tip_vortex_pl/fig6b_axial_deficit_nd_{case}.png',
-   savepath_pressure=f'{master_path}/images/tip_vortex_pl/fig6c_pressure_nd_{case}.png',
+   savepath_tangential=f'{master_path}/images/tip_vortex_pl/tangential_nd_{case}.png',
+   savepath_axial_deficit=f'{master_path}/images/tip_vortex_pl/axial_deficit_nd_{case}.png',
+   savepath_pressure=f'{master_path}/images/tip_vortex_pl/pressure_nd_{case}.png',
 )
 
 plot_fig7_tangential_models(
    rho_values, pl_r_tip, pl_u_tip, profiles_by_age['late'][0], row_late,
    MODELS, MODEL_LABELS, MODEL_STYLES, model_names=('lo', 'scully', 'taylor'),
-   savepath=f'{master_path}/images/tip_vortex_pl/fig7a_tangential_models_{case}.png',
+   savepath=f'{master_path}/images/tip_vortex_pl/tangential_models_{case}.png',
 )
 
 plot_fig8_coreradius_and_maxswirl_nd(
    track_results, pl_r_tip, pl_u_tip,
-   savepath_coreradius=f'{master_path}/images/tip_vortex_pl/fig8a_coreradius_nd_{case}.png',
-   savepath_maxswirl=f'{master_path}/images/tip_vortex_pl/fig8b_maxswirl_nd_{case}.png',
+   savepath_coreradius=f'{master_path}/images/tip_vortex_pl/coreradius_nd_{case}.png',
+   savepath_maxswirl=f'{master_path}/images/tip_vortex_pl/maxswirl_nd_{case}.png',
 )
