@@ -447,8 +447,8 @@ don't mix per-point data across the two.
 `convert.py` is a CLI wrapping both branches above, one subcommand each:
 
 ```bash
-python convert.py forces <snc_path> <output.h5> [--face-name NAME] [--surface-split] [--nc-stats FILE] [--blade-lrf-offset-deg DEG]
-python convert.py pressure <snc_path> <output.h5> --first N --last M [--surface-split] [--nc-stats FILE] [--reference-frame N] [--work-dir DIR] [--face-names NAME1,NAME2,...]
+python convert.py forces <snc_path> <output.h5> [--face-name NAME] [--surface-split] [--nc-stats FILE] [--blade-lrf-offset-deg DEG] [--object {rotor,stator,beam,casing}]
+python convert.py pressure <snc_path> <output.h5> --first N --last M [--surface-split] [--nc-stats FILE] [--reference-frame N] [--work-dir DIR] [--face-names NAME1,NAME2,...] [--object {rotor,stator,beam,casing}]
 python convert.py fnc-meridional <fnc_path> <output.h5> --angle DEG --variables v1,v2 --first N --last M [--freeze-mask-variable vmag]
 python convert.py fnc-iso-radius <fnc_path> <output.h5> --radius M --variables v1,v2 --first N --last M [--freeze-mask-variable vmag]
 ```
@@ -742,6 +742,334 @@ changes between frames, not shape). Noted as an assumption in
 mentioned as the more foolproof (but more storage consuming) alternative,
 not implemented.
 
+## Stationary objects (stator vanes, beams/struts, casings): `--object`
+
+Everything above was written against a rotating rotor blade, but almost
+none of it actually depends on rotation: `SNCReader.surface_split()`,
+`_radius()`/`_span_chord()`, and the azimuth crop
+(`bladeprocessor/_azimuth.py`) are all built on the object's own LRF
+(`lrf_axis_origin`/`lrf_axis_direction`), which PowerFLOW writes for
+**any** `.snc` part, rotating or not. The pressure branch
+(`convert_snc_to_h5`/`pf2ens`) needs **no** rotation correction at all,
+for any object type (see `raw_positions_to_ensight_frame()`'s
+docstring). The two things that genuinely differ for a stator vane,
+beam/strut, or casing:
+
+1. **`Surface X/Y/Z-Force`'s rotation correction must be switched off.**
+   A real multi-part `.snc` can bundle a rotor *and* its stationary
+   hardware under ONE shared `lrf_axis_origin`/`lrf_axis_direction`/
+   `lrf_constant_angular_vel_mag` - confirmed directly on two real
+   files, a multi-vane stator case and a radial-strut beam case, both
+   reporting a **nonzero** shared rate even though the stationary part
+   itself never moves. That rate describes the ROTOR, not whichever
+   face `--face-name` happens to select, so blindly running
+   `_rotation_angle()` on a stationary part's force data would
+   spuriously rotate it by the rotor's time-varying angle.
+2. **Cf/Cp's reference dynamic pressure can't use `omega*r`** - a
+   stationary part has no rotation rate of its own to build a *local*
+   dynamic pressure from. It needs a *fixed* freestream/inlet velocity
+   instead (`v_ref`, uniform everywhere, in place of `rpm`'s
+   position-dependent formula - see
+   `bladeprocessor/_dynamics.dynamic_pressure()`).
+
+`--object {rotor,stator,beam,casing}` on `convert.py forces`/`pressure`
+and `rotor.v_ref`/`object_type` in a case YAML are the two knobs that
+express this. `rotor.rpm` is **not** replaced by `v_ref` - it's still
+useful on a stationary part purely as the phase-lock/convergence period
+clock (the stationary part's own unsteady loads are still driven by the
+rotor's blade-passing frequency), it's just no longer used for Cf/Cp's
+`q_ref`.
+
+### Step by step: a stator vane
+
+Worked example from a real file,
+`/scratch/jmrendon/EDAT-McGill/4e-5_6000rpm/SMF-forces-steady.snc`.
+
+#### 0. Find `split_axis` and `azimuth_center_deg` FIRST - don't assume either
+
+This is the step that's easy to get wrong silently, so it comes before
+any conversion command. Two separate pitfalls, both confirmed on this
+real file:
+
+**Pitfall 1 - `SNCReader.surface_split()`'s default axis is wrong for
+this vane.** `surface_split()` classifies Upper/Lower by the sign of
+`normal . <reference direction>`, and which direction is right is a
+PHYSICAL fact about this specific part, not something to assume from
+"it worked for the rotor" - a vane's own thickness direction isn't
+necessarily the rotor's rotation axis (`split_axis='rotation'`, the
+default). Checking directly on one cleanly-isolated vane here:
+
+```python
+from converters.snc_reader import SNCReader
+from bladeprocessor._azimuth import azimuth_mask
+import numpy as np
+
+r = SNCReader('/scratch/jmrendon/EDAT-McGill/4e-5_6000rpm/SMF-forces-steady.snc')
+mask = r.face_mask('Stator_m_final')
+centroids, normals = r.surfel_centroids()[mask], r.surfel_normals()[mask]
+axis_d = r.lrf_axis_direction / np.linalg.norm(r.lrf_axis_direction)
+
+rel = centroids - r.lrf_axis_origin
+radial_vec = rel - (rel @ axis_d)[:, None] * axis_d
+radial_dir = radial_vec / np.linalg.norm(radial_vec, axis=1, keepdims=True)
+tangential_dir = np.cross(axis_d[None, :], radial_dir)
+
+# isolate ONE vane, away from the near-hub region (see Pitfall 2) -
+# azimuth_center_deg=0 and radius 20-76mm found below
+one_vane = azimuth_mask(centroids, r.lrf_axis_origin, axis_d, 0.0, 4.0)
+
+for name, cand in (('rotation', axis_d[None, :]), ('tangential', tangential_dir), ('radial', radial_dir)):
+    dot = np.sum(normals[one_vane] * cand[one_vane] if cand.ndim == 2 else normals[one_vane] * cand, axis=1)
+    print(name, 'mean|dot|=', np.mean(np.abs(dot)))
+```
+
+Result on this file: **`rotation` gives mean|dot|~0.23-0.24** (checked
+independently on 4 different vanes - a near-meaningless split, barely
+better than chance) **while `tangential` gives ~0.93-0.94, consistently
+across every vane checked** - the vane's thickness direction is
+circumferential, not axial, a genuine ~90 deg difference from the rotor
+convention (exactly the "flipped 90 degrees" suspicion that prompted
+this check in the first place). This isn't just a different overall
+Upper/Lower ratio (both options happen to land near a 50/50 split
+either way) - the actual point-by-point LABELS from `rotation` vs.
+`tangential` agree only ~49.9% of the time on one isolated vane, i.e.
+indistinguishable from a coin flip: `rotation` isn't a worse version of
+the right split, it's essentially a random one, mixing suction- and
+pressure-side points together. A single FIXED global axis (e.g. raw Y)
+is NOT a substitute - it only coincidentally matched `tangential` for
+the one vane sitting at azimuth~0 and failed (~0.47, not even close) for
+every other one, because the correct direction physically ROTATES with
+each vane's own azimuth. **`--split-axis tangential`** is the fix (see
+`SNCReader.surface_split()`'s docstring for the `'radial'` option too,
+not needed here).
+
+**Pitfall 2 - the near-hub region contaminates a naive full-face azimuth
+histogram.** `Stator_m_final` isn't 6 separate airfoil vanes end to end -
+below ~17mm radius it's a CONTINUOUS ring (every azimuth populated,
+hub blending into all 6 vanes at once); only above ~17mm does it narrow
+into 6 distinct, thin vanes. A histogram of `azimuth_deg(...)` over the
+WHOLE face (hub ring included) gives a biased, offset estimate of each
+vane's true center. Restricting first to the real vane region (here,
+roughly `20mm < radius < 76mm`) before histogramming azimuth gives the
+actual, clean centers: **0, 60, 120, 180, -60, -120 deg** for this file
+(30 deg away from what the uncorrected full-face histogram suggests) -
+confirm both of these (the radius cutoff excluding the hub ring, and the
+resulting azimuth centers) for your own case the same way, rather than
+reusing these specific numbers.
+
+#### 1. Convert forces
+
+`--object stator` switches off the rotation correction; `--split-axis
+tangential` fixes Pitfall 1 above; `--surface-split` is still required -
+`FrictionLines` always expects `Geometry/Upper`+`Geometry/Lower`:
+
+```bash
+sbatch run_conversion.sh forces \
+    /scratch/jmrendon/EDAT-McGill/4e-5_6000rpm/SMF-forces-steady.snc \
+    stator_forces.h5 \
+    --face-name Stator_m_final --surface-split --split-axis tangential --object stator
+```
+
+#### 2. Convert pressure
+
+Same `--object`/`--split-axis` (the pressure branch borrows its Upper/
+Lower classification from `SNCReader.surface_split()` via nearest-
+neighbor matching, so it needs the SAME `split_axis` as step 1 to agree
+with it - `--object` here is metadata-only, this branch never needed the
+rotation correction):
+
+```bash
+sbatch run_conversion.sh pressure \
+    /scratch/jmrendon/EDAT-McGill/4e-5_6000rpm/SMF-forces-steady.snc \
+    stator_pressure.h5 \
+    --first 0 --last 652 --surface-split --split-axis tangential --object stator \
+    --face-names /Stator_m_final::Stator_m_final
+```
+
+#### 3. Case YAML
+
+Same shape as an existing rotor case, with `object_type: stator`,
+`rotor.v_ref` set instead of relying on `rotor.rpm` for Cf/Cp, and
+`crop.azimuth_center_deg`/`azimuth_tol_deg` picking ONE of the 6 vanes
+found in step 0 (exactly like isolating one blade on a multi-blade rotor
+face - `span_min` here should exclude the contaminating hub ring too,
+e.g. `span_min: 0.020` in whichever raw axis is this case's `span_axis`,
+confirmed/adjusted the same way as Pitfall 2 above):
+
+```yaml
+object_type: stator
+
+master_path: /scratch/jmrendon/EDAT-McGill/4e-5_6000rpm
+case: stator_vane1
+
+files:
+  inst_force: stator_forces.h5
+  avg_force: stator_forces.h5
+  inst_pressure: stator_pressure.h5
+  avg_pressure: stator_pressure.h5
+
+rotor:
+  r_tip: <VANE_TIP_RADIUS_M>      # outer shroud radius - a stator vane has one
+  rho_ref: <RHO_REF>
+  rpm: 6000                       # still useful: the ROTOR's rpm, for phase-locking
+                                   # this vane's own unsteady loads against blade-
+                                   # passing frequency - NOT used for Cf/Cp here
+  v_ref: <INLET_VELOCITY_M_S>     # used for Cf/Cp's q_ref instead of rpm
+  pref: <PREF_PA>
+
+axes:
+  span: 0
+  chord: 2
+  thickness: 1
+  skip_validation: false          # check this against the real vane geometry
+
+crop:
+  span_min: <EXCLUDE_HUB_RING_M>  # see Pitfall 2 - keep only the real vane region
+  azimuth_center_deg: 0           # one vane - see Pitfall 2's corrected centers
+  azimuth_tol_deg: 4              # the vane's own angular half-width shrinks a lot
+                                   # with radius - check it's narrow enough at your
+                                   # OUTER radii too, the way Pitfall 2's check did
+
+friction:
+  reverse_chord: false            # check against a real plot, same as any new case
+  radii: [<...>]                  # physical radii across this vane's own span
+
+convergence:
+  dt_forces: <DT_FORCES>
+  dt_pressure: <DT_PRESSURE>
+```
+
+#### 4. Run the managers exactly as for a rotor case
+
+No manager code changes needed beyond what's already in this repo
+(`skin_friction_manager.py`/`pressure_manager.py` already pass
+`v_ref=cfg.v_ref` alongside `rpm=cfg.rpm`; `forces_manager.py`/
+`StripForces` need no `v_ref` at all - it has no `q_ref`/Cf/Cp of its
+own, see below):
+
+```bash
+python skin_friction_manager.py --case cases/stator_vane1.yaml
+python pressure_manager.py --case cases/stator_vane1.yaml
+```
+
+Every existing plot (`plot_cf_radii()`, `plot_cp_radii()`,
+`friction_lines()`, `critical_points()`, strip-force bar charts,
+phase-locked polar plots vs. the *rotor's* azimuth, POD/DMD, ...)
+applies unchanged - just swap "blade" for "vane" when reading the
+output.
+
+### Step by step: a cylindrical beam/strut
+
+Worked example from a real file,
+`/scratch/jmrendon/Rotor-strut/14mm/diametral/Tr_Forces_cylinders.snc` -
+a RADIAL strut (its own long axis passes through the rotor's rotation
+axis), confirmed circular by direct inspection (a narrow radial band's
+local cross-section radius recovered to within ~3% std of its mean).
+The "diametral" case has **two** struts 180 deg apart
+(`cylinder_left`/`cylinder_right`); a "radial" case would have the same
+thing with only one of the two faces selected.
+
+The key difference from a vane: `surface_split()`'s Upper/Lower split
+(by normal sign along ANY axis - `split_axis` doesn't matter here) is
+**geometrically arbitrary** for a true circular cross-section - confirmed
+on this file (`split_axis='rotation'`'s default landed at ~50.6%/50.8%,
+and would land near 50/50 for basically any other axis too, by the
+cylinder's own symmetry). This is the opposite problem from the vane's
+`split_axis` pitfall above: for the vane, the WRONG axis gave a split
+that's actively wrong (point labels indistinguishable from random,
+mixing suction/pressure together) and mattered a lot; for a true
+cylinder, there's no "wrong" axis to begin with - any one gives a valid
+(if not physically meaningful) 50/50-ish partition, which is all
+`FrictionLines`/`SurfaceVariable` structurally need at conversion time
+(`split_axis='rotation'`, the default, is fine here - no need to go
+looking for a better one). Use the circumferential "unwrap" view instead
+of
+`plot_cf_radii()`/`plot_cp_radii()`: `FrictionLines.plot_cf_circumference()`/
+`SurfaceVariable.plot_cp_circumference()`, plotting Cf/Cp against the
+local angle around the strut's own axis at a few span (distance-from-
+rotor-axis) stations, pooling `Upper`+`Lower` back into one circle
+(they're still needed at CONVERSION time - `FrictionLines` always
+expects both groups - just pooled back together here, since together
+they make up the whole circle).
+
+1. **Convert** (same idea as the vane, `--object beam`):
+
+   ```bash
+   sbatch run_conversion.sh forces \
+       /scratch/jmrendon/Rotor-strut/14mm/diametral/Tr_Forces_cylinders.snc \
+       beam_forces.h5 \
+       --face-name cylinder_left --surface-split --object beam
+   ```
+
+   (swap `--face-name cylinder_right` for the other strut; a "radial"
+   single-strut case would only ever have one of the two.)
+
+2. **Case YAML** - same `object_type`/`v_ref` idea as the vane; `r_tip`
+   doesn't mean anything for a beam (no outer "tip" of its own), so
+   leave it unset, and `friction.radii` becomes **span-axis stations**
+   along the strut (still physical distances from the rotor's rotation
+   axis - `_radius()` is the same method, it's just "how far out along
+   the strut" here instead of "blade radius"):
+
+   ```yaml
+   object_type: beam
+
+   rotor:
+     rho_ref: <RHO_REF>
+     v_ref: <INLET_VELOCITY_M_S>
+     pref: <PREF_PA>
+     # r_tip, rpm: omit - no outer radius, and no rotor-interaction
+     # frequency to phase-lock against unless this strut sits in a
+     # rotor's wake (in which case set rpm the same way the vane case
+     # does, purely for phase-locking).
+
+   friction:
+     radii: [0.07, 0.2, 0.3]   # distance from the rotor axis, i.e. along the strut
+   ```
+
+3. **Plot the circumferential Cf/Cp** instead of the radii versions:
+
+   ```python
+   from bladeprocessor.friction_lines import FrictionLines
+   from bladeprocessor.surface_variable import SurfaceVariable
+
+   fl = FrictionLines('beam_forces.h5', rho_ref=1.225, v_ref=10.0, validate_axes=False)
+   fl.plot_cf_circumference(
+       [0.07, 0.2, 0.3], strut_azimuth_deg=0.0, surfaces=('Upper', 'Lower'),
+       savepath='cf_circumference.png',
+   )
+
+   sv = SurfaceVariable('beam_pressure.h5', rho_ref=1.225, v_ref=10.0, pref=101325)
+   sv.plot_cp_circumference(
+       [0.07, 0.2, 0.3], strut_azimuth_deg=0.0, surface=('Upper', 'Lower'),
+       savepath='cp_circumference.png',
+   )
+   ```
+
+   `strut_azimuth_deg` is the strut's own azimuth around the rotor's
+   rotation axis (same `bladeprocessor._azimuth.azimuth_deg` convention
+   as `azimuth_center_deg` - `cylinder_left` above sits near 0 deg,
+   `cylinder_right` near 180 deg, confirmed by the same kind of
+   histogram used for the vane case). `validate_axes=False` on
+   `FrictionLines`: the `span_axis`/`chord_axis`/`thickness_axis` axis
+   check assumes an airfoil-like local thickness direction, which
+   doesn't apply to a cylinder - the circumferential methods don't use
+   those axes at all, only `_radius()`/the rotor's own axis.
+
+If a beam's long axis does **not** pass through the rotor's rotation
+axis (an offset support, rather than a radial spoke), this projection
+needs a different reference point - not yet implemented, since neither
+real case checked here needed it.
+
+### Casings
+
+Lowest priority, not validated against a real file yet. Same `--object
+casing` plumbing applies, but a casing is a shell wrapping all the way
+around rather than a local part with two distinct sides - `surface_split()`'s
+Upper/Lower (or the beam's circumferential unwrap, which assumes a
+*thin* cylinder) likely isn't the right tool; `plot_variable_surface()`
+on the whole, unsplit surface is the more likely starting point.
+
 ## Wall shear / friction lines: `bladeprocessor/FrictionLines` - Equations
 
 `FrictionLines` consumes a `SNCReader.to_h5(..., surface_split=True)` file
@@ -857,7 +1185,14 @@ omega = rpm * 2*pi / 60
 still uses the rotation axis rather than raw Cartesian position, see
 `_radius()`). This matches `BladePostProcessor.compute_cf()` elsewhere in
 this project (`U_ref(r) = omega * r`), rather than
-non-dimensionalizing by one global freestream/tip velocity. **Caveat**:
+non-dimensionalizing by one global freestream/tip velocity.
+
+**On a stationary object** (a stator vane, a beam/strut - see
+"Stationary objects" above), this rotor-specific `q_ref` doesn't apply -
+pass `v_ref` instead of `rpm`, for the uniform
+`q_ref = 0.5 * rho_ref * v_ref^2` (see
+`bladeprocessor/_dynamics.dynamic_pressure()`). Give exactly one of
+`rpm`/`v_ref`. **Caveat**:
 `q_ref -> 0` as `r -> 0`, so `Cf` blows up near the rotation axis. Some
 faces include a hub geometry right at `r~0` if no entities are defined. 
 If that is the case it can be excluded (`span_min`/`span_max` in
@@ -1221,6 +1556,8 @@ q_ref = 0.5 * rho_ref * (omega * r)^2
 
 `pref` is only needed for `stat='mean'`/instantaneous - a constant offset
 doesn't change a fluctuation's `rms`/`raw_rms`, so those work without it.
+Same `rpm`/`v_ref` choice as `FrictionLines.cf()` - see "Stationary
+objects" above - for a stator vane/beam, pass `v_ref` instead of `rpm`.
 
 **Instantaneous vs. average vs. RMS:** every method takes the same
 `frame`/`stat` pair `FrictionLines` uses: `frame=<int>` for one frame

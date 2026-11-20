@@ -3,6 +3,17 @@
 master_path: /scratch/jmrendon/Rotor-alone/6e-5_6000rpm-transition_PL
 case: 2025T
 
+# 'rotor' (default, can be omitted), 'stator', 'beam', or 'casing' - which
+# kind of part this case's .snc/HDF5 data is for (see convert.py's
+# --object). Rotor/stator use rotor.rpm for Cf/Cp's local q_ref; a
+# stator/beam/casing case instead needs rotor.v_ref (q_ref uniform,
+# 0.5*rho_ref*v_ref^2 - see bladeprocessor._dynamics.dynamic_pressure),
+# since it has no rotation rate of its own. rotor.rpm can still be set on
+# a stator/beam/casing case purely as the phase-lock period clock (the
+# rotor's blade-passing rate still drives a stationary part's unsteady
+# loads) - that use is independent of v_ref.
+# object_type: rotor
+
 files:
   inst_force: 2026DNS_forces_rotor.h5
   avg_force: RA-beam-no-interaction_avg_forces_rotor.h5
@@ -15,6 +26,7 @@ rotor:
   rpm: 6000
   pref: 101325
   c_ref: 0.025 # reference chord [m], used only when normalize is true below
+  # v_ref: 10.0 # freestream/inlet velocity [m/s] - stator/beam/casing cases only, see above
 
 # No NDA on this case - plots show actual physical radius/chord/units.
 normalize: true

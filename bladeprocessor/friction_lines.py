@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 
 from bladeprocessor._axis_validation import validate_chord_span_thickness_axes
 from bladeprocessor._azimuth import azimuth_mask
+from bladeprocessor._dynamics import dynamic_pressure
+from bladeprocessor._grid_field import grid_scatter
 from bladeprocessor._h5_read import read_masked_columns
 
 plt.rcParams.update({
@@ -81,11 +83,25 @@ class FrictionLines:
     r_tip : float, optional
         Physical tip radius [m], for reference only - not required for
         anything below to run.
-    rho_ref, rpm : float, optional
-        Reference density [kg/m^3] and rotor speed [rev/min] for
-        Cf = tau / (0.5 rho (omega r)^2) - see "Cf normalization" above.
-        Required by cf() / cf_at_radii() / plot_cf_radii() /
-        friction_lines(), not by wall_shear() (dimensional wall shear).
+    rho_ref : float, optional
+        Reference density [kg/m^3] for Cf = tau / q_ref - see "Cf
+        normalization" above. Required (together with rpm or v_ref)
+        by cf() / cf_at_radii() / plot_cf_radii() / friction_lines(),
+        not by wall_shear() (dimensional wall shear).
+    rpm : float, optional
+        Rotor speed [rev/min], for a rotating object - q_ref =
+        0.5*rho_ref*(omega*r)^2, LOCAL to each point's own radius (see
+        "Cf normalization" above). Give exactly one of rpm/v_ref.
+    v_ref : float, optional
+        Reference freestream/inlet velocity [m/s], for a STATIONARY
+        object (a stator vane or a beam/strut has no rotation rate of
+        its own to build a local dynamic pressure from) - q_ref =
+        0.5*rho_ref*v_ref^2, the SAME value everywhere, not derived
+        from position. Give exactly one of rpm/v_ref. rpm can still be
+        set independently of this (on a stationary object too) purely
+        as the phase-lock/convergence period clock (see
+        plot_cf_phase_portrait's color_by='revolution') - that's a
+        separate use of rpm, unaffected by v_ref.
     c_ref : float, optional
         Reference chord [m] - only needed for friction_lines()'s
         normalize=True (chord/c_ref instead of raw physical chord [m],
@@ -149,8 +165,8 @@ class FrictionLines:
     '''
 
     def __init__(self, filename: str, r_tip: float = None, rho_ref: float = None, rpm: float = None,
-                 c_ref: float = None, span_axis: int = 0, chord_axis: int = 2, thickness_axis: int = 1,
-                 span_min: float = None, span_max: float = None,
+                 v_ref: float = None, c_ref: float = None, span_axis: int = 0, chord_axis: int = 2,
+                 thickness_axis: int = 1, span_min: float = None, span_max: float = None,
                  azimuth_center_deg: float = None, azimuth_tol_deg: float = None,
                  validate_axes: bool = True):
 
@@ -161,6 +177,7 @@ class FrictionLines:
         self.r_tip = r_tip
         self.rho_ref = rho_ref
         self.rpm = rpm
+        self.v_ref = v_ref
         self.c_ref = c_ref
         self.span_axis = span_axis
         self.chord_axis = chord_axis
@@ -272,23 +289,24 @@ class FrictionLines:
     def _q_ref(self, surface: str):
 
         '''
-        Local dynamic pressure q_ref = 0.5 * rho_ref * (omega * r)^2 at
-        every surfel, r being this surfel's own radius (_radius()) - see
-        "Cf normalization" in the class docstring.
+        Reference dynamic pressure q_ref at every surfel - see
+        bladeprocessor._dynamics.dynamic_pressure() for the rpm (local,
+        0.5*rho_ref*(omega*r)^2, r from _radius()) vs. v_ref (uniform,
+        0.5*rho_ref*v_ref^2) dispatch, and "Cf normalization" in the
+        class docstring.
 
-        WARNING: q_ref -> 0 as r -> 0, so Cf blows up near the rotation
-        axis. Some faces (e.g. this project's "Rotor::Default-Segment")
-        include a bit of hub/bore geometry very close to r=0 - exclude it
-        before computing Cf over a full, unrestricted selection (e.g. via
-        span_min/span_max in friction_lines(), or keep radii away from ~0
-        in cf_at_radii(), which already only ever looks at thin bands
-        around radii you choose).
+        WARNING (rpm branch only): q_ref -> 0 as r -> 0, so Cf blows up
+        near the rotation axis. Some faces (e.g. this project's
+        "Rotor::Default-Segment") include a bit of hub/bore geometry
+        very close to r=0 - exclude it before computing Cf over a full,
+        unrestricted selection (e.g. via span_min/span_max in
+        friction_lines(), or keep radii away from ~0 in cf_at_radii(),
+        which already only ever looks at thin bands around radii you
+        choose). Doesn't apply to the v_ref branch, which is uniform.
         '''
 
-        omega = self.rpm * 2 * np.pi / 60
         r = self._radius(surface)
-
-        return 0.5 * self.rho_ref * (omega * r) ** 2
+        return dynamic_pressure(self.rho_ref, r, rpm=self.rpm, v_ref=self.v_ref)
 
     def _span_chord(self, surface: str):
 
@@ -455,8 +473,8 @@ class FrictionLines:
         np.ndarray, shape (n_points,)
         '''
 
-        if self.rho_ref is None or self.rpm is None:
-            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cf.")
+        if self.rho_ref is None or (self.rpm is None and self.v_ref is None):
+            raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to compute Cf.")
 
         q_ref = self._q_ref(surface)
 
@@ -497,8 +515,8 @@ class FrictionLines:
         np.ndarray, shape (n_frames, n_points)
         '''
 
-        if self.rho_ref is None or self.rpm is None:
-            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cf.")
+        if self.rho_ref is None or (self.rpm is None and self.v_ref is None):
+            raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to compute Cf.")
 
         q_ref = self._q_ref(surface)
         tau_all = self._wall_shear_all_frames(surface)  # (n_frames, n_points, 3)
@@ -846,6 +864,234 @@ class FrictionLines:
 
         ax.set_xlabel(r'$x/c$ [-]')
         ax.set_ylabel(f'{cf_label} [-]')
+        ax.grid(True)
+        ax.legend()
+        fig.tight_layout()
+
+        if savepath:
+            fig.savefig(savepath, dpi=dpi)
+
+        return fig, ax
+
+    def _axial_tangential(self, surface: str, strut_azimuth_deg: float):
+
+        '''
+        Raw (axial, tangential) position for every surfel on `surface`,
+        in the LOCAL cross-sectional plane of a CYLINDRICAL object (a
+        beam/strut) whose own long axis is assumed RADIAL - perpendicular
+        to the rotor's own rotation axis, extending outward at a fixed
+        azimuth strut_azimuth_deg (bladeprocessor._azimuth.azimuth_deg
+        convention - same angle as this instance's own azimuth_center_deg,
+        if that was used to isolate this one strut at load time on a file
+        with more than one, e.g. a "diametral" two-strut case).
+
+        Use this (and cf_at_circumference()/plot_cf_circumference() built
+        on it) instead of cf_at_radii() whenever surface_split()'s Upper/
+        Lower split isn't physically meaningful - a true circular
+        cross-section has no privileged pressure/suction side, unlike an
+        airfoil (confirmed on this project's own radial-strut case: the
+        normal-sign split there landed at ~50/50 everywhere, vs. an
+        airfoil's uneven suction/pressure areas - see class docstring).
+
+        axial: position along the rotor's own axis_direction - this IS
+        the strut's own local cross-section "vertical" coordinate, since
+        at radial position r the strut's cross-section sits in the plane
+        perpendicular to axis_direction, and (confirmed empirically on a
+        real 14mm-diameter radial strut) the strut's actual centerline
+        barely drifts in this direction as r varies - a flat-plane
+        approximation, not an exact unwrap, but validated: a narrow
+        radius band's recovered local cross-section radius came out
+        circular to within ~3% std of its mean using exactly this
+        (axial, tangential) construction.
+        tangential: position along the LOCAL tangential direction,
+        perpendicular to both axis_direction and the strut's own radial
+        direction at strut_azimuth_deg - the strut's own "sideways"
+        coordinate.
+
+        Returns
+        -------
+        axial, tangential : np.ndarray, shape (n_points,) each
+        '''
+
+        positions = self.surfaces[surface]['positions']
+        rel = positions - self.axis_origin
+        along = rel @ self.axis_direction
+        radial_vec = rel - along[:, None] * self.axis_direction
+
+        # Same e1/e2 construction as bladeprocessor._azimuth.azimuth_deg,
+        # so strut_azimuth_deg means the same thing here as it does for
+        # azimuth_center_deg/azimuth_tol_deg elsewhere in this class.
+        reference = np.array([1.0, 0.0, 0.0])
+        if abs(np.dot(reference, self.axis_direction)) > 0.9:
+            reference = np.array([0.0, 1.0, 0.0])
+        e1 = reference - np.dot(reference, self.axis_direction) * self.axis_direction
+        e1 /= np.linalg.norm(e1)
+        e2 = np.cross(self.axis_direction, e1)
+
+        theta0 = np.radians(strut_azimuth_deg)
+        u_tangential = -np.sin(theta0) * e1 + np.cos(theta0) * e2
+
+        return along, radial_vec @ u_tangential
+
+    def cf_at_circumference(self, radii, strut_azimuth_deg, surfaces=('Upper', 'Lower'), frame: int = None,
+                             component: str = None, stat: str = 'mean', tol: float = 0.0015,
+                             n_angle_bins: int = 150):
+
+        '''
+        Cf vs. local circumferential angle around a CYLINDRICAL object's
+        own axis, at each of several span positions (distance from the
+        rotor's own rotation axis - same "radius" cf_at_radii() uses,
+        just reinterpreted as "how far out along the strut" instead of
+        "blade radius") - the cylindrical-object counterpart to
+        cf_at_radii(), ready to plot via plot_cf_circumference(). See
+        _axial_tangential()'s docstring for the full geometric picture
+        and why this exists instead of an Upper/Lower split.
+
+        BOTH surfaces named in `surfaces` are pooled together before
+        binning (not kept as separate curves the way cf_at_radii() keeps
+        Upper/Lower distinct) - together they make up the WHOLE circle at
+        that span position. Pass surfaces=('Upper',) (or whatever this
+        file's single group is named) if this file wasn't converted with
+        surface_split=True at all - a plain, physically-arbitrary split
+        still works fine for a cylinder (it's just two halves of the same
+        circle), it just needs to be pooled back together here.
+
+        Each target radius's own (axial, tangential) mean is subtracted
+        before computing the angle - corrects for the strut's actual
+        centerline not sitting exactly on strut_azimuth_deg/axis_direction
+        at that band (a small, slowly-varying offset - see
+        _axial_tangential()), same role _span_chord()'s own per-surface
+        centering plays for cf_at_radii().
+
+        Parameters
+        ----------
+        radii : array-like of float
+            Target distances [m] from the rotor's rotation axis - same
+            units/meaning as cf_at_radii()'s own radii.
+        strut_azimuth_deg : float
+            See _axial_tangential().
+        tol : float
+            Half-width [m] of the band selected around each target radius.
+        n_angle_bins : int
+            Number of circumferential-angle bins (over the full
+            -180..180 deg range) to average Cf within - same role as
+            cf_at_radii()'s n_chord_bins.
+
+        Returns
+        -------
+        dict[float, tuple[np.ndarray, np.ndarray]]
+            radius -> (angle_deg, cf), both sorted by angle_deg (angle_deg
+            in (-180, 180]).
+        '''
+
+        curves = {}
+
+        for r_target in radii:
+
+            angle_parts, cf_parts = [], []
+
+            for surface in surfaces:
+
+                r = self._radius(surface)
+                band = np.abs(r - r_target) < tol
+                if not np.any(band):
+                    continue
+
+                along, tangential = self._axial_tangential(surface, strut_azimuth_deg)
+                along_b = along[band] - along[band].mean()
+                tangential_b = tangential[band] - tangential[band].mean()
+
+                angle_parts.append(np.degrees(np.arctan2(tangential_b, along_b)))
+                cf_parts.append(self.cf(surface=surface, frame=frame, component=component, stat=stat)[band])
+
+            n_sel = sum(len(a) for a in angle_parts)
+            if n_sel < 10:
+                raise ValueError(
+                    f"Only {n_sel} points within {tol} m of r={r_target} across {surfaces} - "
+                    "widen tol, check r_target, or check surfaces."
+                )
+
+            angle_all = np.concatenate(angle_parts)
+            cf_all = np.concatenate(cf_parts)
+
+            bin_edges = np.linspace(-180, 180, n_angle_bins + 1)
+            bin_idx = np.clip(np.digitize(angle_all, bin_edges) - 1, 0, n_angle_bins - 1)
+            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+            cf_mean = np.full(n_angle_bins, np.nan)
+            counts = np.bincount(bin_idx, minlength=n_angle_bins)
+            sums = np.bincount(bin_idx, weights=cf_all, minlength=n_angle_bins)
+            has_data = counts > 0
+            cf_mean[has_data] = sums[has_data] / counts[has_data]
+
+            curves[r_target] = (bin_centers[has_data], cf_mean[has_data])
+
+        return curves
+
+    def plot_cf_circumference(self, radii, strut_azimuth_deg, surfaces=('Upper', 'Lower'), frame: int = None,
+                               component: str = None, stat: str = 'mean', tol: float = 0.0015,
+                               n_angle_bins: int = 150, cmap: str = 'cividis', normalize: bool = False,
+                               ax=None, savepath: str = None, dpi: int = 600):
+
+        '''
+        Plot Cf vs. local circumferential angle for several span
+        positions on one set of axes - the cylindrical-object (beam/
+        strut) counterpart to plot_cf_radii(). See
+        cf_at_circumference() for what the axes mean, why this exists
+        instead of an Upper/Lower split, and what strut_azimuth_deg/
+        surfaces do.
+
+        component : None, 'chordwise', or 'spanwise' - see cf(). Note
+        these signed components only mean something physically if
+        chord_axis/span_axis were themselves set to something meaningful
+        for this object (e.g. a known flow direction) - component=None
+        (magnitude) is the natural default for a cylindrical object,
+        which has no chord in the airfoil sense.
+
+        normalize : bool
+            If True, the legend reports each curve's r/R (needs r_tip)
+            instead of the raw physical radius in meters.
+
+        Returns
+        -------
+        (fig, ax)
+        '''
+
+        if normalize and self.r_tip is None:
+            raise ValueError("r_tip must be set (in __init__) to use normalize=True.")
+
+        curves = self.cf_at_circumference(radii, strut_azimuth_deg, surfaces=surfaces, frame=frame,
+                                           component=component, stat=stat, tol=tol,
+                                           n_angle_bins=n_angle_bins)
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(8, 6))
+        else:
+            fig = ax.figure
+
+        colors = plt.cm.get_cmap(cmap)(np.linspace(0, 1, len(curves)))
+
+        for color, (r_target, (angle, cf_curve)) in zip(colors, curves.items()):
+            label = f'$r/R$ = {r_target / self.r_tip:.3f}' if normalize else f'r = {r_target:g} m'
+            ax.plot(angle, cf_curve, color=color, label=label)
+
+        if component is not None:
+            ax.axhline(0, color='k', linewidth=0.8, zorder=0)
+
+        subscripts = []
+        if component == 'chordwise':
+            subscripts.append('c')
+        elif component == 'spanwise':
+            subscripts.append('s')
+        if stat == 'rms':
+            subscripts.append('rms')
+        elif stat == 'raw_rms':
+            subscripts.append(r'raw\_rms')
+        cf_label = f"$C_{{f,{','.join(subscripts)}}}$" if subscripts else r'$C_f$'
+
+        ax.set_xlabel(r'$\theta$ [deg]')
+        ax.set_ylabel(f'{cf_label} [-]')
+        ax.set_xlim(-180, 180)
         ax.grid(True)
         ax.legend()
         fig.tight_layout()
@@ -1303,8 +1549,8 @@ class FrictionLines:
             crossing).
         '''
 
-        if self.rho_ref is None or self.rpm is None:
-            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cf.")
+        if self.rho_ref is None or (self.rpm is None and self.v_ref is None):
+            raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to compute Cf.")
 
         span, chord = self._span_chord(surface)
         r = self._radius(surface)
@@ -1582,8 +1828,8 @@ class FrictionLines:
             separation_line()'s Returns for what that means).
         '''
 
-        if self.rho_ref is None or self.rpm is None:
-            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cf.")
+        if self.rho_ref is None or (self.rpm is None and self.v_ref is None):
+            raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to compute Cf.")
 
         span, chord = self._span_chord(surface)
         r = self._radius(surface)
@@ -1844,8 +2090,8 @@ class FrictionLines:
             ('node', 'saddle', or 'focus').
         '''
 
-        if self.rho_ref is None or self.rpm is None:
-            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cf.")
+        if self.rho_ref is None or (self.rpm is None and self.v_ref is None):
+            raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to compute Cf.")
 
         span, chord = self._span_chord(surface)
         r = self._radius(surface)
@@ -2069,7 +2315,8 @@ class FrictionLines:
 
     def friction_lines(self, surface=('Upper', 'Lower'), frame: int = None, stat: str = 'mean',
                         span_min: float = None, span_max: float = None, cf_clip_percentile: float = 99,
-                        n_arrows: int = 2000, marker_size: float = 1, cmap: str = 'cividis',
+                        show_quiver: bool = True, n_arrows: int = 2000, marker_size: float = 1,
+                        interpolate: bool = False, grid_resolution: int = 300, cmap: str = 'cividis',
                         cbar_label: str = None, show_separation_line: bool = False, separation_line_kwargs: dict = None,
                         show_migration_line: bool = False, migration_line_kwargs: dict = None,
                         show_critical_points: bool = False, critical_points_kwargs: dict = None,
@@ -2151,11 +2398,50 @@ class FrictionLines:
             show_migration_line/show_critical_points) switch to the same
             r/R, chord/c_ref coordinates automatically - no separate flag
             needed on them.
+        show_quiver : bool
+            If False, skip the wall-shear-direction quiver entirely -
+            just the Cf magnitude color field. Default True (unchanged
+            behavior). Turn this off for a plain Cf map, or when
+            n_arrows is still too dense to read even after lowering it
+            (e.g. on a physically small part - a rotor blade and a small
+            stator vane/strut don't need the same n_arrows for a
+            readable arrow spacing, since the same count is spread over
+            a much smaller area).
         n_arrows : int
             Number of surfels randomly sampled for the direction quiver -
-            one arrow per surfel would be illegible.
+            one arrow per surfel would be illegible. Only used if
+            show_quiver is True. Scale this down from the default 2000
+            for a physically small part (see show_quiver above) - e.g. a
+            part with 1/10th a typical blade's planform area wants
+            roughly 1/10th the arrows for the same visual spacing.
         marker_size : float
-            Scatter marker size (matplotlib's `s`, points^2).
+            Scatter marker size (matplotlib's `s`, points^2). Only used
+            when interpolate=False.
+        interpolate : bool
+            If True, grid Cf onto a regular (radius, chord) mesh via
+            scipy.interpolate.griddata (linear, NaN - rendered
+            transparent - outside the convex hull of the actual surfels,
+            so this never extrapolates past the real part's edge) and
+            render with pcolormesh instead of a raw scatter. Off by
+            default - matches this method's original, deliberate choice
+            (see docstring above) for a real rotor blade's tens of
+            millions of surfels, where a raw scatter already reads as
+            continuous and gridding that many points was both slow and
+            introduced artifacts. That tradeoff flips on a MUCH smaller
+            selection (e.g. one stator vane/strut, tens of thousands of
+            points, not tens of millions) - confirmed: here gridding is
+            fast (no Delaunay-over-10M-points cost) and the raw scatter
+            visibly under-resolves, especially across a short chord.
+            Turn this on for a case like that; leave it off (default) for
+            anything resembling the original dense-rotor-mesh case this
+            method was built for. The quiver (if shown) still samples
+            from the ORIGINAL scattered points, not the grid - gridding
+            only affects the color field.
+        grid_resolution : int
+            Number of grid points along the LONGER of the two axes
+            (radius or chord) when interpolate=True - the shorter axis
+            gets proportionally fewer, so grid cells stay roughly square
+            rather than badly distorted. Only used if interpolate=True.
         show_separation_line : bool
             If True, compute separation_line() for each surface plotted
             and overlay its crossings (see that method and
@@ -2191,8 +2477,8 @@ class FrictionLines:
             a list of Axes in the same order as surface.
         '''
 
-        if self.rho_ref is None or self.rpm is None:
-            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cf.")
+        if self.rho_ref is None or (self.rpm is None and self.v_ref is None):
+            raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to compute Cf.")
         if normalize and (self.r_tip is None or self.c_ref is None):
             raise ValueError("r_tip and c_ref must both be set (in __init__) to use normalize=True.")
         show_span_axis = show_span_axis and not normalize
@@ -2234,15 +2520,20 @@ class FrictionLines:
             vmax = np.percentile(cf_sel, cf_clip_percentile)
             cf_clipped = np.clip(cf_sel, 0, vmax)
 
-            sc = ax.scatter(radius_sel, chord_sel, c=cf_clipped, s=marker_size, cmap=cmap, vmin=0, vmax=vmax)
+            if interpolate:
+                Xg, Yg, Zg = grid_scatter(radius_sel, chord_sel, cf_clipped, grid_resolution=grid_resolution)
+                sc = ax.pcolormesh(Xg, Yg, Zg, cmap=cmap, vmin=0, vmax=vmax, shading='auto')
+            else:
+                sc = ax.scatter(radius_sel, chord_sel, c=cf_clipped, s=marker_size, cmap=cmap, vmin=0, vmax=vmax)
             cbar = fig.colorbar(sc, ax=ax, pad=0.02)
             cbar.set_label(cbar_label)
 
-            idx = rng.choice(len(radius_sel), size=min(n_arrows, len(radius_sel)), replace=False)
-            mag = np.hypot(tau_span_sel[idx], tau_chord_sel[idx])
-            mag[mag == 0] = 1
-            ax.quiver(radius_sel[idx], chord_sel[idx], tau_span_sel[idx] / mag, tau_chord_sel[idx] / mag,
-                      color='white', scale=60, width=0.002, alpha=0.8)
+            if show_quiver:
+                idx = rng.choice(len(radius_sel), size=min(n_arrows, len(radius_sel)), replace=False)
+                mag = np.hypot(tau_span_sel[idx], tau_chord_sel[idx])
+                mag[mag == 0] = 1
+                ax.quiver(radius_sel[idx], chord_sel[idx], tau_span_sel[idx] / mag, tau_chord_sel[idx] / mag,
+                          color='white', scale=60, width=0.002, alpha=0.8)
 
             if show_span_axis:
                 self._add_span_secondary_axis(ax, radius_sel, span_sel)

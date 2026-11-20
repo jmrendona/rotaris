@@ -1,0 +1,61 @@
+# Config file for Ducted ISAE4 in hover
+
+master_path: /scratch/jmrendon/EDAT-McGill/4e-5_6000rpm
+case: EDAT-McGill_stator
+
+files:
+  inst_force: EDAT-McGill_inst-forces_stator.h5
+  inst_pressure: EDAT-McGill_inst-pressure_stator.h5
+
+object_type: stator
+
+# Which surface skin_friction_manager.py operates on - 'Upper' or
+# 'Lower'. Every output filename folds in this value (lowercased), so
+# switching sides never overwrites the other side's images.
+surface: Lower
+
+rotor:
+  r_tip: 0.075
+  v_ref: 47.12
+  rho_ref: 1.22523
+  rpm: 6000
+  pref: 101325
+  c_ref: 0.0125 # reference chord [m], used only when normalize is true below
+
+# True if NDA is applied
+normalize: false
+
+# Grid friction_lines()/plot_variable_surface() onto a regular mesh
+# (scipy.interpolate.griddata) before rendering, instead of a raw
+# scatter - worth it here (this vane's mesh is far sparser than a full
+# rotor blade's, so a raw scatter visibly under-resolves); leave False
+# for a rotor-blade-density case, where it isn't needed and is slower.
+interpolate: true
+
+# Raw Cartesian axis (0=X, 1=Y, 2=Z) for each blade direction (this
+# project's original isolated-rotor convention).
+axes:
+  span: 0
+  chord: 2
+  thickness: 1
+  skip_validation: true # set True if you have a highly swept blade
+
+crop:
+  span_min: 0.020
+  span_max: 0.076    # excludes a shroud-like feature right past this vane's real tip
+                      # (~0.078-0.080m) - without this, a radius/chord map shows a gap
+                      # then a disconnected island of points past the true tip
+  azimuth_center_deg: 0.0
+  azimuth_tol_deg: 5.0
+
+friction:
+  reverse_chord: true
+  radii: [0.030, 0.040, 0.050, 0.060, 0.070]
+
+convergence:
+  dt_forces: 0.0000554
+  dt_pressure: 0.00005 
+
+blade_figsize: null # null for ISAE2 case
+
+frame_loop_step: 90

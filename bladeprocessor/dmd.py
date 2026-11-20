@@ -48,6 +48,8 @@ clearly nonzero).
 import numpy as np
 import matplotlib.pyplot as plt
 
+from bladeprocessor._grid_field import grid_scatter
+
 plt.rcParams.update({
     "text.usetex": True,
     "font.family": "serif",
@@ -400,7 +402,8 @@ def plot_dmd_reconstruction(pod_result: dict, dmd_result: dict, mode_index: int 
 
 
 def plot_dmd_mode(radius, chord, dmd_result: dict, mode_index: int = 0, part: str = 'real',
-                   marker_size: float = 1, value_clip_percentile: float = 99, unit_label: str = None,
+                   marker_size: float = 1, interpolate: bool = False, grid_resolution: int = 300,
+                   value_clip_percentile: float = 99, unit_label: str = None,
                    figsize: tuple = None, ax=None, savepath: str = None, dpi: int = 600,
                    radius_full=None, chord_full=None, background_color: str = '0.85'):
 
@@ -422,6 +425,19 @@ def plot_dmd_mode(radius, chord, dmd_result: dict, mode_index: int = 0, part: st
         (always >= 0, no sign to preserve); 'phase' plots its local
         phase angle in degrees, a cyclic quantity best read with a
         cyclic colormap (defaults to 'twilight').
+
+    interpolate : bool
+        If True, grid the field onto a regular (radius, chord) mesh via
+        scipy.interpolate.griddata and render with pcolormesh instead of
+        a raw scatter - see plot_pod_mode()'s own interpolate docstring
+        for the full reasoning. part='phase' is handled correctly under
+        interpolation (its cos/sin components are gridded separately and
+        recombined via arctan2) rather than linearly interpolating the
+        raw angle, which would be wrong right at the +-180 deg wrap.
+    grid_resolution : int
+        Grid points along the LONGER of the two axes when
+        interpolate=True - see grid_scatter(). Only used if
+        interpolate=True.
 
     Returns
     -------
@@ -481,7 +497,23 @@ def plot_dmd_mode(radius, chord, dmd_result: dict, mode_index: int = 0, part: st
         field_clipped = np.clip(field, 0, vmax)
         vmin = 0.0
 
-    sc = ax.scatter(radius, chord, c=field_clipped, s=marker_size, cmap=cmap, vmin=vmin, vmax=vmax, zorder=2)
+    if interpolate:
+        if part == 'phase':
+            # Circular quantity - linearly interpolating the raw degree
+            # values would be wrong right at the +-180 deg wrap (e.g.
+            # averaging -179 and +179 would pull toward 0, not +-180).
+            # Gridding cos/sin separately and recombining via arctan2
+            # sidesteps the wrap entirely.
+            Xg, Yg, Cg = grid_scatter(radius, chord, np.cos(np.radians(field_clipped)),
+                                       grid_resolution=grid_resolution)
+            _, _, Sg = grid_scatter(radius, chord, np.sin(np.radians(field_clipped)),
+                                     grid_resolution=grid_resolution)
+            Zg = np.degrees(np.arctan2(Sg, Cg))
+        else:
+            Xg, Yg, Zg = grid_scatter(radius, chord, field_clipped, grid_resolution=grid_resolution)
+        sc = ax.pcolormesh(Xg, Yg, Zg, cmap=cmap, vmin=vmin, vmax=vmax, zorder=2)
+    else:
+        sc = ax.scatter(radius, chord, c=field_clipped, s=marker_size, cmap=cmap, vmin=vmin, vmax=vmax, zorder=2)
 
     freq = dmd_result['frequency'][mode_index]
     growth = dmd_result['growth_rate'][mode_index]

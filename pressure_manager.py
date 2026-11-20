@@ -35,6 +35,7 @@ inst_pressure_file = cfg.inst_pressure_file
 r_tip = cfg.r_tip
 rho_ref = cfg.rho_ref
 rpm = cfg.rpm
+v_ref = cfg.v_ref
 pref = cfg.pref
 c_ref = cfg.c_ref
 normalize = cfg.normalize
@@ -45,6 +46,8 @@ span_min = cfg.span_min
 azimuth_center_deg = cfg.azimuth_center_deg
 azimuth_tol_deg = cfg.azimuth_tol_deg
 reverse_chord = cfg.reverse_chord
+interpolate = cfg.interpolate
+surface = cfg.surface
 radii = cfg.radii
 dt = cfg.dt_pressure
 blade_figsize = cfg.blade_figsize
@@ -85,20 +88,20 @@ print(40*'-')
 print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_pressure_file))
 sv_pressure_inst = SurfaceVariable(
   os.path.join(master_path, inst_pressure_file),
-  r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, pref=pref, c_ref=c_ref,
+  r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, v_ref=v_ref, pref=pref, c_ref=c_ref,
   span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
   azimuth_center_deg=azimuth_center_deg, azimuth_tol_deg=azimuth_tol_deg,
 )
 
 # # Raw access to any stored variable - instantaneous, mean, or rms/raw_rms:
-#yplus_mean = sv.variable('y+', surface='Upper', frame=None, stat='mean')
-#yplus_frame0 = sv.variable('y+', surface='Upper', frame=0)  # stat ignored once frame is set
+#yplus_mean = sv.variable('y+', surface=surface, frame=None, stat='mean')
+#yplus_frame0 = sv.variable('y+', surface=surface, frame=0)  # stat ignored once frame is set
 
 # # Cp (same LOCAL q_ref normalization as FrictionLines.cf() - see README.md's
 # # "Equations" section), one frame, the average, or its RMS fluctuation:
-#cp_mean = sv.cp(surface='Upper', frame=None, stat='mean')
-#cp_frame0 = sv.cp(surface='Upper', frame=0)
-#cp_rms = sv.cp(surface='Upper', frame=None, stat='rms')
+#cp_mean = sv.cp(surface=surface, frame=None, stat='mean')
+#cp_frame0 = sv.cp(surface=surface, frame=0)
+#cp_rms = sv.cp(surface=surface, frame=None, stat='rms')
 
 # # ------------- Convergence checking on pressure (see README.md) ------------- #
 
@@ -116,10 +119,10 @@ sv_pressure_inst = SurfaceVariable(
 #    # array first, which OOM'd on a real DNS-resolution case (a (3674,
 #    # 84898396) float32 array is 1.13 TiB; the spatial-mean result itself
 #    # is only one scalar per frame).
-#    p_series = sv_pressure_inst.cp_spatial_mean_time_series(surface='Upper')[:-2]  # drop corrupted last frame(s)
+#    p_series = sv_pressure_inst.cp_spatial_mean_time_series(surface=surface)[:-2]  # drop corrupted last frame(s)
 #    p_ylabel, p_label = '$C_p$ [-]', '$C_p$'
 # else:
-#    p_series = sv_pressure_inst.variable_spatial_mean_time_series('static_pressure', surface='Upper')[:-2]  # drop corrupted last frame(s)
+#    p_series = sv_pressure_inst.variable_spatial_mean_time_series('static_pressure', surface=surface)[:-2]  # drop corrupted last frame(s)
 #    p_ylabel, p_label = 'Pressure [Pa]', 'Pressure'
 
 # print(40*'-')
@@ -181,7 +184,7 @@ sv_pressure_inst = SurfaceVariable(
 #       print(40*'-')
 #       print('Plotting cumulative mean+variance of pressure at a single point near the tip')
 #       p_point_series, p_point_info = sv_pressure_inst.variable_time_series_at_point(
-#          'static_pressure', span_pct=span, chord_pct=chord, surface='Upper')  # drop corrupted last frame(s)
+#          'static_pressure', span_pct=span, chord_pct=chord, surface=surface)  # drop corrupted last frame(s)
 #       p_point_series = p_point_series[:-2]
 
 #       print('Point actually used: ', p_point_info)
@@ -256,20 +259,22 @@ sv_pressure_inst = SurfaceVariable(
 # print('Plotting -Cp surface scatter, average over all frames')
 # sv_pressure_inst.plot_variable_surface(
 #    lambda s: -sv_pressure_inst.cp(surface=s, stat='mean'),
-#    cbar_label='-Cp', span_min=span_min, surface='Upper',
+#    cbar_label='-Cp', span_min=span_min, surface=surface,
+#    interpolate=interpolate,
 #    figsize=blade_figsize,
 #    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cp/avg/cp_surface_avg_upper_{case}.png'),
+#    savepath=os.path.join(master_path, f'images/cp/avg/cp_surface_avg_{surface.lower()}_{case}.png'),
 # )
 
 # print(40*'-')
 # print('Plotting -Cp surface scatter rms value')
 # sv_pressure_inst.plot_variable_surface(
 # lambda s: -sv_pressure_inst.cp(surface=s, stat='rms'),
-# cbar_label='-Cp', span_min=span_min, surface='Upper',
+# cbar_label='-Cp', span_min=span_min, surface=surface,
+# interpolate=interpolate,
 # figsize=blade_figsize,
 # normalize=normalize,
-# savepath=os.path.join(master_path, f'images/cp/rms/cp_surface_rms_upper_{case}.png'),
+# savepath=os.path.join(master_path, f'images/cp/rms/cp_surface_rms_{surface.lower()}_{case}.png'),
 # )
 
 # for frame in range(0, sv_pressure_inst.n_frames, frame_loop_step):
@@ -277,10 +282,11 @@ sv_pressure_inst = SurfaceVariable(
 #   print('Plotting -Cp surface scatter, instantaneous frame ', frame)
 #   sv_pressure_inst.plot_variable_surface(
 #     lambda s: -sv_pressure_inst.cp(surface=s, frame=frame),
-#     cbar_label='-Cp', span_min=span_min, surface='Upper',
+#     cbar_label='-Cp', span_min=span_min, surface=surface,
+#     interpolate=interpolate,
 #     figsize=blade_figsize,
 #     normalize=normalize,
-#     savepath=os.path.join(master_path, f'images/cp/inst/cp_surface_upper_frame{frame:03d}_{case}.png'),
+#     savepath=os.path.join(master_path, f'images/cp/inst/cp_surface_{surface.lower()}_frame{frame:03d}_{case}.png'),
 #   )
 
 # # ------------- Computation with instatenous files containing pressure ------------- #
@@ -292,10 +298,11 @@ sv_pressure_inst = SurfaceVariable(
 #   print(40*'-')
 #   print('Plotting pressure fluctuation, instantaneous frame ', frame)
 #   sv_pressure_inst.plot_pressure_fluctuation(
-#       frame, span_min=span_min, surface='Upper',
+#       frame, span_min=span_min, surface=surface,
+#       interpolate=interpolate,
 #       figsize=blade_figsize,
 #       normalize=normalize,
-#       savepath=os.path.join(master_path, f'images/pfluct/p_fluct_upper_frame{frame:03d}_{case}.png'),
+#       savepath=os.path.join(master_path, f'images/pfluct/p_fluct_{surface.lower()}_frame{frame:03d}_{case}.png'),
 #    )
 
 # Prms needs no new method - it's already variable(stat='rms'). Normalized, this divides by
@@ -314,10 +321,11 @@ else:
    prms_cbar_label = '$P_{rms}$ [Pa]'
 sv_pressure_inst.plot_variable_surface(
    prms_get_values,
-   cbar_label=prms_cbar_label, span_min=span_min, surface='Upper',
+   cbar_label=prms_cbar_label, span_min=span_min, surface=surface,
+   interpolate=interpolate,
    figsize=blade_figsize,
    normalize=normalize,
-   savepath=os.path.join(master_path, f'images/pfluct/p_rms_surface_upper_{case}.png'),
+   savepath=os.path.join(master_path, f'images/pfluct/p_rms_surface_{surface.lower()}_{case}.png'),
 )
 
 # Point time trace + Welch periodogram (wall pressure fluctuations at one
@@ -333,7 +341,7 @@ sv_pressure_inst.plot_variable_surface(
 #     print(40*'-')
 #     print(f'Plotting pressure time trace at span {span}% and chord {chord}%')
 #     sv_pressure_inst.plot_timetrace(
-#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper',
+#       'static_pressure', span_pct=span, chord_pct=chord, surface=surface,
 #       ylabel='$C_p$ [-]' if normalize else 'Static pressure [Pa]', dt=dt,
 #       normalize=normalize,
 #       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_timetrace_s{span:03d}_c{chord:03d}_{case}.png'),
@@ -341,14 +349,14 @@ sv_pressure_inst.plot_variable_surface(
 #     print(40*'-')
 #     print(f'Plotting pressure periodogram at span {span}% and chord {chord}%')
 #     sv_pressure_inst.plot_periodogram(
-#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
+#       'static_pressure', span_pct=span, chord_pct=chord, surface=surface, dt=dt,
 #       normalize=normalize, db=not normalize,
 #       savepath=os.path.join(master_path, f'images/pfluct/spectra/p_periodogram_s{span:03d}_c{chord:03d}_{case}.png'),
 #     )
 #     print(40*'-')
 #     print(f'Exporting pressure time trace at span {span}% and chord {chord}%')
 #     sv_pressure_inst.export_timetrace(
-#       'static_pressure', span_pct=span, chord_pct=chord, surface='Upper', dt=dt,
+#       'static_pressure', span_pct=span, chord_pct=chord, surface=surface, dt=dt,
 #       savepath=os.path.join(master_path, f'data/pfluct/p_timetrace_s{span:03d}_c{chord:03d}_{case}.h5'),
 #     )
 #     plt.close('all')
@@ -379,6 +387,7 @@ sv_pressure_inst.plot_variable_surface(
 # sv_pressure.plot_variable_surface(
 #    lambda s: -sv_pressure.cp(surface=s, stat='mean'),
 #    cbar_label='-Cp', span_min=span_min, show_stagnation_line=True,
+#    interpolate=interpolate,
 #    figsize=blade_figsize,
 #    savepath=os.path.join(master_path, f'images/cp/cp_surface_with_stagnation_{case}.png'),
 # )
@@ -438,10 +447,10 @@ sv_pressure_inst.plot_variable_surface(
 # # otherwise, same spirit as pod_span_min/pod_span_max/pod_chord_min/
 # # pod_chord_max above - an explicit, deliberate reduction, not a silent
 # # default.
-# pod_point_stride = 10  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
+# pod_point_stride = 1  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
 
-# span_sv, chord_sv = sv_pressure_inst._span_chord('Upper')
-# radius_sv = sv_pressure_inst._radius('Upper')
+# span_sv, chord_sv = sv_pressure_inst._span_chord(surface)
+# radius_sv = sv_pressure_inst._radius(surface)
 # # radius_sv (TRUE physical radius, [0, r_tip]) - NOT span_sv (the raw,
 # # CENTERED Cartesian span coordinate _span_chord() returns, roughly
 # # [-half_extent, +half_extent]) - pod_span_min/pod_span_max are fractions
@@ -465,7 +474,7 @@ sv_pressure_inst.plot_variable_surface(
 # # throws that sign away). Fixed now at the SOURCE instead of here:
 # # sv_pressure_inst was constructed above with azimuth_center_deg/
 # # azimuth_tol_deg (from this case's own yaml), which crops
-# # sv_pressure_inst.positions['Upper'] - and therefore radius_sv/chord_sv
+# # sv_pressure_inst.positions[surface] - and therefore radius_sv/chord_sv
 # # above, which both read from it - to one blade BEFORE this pod_region
 # # mask ever runs. No further change needed here, but don't drop the
 # # case yaml's azimuth_center_deg/azimuth_tol_deg thinking this pod_region
@@ -494,18 +503,18 @@ sv_pressure_inst.plot_variable_surface(
 # # SurfaceVariable._area()'s docstring), so fall back to an unweighted
 # # POD on this file rather than crash; the forces-branch Cf POD in
 # # skin_friction_manager.py is unaffected and stays area-weighted.
-# if sv_pressure_inst.areas['Upper'] is not None:
-#    pod_weights = sv_pressure_inst._area('Upper')[pod_region]
+# if sv_pressure_inst.areas[surface] is not None:
+#    pod_weights = sv_pressure_inst._area(surface)[pod_region]
 # else:
 #    print(f"No per-surfel Area in '{inst_pressure_file}' (pressure-branch file) - running an UNWEIGHTED POD.")
 #    pod_weights = None
 
 # print(40*'-')
-# print(f'Running POD on {p_label}, Upper surface, {int(pod_region.sum())} points in the selected region')
+# print(f'Running POD on {p_label}, {surface} surface, {int(pod_region.sum())} points in the selected region')
 # if normalize:
-#    cp_pod_data = sv_pressure_inst.cp_time_series_region(surface='Upper', region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
+#    cp_pod_data = sv_pressure_inst.cp_time_series_region(surface=surface, region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
 # else:
-#    cp_pod_data = sv_pressure_inst.variable_time_series_region('static_pressure', surface='Upper', region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
+#    cp_pod_data = sv_pressure_inst.variable_time_series_region('static_pressure', surface=surface, region_mask=pod_region)[:-2]  # drop corrupted last frame(s)
 # cp_pod_result = pod(cp_pod_data, n_modes=100, weights=pod_weights)
 # print(f'{p_label} POD energy fractions (first 5): ', cp_pod_result['energy_fraction'][:5])
 
@@ -530,6 +539,7 @@ sv_pressure_inst.plot_variable_surface(
 #    plot_pod_mode(
 #       radius_sv[pod_region], chord_sv[pod_region], cp_pod_result, mode_index=m,
 #       unit_label=f'{p_label} mode amplitude [-]',
+#       interpolate=interpolate,
 #       figsize=blade_figsize,
 #       savepath=os.path.join(master_path, f'images/cp/pod/cp_pod_mode{m+1}_{case}.png'),
 #    )
@@ -605,6 +615,7 @@ sv_pressure_inst.plot_variable_surface(
 # plot_dmd_mode(
 #    radius_sv[pod_region], chord_sv[pod_region], cp_dmd_result, mode_index=0,
 #    unit_label=f'{p_label} DMD mode amplitude [-]',
+#    interpolate=interpolate,
 #    figsize=blade_figsize,
 #    savepath=os.path.join(master_path, f'images/cp/pod/cp_dmd_mode1_{case}.png'),
 # )

@@ -442,3 +442,147 @@ def plot_vs_angle_compare(phase_locked: dict, strips=(0, 4, 9),
             fig.savefig(savepath, dpi=dpi)
 
     return fig, axes
+
+
+def _check_consistent_radii(curves_by_case: dict, radii_list):
+
+    '''
+    Warns (does not raise) if any case is missing one of `radii_list`'s own target radii - every
+    case is expected to have been built by calling SurfaceVariable.at_radii()/
+    FrictionLines.cf_at_radii() with the SAME `radii` argument (see plot_radii_compare()'s own
+    docstring), so the dict keys should match exactly (they're the literal requested r_target
+    values, not a re-detected band center) - a mismatch here means a case was built with a
+    different `radii` list, not a small floating-point drift.
+    '''
+
+    for label, case_curves in curves_by_case.items():
+        missing = [r for r in radii_list if r not in case_curves]
+        if missing:
+            import warnings
+            warnings.warn(
+                f"Case '{label}' has no curve for radius target(s) {missing} (built with a "
+                "different `radii` list than the other cases?) - those will be skipped for this "
+                "case only."
+            )
+
+
+def plot_radii_compare(curves_by_case: dict, ylabel: str, cmap: str = 'cividis',
+                        marker_only_cases=(), total_width_in: float = 6.3, total_height_in: float = 4.6,
+                        tick_fontsize: int = 14, label_fontsize: int = 15, legend_fontsize: int = 11,
+                        savepath: str = None, dpi: int = 600):
+
+    '''
+    Cp or ONE Cf component vs. local x/c at a handful of fixed radii, overlaid across several
+    SIMULATIONS on one panel - the cross-case counterpart to
+    SurfaceVariable.plot_at_radii()/plot_cp_radii() and FrictionLines.plot_cf_radii() (which
+    compare RADII within one case). Unlike this module's own usual color=CASE convention
+    (plot_time_trace_compare()/plot_vs_angle_compare() - see module docstring for that rationale),
+    here COLOR encodes RADIUS and LINESTYLE encodes case: every radius-to-radius comparison is a
+    group of same-colored lines across cases, so reading "how do the cases differ at THIS radius"
+    only needs following one color, not cross-referencing a linestyle legend as well - confirmed
+    more readable in practice than the opposite mapping for this specific figure (unlike
+    plot_time_trace_compare()'s own noisy raw traces, these are smooth per-radius curves, so
+    radius is the natural grouping to scan visually, not case).
+
+    Call this ONCE PER PHYSICAL QUANTITY (Cp, Cf magnitude, Cf chordwise, Cf spanwise, ...) - it
+    does not know or assume which one it's plotting (same spirit as SurfaceVariable.plot_at_radii()'s
+    own get_values/ylabel split); build 4 separate `curves_by_case` dicts upstream (one per
+    quantity, see manager_comparison.py's own main_radii_compare()) and call this 4 times.
+
+    Parameters
+    ----------
+    curves_by_case : dict[str, dict[float, dict[str, tuple[np.ndarray, np.ndarray]]]]
+        {case_label: {radius: {surface: (xc, values)}}} - i.e., for EVERY case to compare,
+        either SurfaceVariable.at_radii(radii, ..., surface=('Upper', 'Lower'))'s own return
+        value AS-IS (Cp needs BOTH surfaces - a suction-side-only branch is not a physically
+        complete Cp-vs-x/c picture, confirmed directly: an Upper-only cross-case Cp plot looked
+        nothing like the matching single-case plot_cp_radii() reference, which always shows
+        both) or FrictionLines.cf_at_radii(radii, surface='Upper', ...)'s own (xc, values) wrapped
+        in a single-key {'Upper': (xc, values)} dict (Cf only ever needs Upper here - that one is
+        already single-surface). Every case MUST have been built with the SAME `radii` target
+        list (see _check_consistent_radii(), which warns rather than raises if a case is missing
+        one).
+    ylabel : str
+        e.g. r'$C_p$ [-]', r'$|C_f|$ [-]', r'$C_f$ (chordwise) [-]' - this function does not know
+        or assume which physical quantity is being compared.
+    marker_only_cases : iterable of str, optional
+        Case labels (a subset of curves_by_case's own keys) to render as DISCRETE MARKERS
+        (color=radius still, but no connecting line and no linestyle slot used) instead of a
+        line - for reference/validation data that isn't this project's own LBM simulations (e.g.
+        a digitized iLES/experimental Cp curve) and so shouldn't visually compete with the
+        smooth simulation lines for one of the 4 linestyle slots (and whose own point ORDER,
+        for digitized data, may not be reliably sortable/connectable as a single clean curve
+        anyway) - standard convention: lines for simulations, symbols for reference data.
+    cmap, total_width_in, total_height_in, tick_fontsize, label_fontsize : see
+        plot_time_trace_compare() - identical meaning here.
+    legend_fontsize : int
+        Smaller default (11) than the 2x2-grid functions' own 14 pt - this is a single-panel
+        figure with the legend drawn INSIDE the data axes (not its own dedicated grid cell, which
+        only the 2x2 multi-panel functions need - see module docstring's print-size note on why
+        THAT combination specifically needed a dedicated cell), so a smaller legend keeps it from
+        crowding the curves themselves.
+
+    Returns
+    -------
+    (fig, ax)
+    '''
+
+    if len(curves_by_case) == 0:
+        raise ValueError("curves_by_case is empty - need at least one case to plot.")
+
+    case_labels = list(curves_by_case.keys())
+    radii_list = sorted(next(iter(curves_by_case.values())).keys())
+    _check_consistent_radii(curves_by_case, radii_list)
+    radius_colors = _strip_colors(radii_list, cmap)
+
+    with plt.rc_context({
+        'text.usetex': True, 'font.family': 'serif', 'font.serif': ['Computer Modern'],
+        'axes.labelsize': label_fontsize, 'xtick.labelsize': tick_fontsize,
+        'ytick.labelsize': tick_fontsize, 'legend.fontsize': legend_fontsize,
+    }):
+
+        fig, ax = plt.subplots(figsize=(total_width_in, total_height_in))
+
+        line_case_labels = [c for c in case_labels if c not in marker_only_cases]
+        marker_case_labels = [c for c in case_labels if c in marker_only_cases]
+
+        for case_label in case_labels:
+            case_curves = curves_by_case[case_label]
+            is_marker = case_label in marker_only_cases
+            j = line_case_labels.index(case_label) if not is_marker else None
+            for i, r_target in enumerate(radii_list):
+                if r_target not in case_curves:
+                    continue
+                # Every surface at this radius (1 for Cf - Upper only; 2 for Cp - Upper AND
+                # Lower, see this function's own docstring) shares the SAME color (radius) and
+                # linestyle (case) - same "both surfaces, same color per radius" convention
+                # SurfaceVariable.plot_at_radii() itself uses for the single-case reference plot.
+                for xc, values in case_curves[r_target].values():
+                    if is_marker:
+                        ax.plot(xc, values, color=radius_colors[i], linestyle='none', marker='o',
+                                markersize=4, markerfacecolor='none', markeredgewidth=1.2, alpha=0.9)
+                    else:
+                        ax.plot(xc, values, color=radius_colors[i],
+                                linestyle=_LINESTYLES[j % len(_LINESTYLES)], linewidth=1.6, alpha=0.9)
+
+        ax.set_xlabel(r'$x/c$ [-]')
+        ax.set_ylabel(ylabel)
+        ax.grid(True, alpha=0.3, linewidth=0.5)
+        ax.tick_params(axis='both', labelsize=tick_fontsize)
+
+        radius_handles = [Line2D([0], [0], color=radius_colors[i], linewidth=2.2) for i in range(len(radii_list))]
+        line_case_handles = [Line2D([0], [0], color='black', linestyle=_LINESTYLES[j % len(_LINESTYLES)], linewidth=1.6)
+                              for j in range(len(line_case_labels))]
+        marker_case_handles = [Line2D([0], [0], color='black', linestyle='none', marker='o', markersize=5,
+                                      markerfacecolor='none', markeredgewidth=1.2)
+                                for _ in marker_case_labels]
+        ax.legend(radius_handles + line_case_handles + marker_case_handles,
+                  [f'$r$={r:.3f} m' for r in radii_list] + line_case_labels + marker_case_labels,
+                  fontsize=legend_fontsize, ncol=2, loc='best', framealpha=0.85)
+
+        fig.tight_layout()
+
+        if savepath:
+            fig.savefig(savepath, dpi=dpi)
+
+    return fig, ax

@@ -53,6 +53,7 @@ from scipy.optimize import curve_fit
 from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator, RegularGridInterpolator
 from scipy.spatial import Delaunay
 from matplotlib.colors import TwoSlopeNorm
+from matplotlib.lines import Line2D
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - registers the 'projection=3d' subplot kind
 
 from bladeprocessor.tip_vortex_tracking import cylindrical_velocity
@@ -60,6 +61,7 @@ from bladeprocessor.meridional_field import (
     load_scattered_xyzv, rotate_scattered_position, _build_scattered_grid_interp,
     scattered_cylindrical_components, griddata_scattered_field, plot_meridional_field,
 )
+from bladeprocessor.case_comparison import _LINESTYLES
 
 
 def rotate_scattered_vector(x: np.ndarray, z: np.ndarray, vx: np.ndarray, vy: np.ndarray, vz: np.ndarray,
@@ -503,8 +505,8 @@ def plot_core_extraction_mesh(pl_master_path: str, angle_deg: float, r_core: flo
     ax_mesh.plot(r_core * 1000, y_core * 1000, '+', color='red', markersize=14, markeredgewidth=2)
     cbar = fig_mesh.colorbar(tpc, ax=ax_mesh)
     cbar.set_label(variable_label)
-    ax_mesh.set_xlabel(r'$r$ [mm] (local, core-centered)')
-    ax_mesh.set_ylabel(r'$y$ [mm] (local, core-centered)')
+    ax_mesh.set_xlabel(r'$r$ [mm]')
+    ax_mesh.set_ylabel(r'$y$ [mm]')
     ax_mesh.set_aspect('equal')
     fig_mesh.tight_layout()
     if savepath_mesh:
@@ -562,22 +564,39 @@ def plot_core_extraction_mesh(pl_master_path: str, angle_deg: float, r_core: flo
 
 def wake_age_series(track_results):
     '''
-    Wake age [deg] for every row in `track_results`, defined relative to track_results[0]'s OWN
-    angle (the bootstrap/first-tracked angle, i.e. t=0) - NOT assumed to be any fixed number, so
-    this works regardless of which angle the sweep actually started from (see
-    track_vortex_core_sweep()'s own docstring for why the sweep direction/starting angle matters).
+    Wake age [deg] for every row in `track_results`. Prefers each row's own stored 'wake_age'
+    (track_vortex_core_sweep() stores this directly, since with n_sweeps > 1 the tracked ANGLE
+    repeats every lap - track_angles[0], 170deg say, is wake age 0 on lap 1 but wake age 180 on
+    lap 2 - so wake age can no longer be recovered from the angle value alone). Falls back to the
+    OLD bootstrap_angle-minus-angle formula for results that predate this field (a track_results
+    loaded from an older cached .npz, n_sweeps=1 always in practice there) - identical to the
+    stored value in that single-sweep case, so this fallback changes nothing for old results.
     '''
+    if 'wake_age' in track_results[0]:
+        return np.array([row['wake_age'] for row in track_results], dtype=float)
     bootstrap_angle = track_results[0]['angle']
     return np.array([bootstrap_angle - row['angle'] for row in track_results], dtype=float)
 
 
-def angle_at_wake_age(track_results, target_wake_age):
-    '''The tracked angle (a valid field_cache/track_results key) whose wake age is closest to
-    `target_wake_age` - e.g. angle_at_wake_age(track_results, 160) for Quaglia et al.'s own
-    "85%"-style late/most-developed wake age used in several figures below.'''
+def row_at_wake_age(track_results, target_wake_age):
+    '''The full track_results row whose wake age is closest to `target_wake_age` - e.g.
+    row_at_wake_age(track_results, 160) for Quaglia et al.'s own "85%"-style late/most-developed
+    wake age used in several figures below. Prefer this over angle_at_wake_age() whenever more
+    than just the angle is needed (e.g. row['index'] to look up field_cache, which - unlike the
+    row's own 'angle' - is guaranteed unique even with n_sweeps > 1, see
+    track_vortex_core_sweep()'s own docstring).'''
     wake_age = wake_age_series(track_results)
     idx = int(np.argmin(np.abs(wake_age - target_wake_age)))
-    return track_results[idx]['angle']
+    return track_results[idx]
+
+
+def angle_at_wake_age(track_results, target_wake_age):
+    '''The tracked angle whose wake age is closest to `target_wake_age` - thin wrapper around
+    row_at_wake_age() for callers that only need the angle (e.g. a raw-data file path, which
+    only ever depends on angle, reused as-is across sweep laps). Do NOT use this value as a
+    field_cache key with n_sweeps > 1 - it is no longer unique across laps; use
+    row_at_wake_age(...)['index'] for that instead.'''
+    return row_at_wake_age(track_results, target_wake_age)['angle']
 
 
 def plot_swirl_profile_fit(rho_values, v_swirl_mean, v_swirl_std, row, models, model_labels,
@@ -593,7 +612,7 @@ def plot_swirl_profile_fit(rho_values, v_swirl_mean, v_swirl_std, row, models, m
     for model_name, model in models.items():
         ax.plot(rho_fine * 1000, model(rho_fine, row[f'strength_{model_name}'], row[f'rc_{model_name}']),
                  model_styles[model_name], label=model_labels[model_name])
-    ax.set_xlabel(r'$\rho$ [mm]')
+    ax.set_xlabel(r'$\rho_r$ [mm]')
     ax.set_ylabel(r'$v_{\rm swirl}$ [m/s]')
     ax.legend()
     fig.tight_layout()
@@ -602,7 +621,7 @@ def plot_swirl_profile_fit(rho_values, v_swirl_mean, v_swirl_std, row, models, m
 
 
 def track_vortex_core_sweep(pl_master_path, track_angles, r_tip, rho_values, models, model_labels,
-                             model_styles, bootstrap_angle=None, search_radius=0.008,
+                             model_styles, n_sweeps=1, bootstrap_angle=None, search_radius=0.008,
                              bootstrap_search_radius=0.035, refine_n=121,
                              profile_plot_dir=None, results_savepath=None):
 
@@ -623,30 +642,56 @@ def track_vortex_core_sweep(pl_master_path, track_angles, r_tip, rho_values, mod
     half that ~0.2R spacing) for every step except the first, which has no previous cut to start
     from and uses `bootstrap_search_radius` instead.
 
+    n_sweeps > 1: CONTINUE tracking past the end of one lap through `track_angles` by simply
+    looping back to track_angles[0] again and carrying continuity straight through the wrap,
+    `n_sweeps` times in total - i.e. the full tracked sequence is
+    list(track_angles) * n_sweeps, with NO reset/re-bootstrap at each lap boundary. This works
+    for exactly the same reason continuity tracking works at all within one lap (see above): the
+    comb of multiple discrete, ~0.2R-apart, same-shaped vortex cores this phase-locked dataset
+    always shows doesn't stop at the edge of the angle range actually exported - the lap boundary
+    is just one more ~0.2R step in the same comb, from this tracker's point of view, so the SAME
+    tight `search_radius` that already follows one rung from cut to cut within a lap keeps
+    following the NEXT rung out (one blade-passage older) once the angle sequence wraps, rather
+    than jumping back to the rung the FIRST lap started on. Each row's own 'wake_age' keeps
+    increasing monotonically across every lap (unlike the raw 'angle', which repeats every lap -
+    see wake_age_series()'s own docstring), and 'index' (this row's own position in the full
+    sequence, 0-based) is what field_cache is actually keyed by - also unlike 'angle', which is
+    no longer a unique field_cache key once n_sweeps > 1 (the same angle file gets re-read, and
+    its own field re-gridded fresh - deliberately not reused from the previous lap's own
+    field_cache entry - at a different, continuity-tracked local window each time).
+
     Parameters
     ----------
     pl_master_path : str
-    track_angles : list of int/float - sweep order, see above.
+    track_angles : list of int/float - ONE lap's sweep order, see above - repeated `n_sweeps`
+        times internally if n_sweeps > 1.
     r_tip : float - only used to scale the bootstrap search window (0.6-1.05 R radially,
         -0.3-0.05 R axially - the tip-vortex region for this rotor/dataset).
     rho_values : np.ndarray - sample radii for azimuthal_profiles()/fit_vortex_model().
     models, model_labels, model_styles : dict, keyed by model name (e.g. 'lo', 'scully', ...) -
         models maps to the callables themselves (lamb_oseen, scully, ...).
+    n_sweeps : int - how many times to loop through `track_angles` continuously, see above.
+        1 (default) is the original single-lap behavior.
     bootstrap_angle : float, optional - defaults to track_angles[0].
     profile_plot_dir : str, optional - if given, saves a plot_swirl_profile_fit() sanity plot per
-        angle as swirl_profile_<NN>deg.png there.
-    results_savepath : str, optional - if given, saves track_results (+ rho_values + track_angles)
-        as an .npz there (reload with np.load(..., allow_pickle=True)['results']).
+        tracked step as swirl_profile_<NN>deg_lap<L>.png there (L = 0-based lap/sweep index) -
+        the lap suffix keeps later laps' own sanity plots at a repeated angle from silently
+        overwriting an earlier lap's own file.
+    results_savepath : str, optional - if given, saves track_results (+ rho_values + track_angles
+        + n_sweeps) as an .npz there (reload with np.load(..., allow_pickle=True)['results']).
 
     Returns
     -------
-    track_results : list of dict, one per angle in `track_angles`, each already containing
-        find_vortex_core()'s own keys plus 'angle', 'strength_<model>'/'rc_<model>'/'fit_ok_<model>'
-        for every model, 'rc_peak'/'strength_peak' (data-only, no profile shape assumed), and
-        'v_swirl_max'.
-    field_cache : dict keyed by angle - {'R', 'Y', 'v_r', 'v_a', 'v_t', 'core'} per angle, kept in
-        memory for the figures below that need the full gridded field again (not just
-        track_results' own scalar summaries).
+    track_results : list of dict, one per tracked step (len(track_angles) * n_sweeps total), each
+        already containing find_vortex_core()'s own keys plus 'angle' (repeats every lap - see
+        above), 'wake_age' (strictly increasing, see wake_age_series()), 'index' (this row's own
+        0-based position - the right field_cache key), 'lap' (0-based sweep index),
+        'strength_<model>'/'rc_<model>'/'fit_ok_<model>' for every model, 'rc_peak'/
+        'strength_peak' (data-only, no profile shape assumed), and 'v_swirl_max'.
+    field_cache : dict keyed by each row's own 'index' (NOT angle - see above) -
+        {'R', 'Y', 'v_r', 'v_a', 'v_t', 'core', 'angle'} per tracked step, kept in memory for the
+        figures below that need the full gridded field again (not just track_results' own scalar
+        summaries).
     '''
 
     bootstrap_angle = track_angles[0] if bootstrap_angle is None else bootstrap_angle
@@ -661,11 +706,17 @@ def track_vortex_core_sweep(pl_master_path, track_angles, r_tip, rho_values, mod
     r_center, y_center = float(r0[i_min]), float(y0[i_min])
     print(f"  bootstrap core: r={r_center:.5f} y={y_center:.5f}")
 
+    step_deg = abs(track_angles[1] - track_angles[0]) if len(track_angles) > 1 else 10.0
+    full_angles = list(track_angles) * n_sweeps
+
     track_results = []
     field_cache = {}
     first = True
 
-    for angle in track_angles:
+    for index, angle in enumerate(full_angles):
+        lap = index // len(track_angles)
+        wake_age = index * step_deg
+
         sr = bootstrap_search_radius if first else search_radius
         core = find_vortex_core(pl_master_path, float(angle), r_center, y_center, search_radius=sr,
                                  refine_n=refine_n)
@@ -679,13 +730,13 @@ def track_vortex_core_sweep(pl_master_path, track_angles, r_tip, rho_values, mod
         R, Y, v_r, v_a, v_t = scattered_cylindrical_components(
             x_file, y_file, z_file, angle_deg=float(angle), n_r=250, n_y=125,
         )
-        field_cache[angle] = dict(R=R, Y=Y, v_r=v_r, v_a=v_a, v_t=v_t, core=core)
+        field_cache[index] = dict(R=R, Y=Y, v_r=v_r, v_a=v_a, v_t=v_t, core=core, angle=angle)
 
         v_swirl_mean, v_swirl_std, v_along_mean, v_along_std = azimuthal_profiles(
             R, Y, v_r, v_a, v_t, core['r_core'], core['y_core'], rho_values,
         )
 
-        row = {'angle': angle, **core}
+        row = {'angle': angle, 'wake_age': wake_age, 'index': index, 'lap': lap, **core}
         for model_name, model in models.items():
             strength, r_c, pcov = fit_vortex_model(rho_values, v_swirl_mean, model=model)
             row[f'strength_{model_name}'] = strength
@@ -699,17 +750,19 @@ def track_vortex_core_sweep(pl_master_path, track_angles, r_tip, rho_values, mod
         row['strength_peak'] = float(2 * np.pi * rho_valid[i_peak] * v_swirl_mean[valid][i_peak])
         row['v_swirl_max'] = float(np.nanmax(np.abs(v_swirl_mean)))
         track_results.append(row)
-        print(f"angle={angle}: core=({core['r_core']/r_tip:.3f}R,{core['y_core']/r_tip:.3f}R) "
+        print(f"wake_age={wake_age:g} (lap {lap}, angle={angle}): "
+              f"core=({core['r_core']/r_tip:.3f}R,{core['y_core']/r_tip:.3f}R) "
               f"spread={core['spread']*1000:.3f}mm  rc_lo={row['rc_lo']*1000:.2f}mm")
 
         if profile_plot_dir:
             plot_swirl_profile_fit(
                 rho_values, v_swirl_mean, v_swirl_std, row, models, model_labels, model_styles,
-                savepath=f'{profile_plot_dir}/swirl_profile_{angle_str}deg.png',
+                savepath=f'{profile_plot_dir}/swirl_profile_{angle_str}deg_lap{lap}.png',
             )
 
     if results_savepath:
-        np.savez(results_savepath, results=track_results, rho_values=rho_values, angles=track_angles)
+        np.savez(results_savepath, results=track_results, rho_values=rho_values,
+                 angles=track_angles, n_sweeps=n_sweeps)
 
     return track_results, field_cache
 
@@ -785,15 +838,20 @@ def plot_coreradius_vs_wakeage(track_results, models, model_labels, model_styles
     plt.close(fig)
 
 
-def plot_core_trajectory_overlay(track_results, field_cache, overlay_angle, r_tip, savepath):
+def plot_core_trajectory_overlay(track_results, field_cache, overlay_index, r_tip, savepath):
     '''Core trajectory (same data as plot_core_trajectory()) overlaid directly on one
-    representative meridional Ua field (field_cache[overlay_angle], as returned by
+    representative meridional Ua field (field_cache[overlay_index], as returned by
     track_vortex_core_sweep() - no extra load/interpolation needed) - shows the vortex path
-    against the actual mean flow it sits in, rather than a blank background.'''
+    against the actual mean flow it sits in, rather than a blank background.
+
+    overlay_index : int
+        A row's own 'index' field (see track_vortex_core_sweep()'s own docstring) - e.g.
+        row_at_wake_age(track_results, 90)['index']. NOT an angle - field_cache is keyed by
+        index, unique across sweeps/laps, unlike angle.'''
     wake_age = wake_age_series(track_results)
     r_core_arr = np.array([row['r_core'] for row in track_results]) / r_tip
     y_core_arr = np.array([row['y_core'] for row in track_results]) / r_tip
-    bg = field_cache[overlay_angle]
+    bg = field_cache[overlay_index]
     fig, ax = plt.subplots(figsize=(8, 6.5))
     plot_meridional_field(bg['R'], bg['Y'], bg['v_a'], variable_label=r'mean $U_a$ [m/s]',
                            r_tip=r_tip, vmin=-18, vmax=18, ax=ax)
@@ -887,20 +945,23 @@ def plot_peak_swirl_vs_wakeage(track_results, rpm, u_tip, savepath):
     plt.close(fig)
 
 
-def vortex_profiles_at_angle(pl_master_path, field_cache, angle, rho_values):
+def vortex_profiles_at_index(pl_master_path, field_cache, index, rho_values):
     '''
     v_swirl/v_along-core (from field_cache's own cached velocity grid) + azimuthally-averaged
     static pressure (freshly gridded here - field_cache only stores velocity) around the tracked
-    core at `angle` (must already be a field_cache key, i.e. an angle track_vortex_core_sweep()
-    actually tracked).
+    core at `index` (a row's own 'index' field - see track_vortex_core_sweep()'s own docstring -
+    e.g. row_at_wake_age(track_results, 90)['index']; must already be a field_cache key). NOT an
+    angle - unlike angle, index stays unique across sweeps/laps (n_sweeps > 1), and the angle
+    needed for this step's own pstat file is read back from field_cache[index]['angle'].
 
     Returns
     -------
     v_swirl_mean, v_swirl_std, v_along_mean, v_along_std, p_mean, p_std : np.ndarray,
         shape (len(rho_values),) each
     '''
-    c = field_cache[angle]
+    c = field_cache[index]
     core = c['core']
+    angle = c['angle']
     v_swirl_mean, v_swirl_std, v_along_mean, v_along_std = azimuthal_profiles(
         c['R'], c['Y'], c['v_r'], c['v_a'], c['v_t'], core['r_core'], core['y_core'], rho_values,
     )
@@ -916,12 +977,12 @@ def plot_fig5_profiles(rho_values, v_swirl_mean, v_swirl_std, v_along_mean, v_al
                         savepath_tangential, savepath_axial):
     '''Quaglia et al.'s Fig. 5 pair: dimensional tangential (swirl) and axial (along-core)
     velocity profiles at a single representative wake age, with azimuthal std band - see
-    vortex_profiles_at_angle() for the inputs.'''
+    vortex_profiles_at_index() for the inputs.'''
     fig, ax = plt.subplots(figsize=(6.5, 4.8))
     ax.plot(rho_values * 1000, v_swirl_mean, '-', color='k')
     ax.fill_between(rho_values * 1000, v_swirl_mean - v_swirl_std, v_swirl_mean + v_swirl_std,
                      alpha=0.2, color='k')
-    ax.set_xlabel(r'$\rho$ [mm]')
+    ax.set_xlabel(r'$\rho_r$ [mm]')
     ax.set_ylabel(r'$v_{\rm swirl}$ [m/s]')
     fig.tight_layout()
     fig.savefig(savepath_tangential, dpi=300)
@@ -931,7 +992,7 @@ def plot_fig5_profiles(rho_values, v_swirl_mean, v_swirl_std, v_along_mean, v_al
     ax.plot(rho_values * 1000, v_along_mean, '-', color='k')
     ax.fill_between(rho_values * 1000, v_along_mean - v_along_std, v_along_mean + v_along_std,
                      alpha=0.2, color='k')
-    ax.set_xlabel(r'$\rho$ [mm]')
+    ax.set_xlabel(r'$\rho_r$ [mm]')
     ax.set_ylabel(r'$v_{\rm along-core}$ [m/s]')
     fig.tight_layout()
     fig.savefig(savepath_axial, dpi=300)
@@ -947,7 +1008,7 @@ def plot_fig6_profiles(rho_values, r_tip, u_tip, pref, profiles_by_age, age_labe
     Parameters
     ----------
     profiles_by_age : dict keyed by an arbitrary label (e.g. 'early'/'mid'/'late') ->
-        vortex_profiles_at_angle() output tuple.
+        vortex_profiles_at_index() output tuple.
     age_labels, age_markers : dict, same keys as profiles_by_age - legend label and marker style
         for each.
     '''
@@ -956,7 +1017,7 @@ def plot_fig6_profiles(rho_values, r_tip, u_tip, pref, profiles_by_age, age_labe
     fig, ax = plt.subplots(figsize=(6.5, 4.8))
     for key in profiles_by_age:
         ax.plot(rho_nd, profiles_by_age[key][0] / u_tip, age_markers[key], label=age_labels[key], markersize=5)
-    ax.set_xlabel(r'$\rho/R$')
+    ax.set_xlabel(r'$\rho_r/R$')
     ax.set_ylabel(r'$v_{\rm swirl}/U_{\rm tip}$')
     ax.legend(title=r'$\psi_w$')
     fig.tight_layout()
@@ -968,7 +1029,7 @@ def plot_fig6_profiles(rho_values, r_tip, u_tip, pref, profiles_by_age, age_labe
         va = profiles_by_age[key][2]
         far_field = va[~np.isnan(va)][-1] if np.any(~np.isnan(va)) else 0.0
         ax.plot(rho_nd, (va - far_field) / u_tip, age_markers[key], label=age_labels[key], markersize=5)
-    ax.set_xlabel(r'$\rho/R$')
+    ax.set_xlabel(r'$\rho_r/R$')
     ax.set_ylabel(r'$(v_{\rm along-core}-v_\infty)/U_{\rm tip}$')
     ax.legend(title=r'$\psi_w$')
     fig.tight_layout()
@@ -978,7 +1039,7 @@ def plot_fig6_profiles(rho_values, r_tip, u_tip, pref, profiles_by_age, age_labe
     fig, ax = plt.subplots(figsize=(6.5, 4.8))
     for key in profiles_by_age:
         ax.plot(rho_nd, profiles_by_age[key][4] / pref, age_markers[key], label=age_labels[key], markersize=5)
-    ax.set_xlabel(r'$\rho/R$')
+    ax.set_xlabel(r'$\rho_r/R$')
     ax.set_ylabel(r'$p/p_{\rm ref}$')
     ax.legend(title=r'$\psi_w$')
     fig.tight_layout()
@@ -999,7 +1060,7 @@ def plot_fig7_tangential_models(rho_values, r_tip, u_tip, v_swirl_mean, row, mod
         ax.plot(rho_fine / r_tip,
                 models[model_name](rho_fine, row[f'strength_{model_name}'], row[f'rc_{model_name}']) / u_tip,
                 model_styles[model_name], label=model_labels[model_name])
-    ax.set_xlabel(r'$\rho/R$')
+    ax.set_xlabel(r'$\rho_r/R$')
     ax.set_ylabel(r'$v_{\rm swirl}/U_{\rm tip}$')
     ax.legend()
     fig.tight_layout()
@@ -1194,3 +1255,219 @@ def plot_core_trajectory_3d(pl_master_path, track_results, r_tip, savepath, plan
     combined.paste(img_3d, (0, 0))
     combined.paste(img_cb, (0, img_3d.height + gap))
     combined.save(savepath)
+
+
+# ------------------------------------------------------------------------------------------------
+# Cross-SIMULATION comparisons - overlay the tip-vortex tracking/fitting results of several
+# separate tracking runs (e.g. different mesh/model fidelities, same rotor) on ONE set of axes
+# each, the TV-specific counterpart to bladeprocessor.case_comparison.py's own StripForces/Cp/Cf
+# cross-case plots (manager_comparison.py is where those get called for a real set of cases - see
+# that file's own main_tv_compare()). Convention, consistent across all three functions below and
+# matching the project's own established pattern (bladeprocessor.case_comparison's color=case
+# design) ADAPTED to this module's own existing single-case figures: COLOR stays tied to whatever
+# category each underlying single-case figure already used it for (continuous wake age for the
+# trajectory; early/mid/late wake-age bin for the Fig. 6 profiles; vortex model identity for
+# Fig. 7) - i.e. color keeps its SAME MEANING across every case, which is what actually lets a
+# reader compare "the same thing" between simulations at a glance. LINESTYLE instead encodes
+# CASE (_LINESTYLES, imported from bladeprocessor.case_comparison - up to 4 cases before
+# linestyles repeat).
+# ------------------------------------------------------------------------------------------------
+
+
+def plot_core_trajectory_compare(track_results_by_case: dict, r_tip, savepath, cmap='viridis'):
+
+    '''
+    Core trajectory (r_core/R, y_core/R), overlaid across several tracking runs - the cross-case
+    counterpart to plot_core_trajectory(). Every case's scatter points share the SAME wake-age
+    colormap and normalization (fit to the full range across every case, not per-case), so a
+    given color means the same wake age everywhere on the figure; each case's own connecting
+    line gets its own linestyle (see module docstring above) and a legend entry.
+
+    Parameters
+    ----------
+    track_results_by_case : dict[str, list[dict]]
+        {case_label: track_results} - one entry per tracking run to compare (e.g. loaded back
+        from each run's own saved vortex_core_results*.npz - see track_vortex_core_sweep()'s own
+        `results_savepath`). Every case is assumed to share the same r_tip (passed once, not
+        per-case) - pass a single-rotor-geometry comparison set, same assumption
+        bladeprocessor.case_comparison.py's own cross-case plots make.
+
+    Returns
+    -------
+    (fig, ax)
+    '''
+
+    if len(track_results_by_case) == 0:
+        raise ValueError("track_results_by_case is empty - need at least one case to plot.")
+
+    case_labels = list(track_results_by_case.keys())
+    all_wake_age = np.concatenate([wake_age_series(tr) for tr in track_results_by_case.values()])
+    vmin, vmax = float(all_wake_age.min()), float(all_wake_age.max())
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    sc = None
+    for i, case_label in enumerate(case_labels):
+        tr = track_results_by_case[case_label]
+        wake_age = wake_age_series(tr)
+        r_arr = np.array([row['r_core'] for row in tr]) / r_tip
+        y_arr = np.array([row['y_core'] for row in tr]) / r_tip
+        ax.plot(r_arr, y_arr, linestyle=_LINESTYLES[i % len(_LINESTYLES)], color='gray', alpha=0.7,
+                linewidth=1.4, zorder=2, label=case_label)
+        sc = ax.scatter(r_arr, y_arr, c=wake_age, cmap=cmap, vmin=vmin, vmax=vmax, s=55, zorder=3,
+                         edgecolors='k', linewidths=0.5)
+
+    cbar = fig.colorbar(sc, ax=ax)
+    cbar.set_label(r'wake age $\psi_w$ [deg]')
+    ax.set_xlabel('$r_{\\rm core}/R$')
+    ax.set_ylabel('$y_{\\rm core}/R$')
+    ax.legend(title='case', fontsize=10)
+    fig.tight_layout()
+    fig.savefig(savepath, dpi=300)
+    plt.close(fig)
+
+    return fig, ax
+
+
+def plot_fig6_compare(rho_values, r_tip, u_tip, pref, profiles_by_age_by_case: dict,
+                       savepath_tangential, savepath_axial_deficit, savepath_pressure,
+                       age_colors=None, age_display_labels=None):
+
+    '''
+    Quaglia et al.'s Fig. 6 triplet (tangential/axial-deficit/pressure profiles, dimensionless),
+    overlaid across several tracking runs - the cross-case counterpart to plot_fig6_profiles().
+    COLOR encodes the early/mid/late wake-age bin (a FIXED palette, `age_colors`, shared across
+    every case - unlike the single-case plot_fig6_profiles(), which left this to matplotlib's own
+    default color cycle, fixing it explicitly here is what makes "blue early" mean the same thing
+    in every case); LINESTYLE encodes case (see module docstring above).
+
+    Parameters
+    ----------
+    profiles_by_age_by_case : dict[str, dict[str, tuple]]
+        {case_label: {'early'/'mid'/'late': vortex_profiles_at_index() output tuple}} - one
+        entry per case, each itself shaped exactly like plot_fig6_profiles()'s own
+        `profiles_by_age`.
+    age_colors : dict, optional
+        {'early'/'mid'/'late': color} - default {'early': 'tab:blue', 'mid': 'tab:orange',
+        'late': 'tab:green'}.
+    age_display_labels : dict, optional
+        {'early'/'mid'/'late': legend text} - default uses the bin name itself
+        ('early'/'mid'/'late'); pass e.g. {'early': r'$\\psi_w{\\approx}10^\\circ$', ...} for an
+        approximate wake-age annotation instead (necessarily approximate across cases - each
+        case's own angle_at_wake_age() call lands on whichever tracked angle is closest to the
+        SAME target, not identical wake ages between cases built from different azimuth grids).
+
+    Returns
+    -------
+    None
+    '''
+
+    if len(profiles_by_age_by_case) == 0:
+        raise ValueError("profiles_by_age_by_case is empty - need at least one case to plot.")
+
+    age_colors = age_colors or {'early': 'tab:blue', 'mid': 'tab:orange', 'late': 'tab:green'}
+    age_display_labels = age_display_labels or {'early': 'early', 'mid': 'mid', 'late': 'late'}
+    case_labels = list(profiles_by_age_by_case.keys())
+    rho_nd = rho_values / r_tip
+
+    def _legend(ax):
+        age_handles = [Line2D([0], [0], color=age_colors[k], marker='o', linestyle='-', markersize=5)
+                       for k in ('early', 'mid', 'late')]
+        case_handles = [Line2D([0], [0], color='black', linestyle=_LINESTYLES[i % len(_LINESTYLES)], linewidth=1.6)
+                         for i in range(len(case_labels))]
+        ax.legend(age_handles + case_handles,
+                  [age_display_labels[k] for k in ('early', 'mid', 'late')] + list(case_labels),
+                  fontsize=9, ncol=2)
+
+    def _finish(fig, ax, ylabel, savepath):
+        ax.set_xlabel(r'$\rho_r/R$')
+        ax.set_ylabel(ylabel)
+        _legend(ax)
+        fig.tight_layout()
+        fig.savefig(savepath, dpi=300)
+        plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.8))
+    for i, case_label in enumerate(case_labels):
+        for key in ('early', 'mid', 'late'):
+            v = profiles_by_age_by_case[case_label][key][0] / u_tip
+            ax.plot(rho_nd, v, color=age_colors[key], linestyle=_LINESTYLES[i % len(_LINESTYLES)],
+                    marker='o', markersize=3, linewidth=1.2)
+    _finish(fig, ax, r'$v_{\rm swirl}/U_{\rm tip}$', savepath_tangential)
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.8))
+    for i, case_label in enumerate(case_labels):
+        for key in ('early', 'mid', 'late'):
+            va = profiles_by_age_by_case[case_label][key][2]
+            far_field = va[~np.isnan(va)][-1] if np.any(~np.isnan(va)) else 0.0
+            ax.plot(rho_nd, (va - far_field) / u_tip, color=age_colors[key],
+                    linestyle=_LINESTYLES[i % len(_LINESTYLES)], marker='o', markersize=3, linewidth=1.2)
+    _finish(fig, ax, r'$(v_{\rm along-core}-v_\infty)/U_{\rm tip}$', savepath_axial_deficit)
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.8))
+    for i, case_label in enumerate(case_labels):
+        for key in ('early', 'mid', 'late'):
+            p = profiles_by_age_by_case[case_label][key][4] / pref
+            ax.plot(rho_nd, p, color=age_colors[key], linestyle=_LINESTYLES[i % len(_LINESTYLES)],
+                    marker='o', markersize=3, linewidth=1.2)
+    _finish(fig, ax, r'$p/p_{\rm ref}$', savepath_pressure)
+
+
+def plot_fig7_compare(rho_values, r_tip, u_tip, v_swirl_mean_by_case: dict, row_late_by_case: dict,
+                       models: dict, model_labels: dict, model_colors: dict, model_names, savepath):
+
+    '''
+    Quaglia et al.'s Fig. 7a (measured swirl profile + fitted vortex models, dimensionless, at
+    the latest/most-developed wake age), overlaid across several tracking runs - the cross-case
+    counterpart to plot_fig7_tangential_models(). COLOR encodes category (black for the raw
+    data, `model_colors` per model - a FIXED palette, since plot_fig7_tangential_models()'s own
+    single-case version instead used LINESTYLE per model, which is repurposed here for case
+    instead); LINESTYLE encodes case (see module docstring above).
+
+    Parameters
+    ----------
+    v_swirl_mean_by_case : dict[str, np.ndarray]
+        {case_label: v_swirl_mean} at the SAME rho_values, at that case's own latest wake age -
+        i.e. each case's own vortex_profiles_at_index(...)[0] at its own latest wake age.
+    row_late_by_case : dict[str, dict]
+        {case_label: track_results row} at that case's own latest wake age - must already carry
+        strength_<name>/rc_<name> for every name in `model_names` (see fit_vortex_model()).
+    model_colors : dict
+        {model_name: color} - e.g. {'lo': 'tab:red', 'scully': 'tab:blue', 'taylor': 'tab:green'}.
+
+    Returns
+    -------
+    (fig, ax)
+    '''
+
+    if len(v_swirl_mean_by_case) == 0:
+        raise ValueError("v_swirl_mean_by_case is empty - need at least one case to plot.")
+
+    case_labels = list(v_swirl_mean_by_case.keys())
+    rho_fine = np.linspace(rho_values.min(), rho_values.max(), 200)
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.8))
+    for i, case_label in enumerate(case_labels):
+        ls = _LINESTYLES[i % len(_LINESTYLES)]
+        ax.plot(rho_values / r_tip, v_swirl_mean_by_case[case_label] / u_tip, marker='+', color='black',
+                linestyle=ls, markersize=6, linewidth=0.8)
+        row_late = row_late_by_case[case_label]
+        for model_name in model_names:
+            ax.plot(rho_fine / r_tip,
+                    models[model_name](rho_fine, row_late[f'strength_{model_name}'], row_late[f'rc_{model_name}']) / u_tip,
+                    color=model_colors[model_name], linestyle=ls, linewidth=1.4)
+
+    ax.set_xlabel(r'$\rho_r/R$')
+    ax.set_ylabel(r'$v_{\rm swirl}/U_{\rm tip}$')
+
+    category_handles = ([Line2D([0], [0], color='black', marker='+', linestyle='-', markersize=6)] +
+                         [Line2D([0], [0], color=model_colors[m], linestyle='-') for m in model_names])
+    category_labels = ['data'] + [model_labels[m] for m in model_names]
+    case_handles = [Line2D([0], [0], color='gray', linestyle=_LINESTYLES[i % len(_LINESTYLES)])
+                    for i in range(len(case_labels))]
+    ax.legend(category_handles + case_handles, category_labels + list(case_labels), fontsize=9, ncol=2)
+
+    fig.tight_layout()
+    fig.savefig(savepath, dpi=300)
+    plt.close(fig)
+
+    return fig, ax

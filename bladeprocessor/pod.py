@@ -93,6 +93,7 @@ from matplotlib.ticker import MaxNLocator
 from scipy.signal import csd, coherence
 
 from bladeprocessor.convergence import periodogram
+from bladeprocessor._grid_field import grid_scatter
 
 plt.rcParams.update({
     "text.usetex": True,
@@ -319,7 +320,8 @@ def pod(data, n_modes: int = None, subtract_mean: bool = True, weights=None):
 
 
 def plot_pod_mode(radius, chord, pod_result: dict, mode_index: int = 0,
-                   cmap: str = 'RdBu_r', marker_size: float = 1, value_clip_percentile: float = 99,
+                   cmap: str = 'RdBu_r', marker_size: float = 1, interpolate: bool = False,
+                   grid_resolution: int = 300, value_clip_percentile: float = 99,
                    unit_label: str = None, figsize: tuple = None, ax=None, savepath: str = None,
                    dpi: int = 600, radius_full=None, chord_full=None, background_color: str = '0.85'):
 
@@ -337,6 +339,22 @@ def plot_pod_mode(radius, chord, pod_result: dict, mode_index: int = 0,
     plot_variable_surface() answers for a raw physical field, now asked
     of a POD mode instead.
 
+    interpolate : bool
+        If True, grid the mode onto a regular (radius, chord) mesh via
+        scipy.interpolate.griddata (linear, NaN outside the convex hull
+        of the real points) and render with pcolormesh instead of a raw
+        scatter - see FrictionLines.friction_lines()'s own interpolate
+        docstring for the full reasoning (identical tradeoff here: off
+        by default, matching this function's original design for a full
+        rotor blade's dense mesh; turn on for a sparser one, e.g. a
+        stator vane/strut, where the raw scatter under-resolves). The
+        radius_full/chord_full backdrop (if given) is NOT affected by
+        this - it's plain neutral context, not data, and stays a scatter
+        either way.
+    grid_resolution : int
+        Grid points along the LONGER of the two axes when
+        interpolate=True - see grid_scatter(). Only used if
+        interpolate=True.
     One mode per call, by design, so each gets a full-sized, individually
     readable plot rather than a small panel in a crowded grid - call this
     once per mode actually worth a closer look (typically identified
@@ -463,7 +481,11 @@ def plot_pod_mode(radius, chord, pod_result: dict, mode_index: int = 0,
         ax.scatter(np.asarray(radius_full), np.asarray(chord_full), s=marker_size,
                    color=background_color, linewidths=0, zorder=1)
 
-    sc = ax.scatter(radius, chord, c=mode_clipped, s=marker_size, cmap=cmap, vmin=-vmax, vmax=vmax, zorder=2)
+    if interpolate:
+        Xg, Yg, Zg = grid_scatter(radius, chord, mode_clipped, grid_resolution=grid_resolution)
+        sc = ax.pcolormesh(Xg, Yg, Zg, cmap=cmap, vmin=-vmax, vmax=vmax, zorder=2)
+    else:
+        sc = ax.scatter(radius, chord, c=mode_clipped, s=marker_size, cmap=cmap, vmin=-vmax, vmax=vmax, zorder=2)
     ax.set_title(f'Mode {mode_index + 1} ({100 * energy[mode_index]:.1f}\\% energy)')
     ax.set_xlabel('$r$ [m]')
     ax.set_ylabel('chord [m]')

@@ -68,8 +68,10 @@ docstring for the working module-load recipe).
 def run_forces(args):
     reader = SNCReader(args.snc_path)
     reader.to_h5(args.output, face_name=args.face_name, surface_split=args.surface_split,
-                 nc_stats_path=args.nc_stats, blade_lrf_offset_deg=args.blade_lrf_offset_deg,
-                 span_min=args.span_min, span_max=args.span_max, span_axis=args.span_axis)
+                 split_axis=args.split_axis, nc_stats_path=args.nc_stats,
+                 blade_lrf_offset_deg=args.blade_lrf_offset_deg,
+                 span_min=args.span_min, span_max=args.span_max, span_axis=args.span_axis,
+                 stationary=(args.object != 'rotor'), object_type=args.object)
     reader.close()
     print(f'wrote {args.output}')
 
@@ -93,8 +95,10 @@ def run_pressure(args):
         reference_frame=args.reference_frame,
         work_dir=args.work_dir,
         surface_split=args.surface_split,
+        split_axis=args.split_axis,
         face_names=args.face_names.split(',') if args.face_names else None,
         blade_lrf_offset_deg=args.blade_lrf_offset_deg,
+        object_type=args.object,
     )
     print(f'wrote {args.output}')
 
@@ -269,6 +273,17 @@ def build_parser():
                          help='Restrict to surfels matching this face (e.g. one rotor blade)')
     forces.add_argument('--surface-split', action='store_true',
                          help='Split into Upper/Lower surface groups (see SNCReader.surface_split)')
+    forces.add_argument('--split-axis', default='rotation', choices=['rotation', 'radial', 'tangential'],
+                         help='Reference direction for --surface-split\'s normal-sign classification - '
+                              '\'rotation\' (default) uses the rotor axis itself, correct for a rotor '
+                              'blade. \'tangential\' uses the LOCAL tangential direction at each surfel '
+                              'instead - confirmed necessary on a real multi-vane stator case, where '
+                              '\'rotation\' gave a near-meaningless split (mean |normal . axis| ~0.23) '
+                              'while \'tangential\' gave a clean one (~0.93) - CHECK this per case '
+                              '(e.g. inspect mean |normal . candidate direction| over one cleanly-'
+                              'isolated instance) rather than assuming either one; don\'t guess from '
+                              '--object alone. \'radial\' provided for completeness, not yet validated '
+                              'against a real case. See SNCReader.surface_split()\'s docstring.')
     forces.add_argument('--nc-stats', default=None,
                          help='Path to saved `exaritool nc-stats.ri <snc_path> -detail` output - '
                               'PREFERRED, authoritative per-frame rotation angle for the '
@@ -298,6 +313,21 @@ def build_parser():
     forces.add_argument('--span-axis', type=int, default=0, choices=[0, 1, 2],
                          help='Which raw coordinate column (0=X, 1=Y, 2=Z) --span-min/--span-max '
                               'apply to - match this case\'s own span_axis convention (default: 0).')
+    forces.add_argument('--object', default='rotor', choices=['rotor', 'stator', 'beam', 'casing'],
+                         help='Kind of part this .snc face is - \'rotor\' (default) keeps the '
+                              'existing per-frame rotation-angle correction on Surface_X/Y/Z-Force '
+                              '(the part physically rotates). \'stator\'/\'beam\'/\'casing\' pass '
+                              'stationary=True to SNCReader.to_h5() instead: a real multi-part .snc '
+                              'can bundle a rotor and its stationary hardware under ONE shared LRF '
+                              'rotation rate (confirmed on a real cylindrical-beam case and a real '
+                              'multi-vane stator case, both reporting a nonzero rate even though the '
+                              'selected part itself never rotates) - every frame\'s rotation angle '
+                              'becomes --blade-lrf-offset-deg alone (a fixed constant, e.g. one '
+                              'vane\'s own installation azimuth) instead of that shared rate, and no '
+                              'start_time/nc_stats metadata is required for it. Also tagged into '
+                              'Metadata/object_type for downstream tools (e.g. FrictionLines/'
+                              'SurfaceVariable can warn if rpm alone is used for Cf/Cp on a non-rotor '
+                              'object without v_ref - see bladeprocessor._dynamics.dynamic_pressure).')
     forces.set_defaults(func=run_forces)
 
     pressure = subparsers.add_parser(
@@ -323,6 +353,12 @@ def build_parser():
                            help='Split into Upper/Lower surface groups, classification borrowed '
                                 'from the raw .snc file via nearest-neighbor matching (see '
                                 'EnsightFrame.surface_split).')
+    pressure.add_argument('--split-axis', default='rotation', choices=['rotation', 'radial', 'tangential'],
+                           help='Forwarded to the raw .snc file\'s SNCReader.surface_split() (the '
+                                'classification source --surface-split above borrows from) - see the '
+                                'forces subcommand\'s --split-axis for what each choice means. Use the '
+                                'SAME value here as this case\'s forces-branch conversion, so both '
+                                'branches agree on which surfel is Upper/Lower.')
     pressure.add_argument('--face-names', default=None,
                            help='Comma-separated face names to pass to pf2ens (e.g. '
                                 '"/rotor::blade1,/rotor::blade2") - default: every face present '
@@ -339,6 +375,12 @@ def build_parser():
                                 '- use the SAME value here as was used for this case\'s forces-branch '
                                 'conversion (see ensight_to_h5.convert_snc_to_h5\'s '
                                 'blade_lrf_offset_deg docstring). 0 (no rotation) by default.')
+    pressure.add_argument('--object', default='rotor', choices=['rotor', 'stator', 'beam', 'casing'],
+                           help='Kind of part this .snc face is - metadata only (Metadata/object_type), '
+                                'for downstream provenance/sanity-checks. This branch (pf2ens) already '
+                                'needs no rotation correction for any object type (see '
+                                'raw_positions_to_ensight_frame()\'s docstring), so unlike the forces '
+                                'subcommand\'s --object, this does not change anything computed here.')
     pressure.set_defaults(func=run_pressure)
 
     fnc_meridional = subparsers.add_parser(

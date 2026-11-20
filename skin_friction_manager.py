@@ -45,6 +45,7 @@ avg_force_file = cfg.avg_force_file
 r_tip = cfg.r_tip
 rho_ref = cfg.rho_ref
 rpm = cfg.rpm
+v_ref = cfg.v_ref
 c_ref = cfg.c_ref
 normalize = cfg.normalize
 span_axis = cfg.span_axis
@@ -52,9 +53,12 @@ chord_axis = cfg.chord_axis
 thickness_axis = cfg.thickness_axis
 validate_axes = cfg.validate_axes
 span_min = cfg.span_min
+span_max = cfg.span_max
 azimuth_center_deg = cfg.azimuth_center_deg
 azimuth_tol_deg = cfg.azimuth_tol_deg
 reverse_chord = cfg.reverse_chord
+interpolate = cfg.interpolate
+surface = cfg.surface
 radii = cfg.radii
 dt = cfg.dt_forces
 blade_figsize = cfg.blade_figsize
@@ -72,163 +76,164 @@ fl = FrictionLines(
    r_tip=r_tip,
    rho_ref=rho_ref,
    rpm=rpm,
+   v_ref=v_ref,
    c_ref=c_ref,
    span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
-   span_min=span_min, azimuth_center_deg=azimuth_center_deg, azimuth_tol_deg=azimuth_tol_deg,
+   span_min=span_min, span_max=span_max, azimuth_center_deg=azimuth_center_deg, azimuth_tol_deg=azimuth_tol_deg,
    validate_axes=validate_axes
 )
 
+# Cf magnitude and signed chordwise/spanwise components, one frame or the average:
+cf_mag = fl.cf(surface=surface, frame=None, component=None)
+print(40*'-')
+print('Average Cf magnitude: ', np.mean(cf_mag))
 
-# Dimensional wall shear vector (tau = F - (F.n)n), no rho_ref/rpm needed:
-# tau = fl.wall_shear(surface='Upper', frame=None)  # frame=None -> average over every frame in the file
+for frame in range(0,fl.n_frames,frame_loop_step):
+	cf_mag = fl.cf(surface=surface, frame=frame, component=None)
+	print(40*'-')
+	print(f'Cf magnitude: {np.mean(cf_mag)} at frame {frame:03d}')
 
-# # Cf magnitude and signed chordwise/spanwise components, one frame or the average:
-# cf_mag = fl.cf(surface='Upper', frame=None, component=None)
-# print(40*'-')
-# print('Average Cf magnitude: ', np.mean(cf_mag))
-# # cf_chordwise_frame0 = fl.cf(surface='Upper', frame=0, component='chordwise')
+# Cf vs local x/c at several radii, one plot per call - instantaneous and
+# average. span_min isolates one blade (REQUIRED in practice - without it,
+# a radius band mixes both blades' chord ranges and produces a spurious
+# double peak, see README.md); reverse_chord fixes which end is the
+# leading vs. trailing edge (no automatic detection - check per case, Cf
+# should peak sharply near x/c=0 and decay toward x/c=1; if it's flipped,
+# set reverse_chord=reverse_chord - see README.md's "Two bugs found and fixed"):
 
-# for frame in range(0,fl.n_frames,frame_loop_step):
-# 	cf_mag = fl.cf(surface='Upper', frame=frame, component=None)
-# 	print(40*'-')
-# 	print(f'Cf magnitude: {np.mean(cf_mag)} at frame {frame:03d}')
+print(40*'-')
+print(f'Plotting Cf vs x/c at several radii, {surface} surface, average over all frames')
+print(40*'-')
+print('Plotting Cf vs x/c magnitude')
+fl.plot_cf_radii(
+   radii=radii, surface=surface,
+   frame=None, component=None, span_min=span_min, span_max=span_max, reverse_chord=reverse_chord,
+   n_chord_bins=60, normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_mag_avg_{surface.lower()}_{case}.png'),
+)
+print(40*'-')
+print('Plotting Cf vs x/c chordwise component')
+fl.plot_cf_radii(
+   radii=radii, surface=surface,
+   frame=None, component='chordwise', span_min=span_min, span_max=span_max, reverse_chord=reverse_chord,
+   n_chord_bins=60, normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_chordwise_avg_{surface.lower()}_{case}.png'),
+)
+print(40*'-')
+print('Plotting Cf vs x/c spanwise component')
+fl.plot_cf_radii(
+   radii=radii, surface=surface,
+   frame=None, component='spanwise', span_min=span_min, span_max=span_max, reverse_chord=reverse_chord,
+   n_chord_bins=60, normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_spanwise_avg_{surface.lower()}_{case}.png'),
+)
 
-# # Cf vs local x/c at several radii, one plot per call - instantaneous and
-# # average. span_min isolates one blade (REQUIRED in practice - without it,
-# # a radius band mixes both blades' chord ranges and produces a spurious
-# # double peak, see README.md); reverse_chord fixes which end is the
-# # leading vs. trailing edge (no automatic detection - check per case, Cf
-# # should peak sharply near x/c=0 and decay toward x/c=1; if it's flipped,
-# # set reverse_chord=reverse_chord - see README.md's "Two bugs found and fixed"):
+for frame in range(0,fl.n_frames,frame_loop_step):
+	print(40*'-')
+	print(f'Plotting Cf vs x/c at several radii, {surface} surface, average for frame {frame:03d}')
+	print(40*'-')
+	print('Plotting Cf vs x/c magnitude')
+	fl.plot_cf_radii(
+	radii=radii, surface=surface,
+	frame=frame, component=None, span_min=span_min, span_max=span_max, reverse_chord=reverse_chord,
+	n_chord_bins=60, normalize=normalize,
+	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_mag_frame{frame:03d}_{surface.lower()}_{case}.png'),
+	)
+	print(40*'-')
+	print('Plotting Cf vs x/c chordwise component')
+	fl.plot_cf_radii(
+	radii=radii, surface=surface,
+	frame=frame, component='chordwise', span_min=span_min, span_max=span_max, reverse_chord=reverse_chord,
+	n_chord_bins=60, normalize=normalize,
+	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_chordwise_frame{frame:03d}_{surface.lower()}_{case}.png'),
+	)
+	print(40*'-')
+	print('Plotting Cf vs x/c spanwise component')
+	fl.plot_cf_radii(
+	radii=radii, surface=surface,
+	frame=frame, component='spanwise', span_min=span_min, span_max=span_max, reverse_chord=reverse_chord,
+	n_chord_bins=60, normalize=normalize,
+	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_spanwise_frame{frame:03d}_{surface.lower()}_{case}.png'),
+	)
 
-# print(40*'-')
-# print('Plotting Cf vs x/c at several radii, Upper surface, average over all frames')
-# print(40*'-')
-# print('Plotting Cf vs x/c magnitude')
-# fl.plot_cf_radii(
-#    radii=radii,#[0.045, 0.072, 0.100, 0.117, 0.122],
-#    frame=None, component=None, span_min=span_min, reverse_chord=reverse_chord,
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_mag_avg_{case}.png'),
-# )
-# print(40*'-')
-# print('Plotting Cf vs x/c chordwise component')
-# fl.plot_cf_radii(
-#    radii=radii,
-#    frame=None, component='chordwise', span_min=span_min, reverse_chord=reverse_chord,
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_chordwise_avg_{case}.png'),
-# )
-# print(40*'-')
-# print('Plotting Cf vs x/c spanwise component')
-# fl.plot_cf_radii(
-#    radii=radii,
-#    frame=None, component='spanwise', span_min=span_min, reverse_chord=reverse_chord,
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/avg/cf_radii_spanwise_avg_{case}.png'),
-# )
+# Cf unsteadiness (RMS fluctuation about the mean - see README.md, "Cf
+# unsteadiness"): flags transition/wandering separation lines/moving
+# vortex cores that the mean Cf field alone can miss.
+print(40*'-')
+print(f'Plotting Cf RMS vs x/c at several radii, {surface} surface, average over all frames')
+print(40*'-')
+print('Plotting Cf RMS vs x/c magnitude')
+fl.plot_cf_radii(
+   radii=radii,
+   surface=surface, frame=None, stat='rms', span_min=span_min, span_max=span_max, reverse_chord=reverse_chord,
+   n_chord_bins=60, normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/rms/cf_rms_radii_avg_{surface.lower()}_{case}.png'),
+)
+print(40*'-')
+print('Plotting Cf RMS vs x/c color map')
+fl.friction_lines(
+   surface=surface, frame=None, stat='rms', span_min=span_min, span_max=span_max,
+   n_arrows=1000, interpolate=interpolate,
+   figsize=blade_figsize,
+   normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/rms/cf_rms_map_{surface.lower()}_{case}.png'),
+)
 
-# for frame in range(0,fl.n_frames,frame_loop_step):
-# 	print(40*'-')
-# 	print(f'Plotting Cf vs x/c at several radii, Upper surface, average for frame {frame:03d}')
-# 	print(40*'-')
-# 	print('Plotting Cf vs x/c magnitude')
-# 	fl.plot_cf_radii(
-# 	radii=radii,
-# 	frame=frame, component=None, span_min=span_min, reverse_chord=reverse_chord,
-# 	normalize=normalize,
-# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_mag_frame{frame:03d}_{case}.png'),
-# 	)
-# 	print(40*'-')
-# 	print('Plotting Cf vs x/c chordwise component')
-# 	fl.plot_cf_radii(
-# 	radii=radii,
-# 	frame=frame, component='chordwise', span_min=span_min, reverse_chord=reverse_chord,
-# 	normalize=normalize,
-# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_chordwise_frame{frame:03d}_{case}.png'),
-# 	)
-# 	print(40*'-')
-# 	print('Plotting Cf vs x/c spanwise component')
-# 	fl.plot_cf_radii(
-# 	radii=radii,
-# 	frame=frame, component='spanwise', span_min=span_min, reverse_chord=reverse_chord,
-# 	normalize=normalize,
-# 	savepath=os.path.join(master_path, f'images/cf/inst/cf_radii_spanwise_frame{frame:03d}_{case}.png'),
-# 	)
+# Friction lines (Upper+Lower stacked by default) - span_min isolates one
+# blade half on a two-bladed rotor centered at span=0 (see the method's
+# docstring - there's no reliable automatic hub cutoff, pass what's right
+# for this case's mesh):
+print(40*'-')
+print(f'Plotting Friction Lines, {surface} surface, average over all frames')
+fl.friction_lines(
+   frame=None, span_min=span_min, span_max=span_max, surface=surface,
+   n_arrows=1000, interpolate=interpolate,
+   figsize=blade_figsize,
+   normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_avg_{surface.lower()}_{case}.png'),
+)
 
-# # Cf unsteadiness (RMS fluctuation about the mean - see README.md, "Cf
-# # unsteadiness"): flags transition/wandering separation lines/moving
-# # vortex cores that the mean Cf field alone can miss.
-# print(40*'-')
-# print('Plotting Cf RMS vs x/c at several radii, Upper surface, average over all frames')
-# print(40*'-')
-# print('Plotting Cf RMS vs x/c magnitude')
-# fl.plot_cf_radii(
-#    radii=radii,
-#    surface='Upper', frame=None, stat='rms', span_min=span_min, reverse_chord=reverse_chord,
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/rms/cf_rms_radii_avg_{case}.png'),
-# )
-# print(40*'-')
-# print('Plotting Cf RMS vs x/c color map')
-# fl.friction_lines(
-#    surface='Upper', frame=None, stat='rms', span_min=span_min,
-#    figsize=blade_figsize,
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/rms/cf_rms_map_{case}.png'),
-# )
+for frame in range(0,fl.n_frames,frame_loop_step):
+	print(40*'-')
+	print(f'Plotting Friction Lines, {surface} surface, for frame {frame:03d}')
+	fl.friction_lines(
+	   frame=frame, span_min=span_min, span_max=span_max, surface=surface,
+	   n_arrows=1000, interpolate=interpolate,
+	   figsize=blade_figsize,
+	   normalize=normalize,
+	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_frame{frame:03d}_{surface.lower()}_{case}.png'),
+	)
 
-# # Friction lines (Upper+Lower stacked by default) - span_min isolates one
-# # blade half on a two-bladed rotor centered at span=0 (see the method's
-# # docstring - there's no reliable automatic hub cutoff, pass what's right
-# # for this case's mesh):
-# print(40*'-')
-# print('Plotting Friction Lines, Upper surface, average over all frames')
-# fl.friction_lines(
-#    frame=None, span_min=span_min, surface='Upper',
-#    figsize=blade_figsize,
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_avg_{case}.png'),
-# )
+# Separation/reattachment line (chordwise-Cf sign crossings) - restricted
+# to one blade section via span_min/span_max like everything else here;
+# reverse_chord must match what plot_cf_radii()/cf_at_radii() needed on
+# this case (see README.md, "Separation/reattachment line"):
+#sep_points = fl.separation_line(surface='Upper', frame=None, span_min=span_min, reverse_chord=reverse_chord)
+#fl.save_separation_line(sep_points, os.path.join(master_path, 'data/cf/separation_line.txt'))
 
-# for frame in range(0,fl.n_frames,frame_loop_step):
-# 	print(40*'-')
-# 	print(f'Plotting Friction Lines, Upper surface, for frame {frame:03d}')
-# 	fl.friction_lines(
-# 	   frame=frame, span_min=span_min, surface='Upper',
-# 	   figsize=blade_figsize,
-# 	   normalize=normalize,
-# 	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_frame{frame:03d}_{case}.png'),
-# 	)
+# Overlaid directly on friction_lines() (separation in red, reattachment in cyan):
+print(40*'-')
+print(f'Plotting Friction Lines with separation/reattachment line, {surface} surface, average over all frames')
+fl.friction_lines(
+   surface=surface, frame=None, span_min=span_min, span_max=span_max, show_separation_line=True,
+   separation_line_kwargs={'reverse_chord': reverse_chord},
+   n_arrows=1000, interpolate=interpolate,
+   figsize=blade_figsize,
+   normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_separation_{surface.lower()}_{case}.png'),
+)
 
-# # Separation/reattachment line (chordwise-Cf sign crossings) - restricted
-# # to one blade section via span_min/span_max like everything else here;
-# # reverse_chord must match what plot_cf_radii()/cf_at_radii() needed on
-# # this case (see README.md, "Separation/reattachment line"):
-# #sep_points = fl.separation_line(surface='Upper', frame=None, span_min=span_min, reverse_chord=reverse_chord)
-# #fl.save_separation_line(sep_points, os.path.join(master_path, 'data/cf/separation_line.txt'))
-
-# # Overlaid directly on friction_lines() (separation in red, reattachment in cyan):
-# print(40*'-')
-# print('Plotting Friction Lines with separation/reattachment line, Upper surface, average over all frames')
-# fl.friction_lines(
-#    surface='Upper', frame=None, span_min=span_min, show_separation_line=True,
-#    separation_line_kwargs={'reverse_chord': reverse_chord},
-#    figsize=blade_figsize,
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_separation_{case}.png'),
-# )
-
-# for frame in range(0,fl.n_frames,frame_loop_step):
-# 	print(40*'-')
-# 	print(f'Plotting Friction Lines with separation/reattachment line, Upper surface, for frame {frame:03d}')
-# 	fl.friction_lines(
-# 	   surface='Upper', frame=frame, span_min=span_min, show_separation_line=True,
-# 	   separation_line_kwargs={'reverse_chord': reverse_chord},
-# 	   figsize=blade_figsize,
-# 	   normalize=normalize,
-# 	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_separation_frame{frame:03d}_{case}.png'),
-# 	)
+for frame in range(0,fl.n_frames,frame_loop_step):
+	print(40*'-')
+	print(f'Plotting Friction Lines with separation/reattachment line, {surface} surface, for frame {frame:03d}')
+	fl.friction_lines(
+	   surface=surface, frame=frame, span_min=span_min, span_max=span_max, show_separation_line=True,
+	   separation_line_kwargs={'reverse_chord': reverse_chord},
+	   n_arrows=1000, interpolate=interpolate,
+	   figsize=blade_figsize,
+	   normalize=normalize,
+	   savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_separation_frame{frame:03d}_{surface.lower()}_{case}.png'),
+	)
 
 # # # Spanwise migration-reversal line (spanwise-Cf sign crossings - a
 # # # DIFFERENT physical phenomenon from separation/reattachment above, see
@@ -247,231 +252,215 @@ fl = FrictionLines(
 # #    savepath=os.path.join(master_path, 'images/cf/friction_lines_migration.png'),
 # #)
 
-# # Vortex-footprint critical points (node/saddle/focus - see README.md,
-# # "Vortex-footprint critical points"; 'focus' = actual vortex core, e.g.
-# # a leading-edge or corner/horseshoe vortex, not just an ordinary
-# # separation/reattachment feature). No reverse_chord - works in raw
-# # physical (span, chord) coordinates, not x/c:
-# #crit_points = fl.critical_points(surface='Upper', frame=None, span_min=span_min)
-# #fl.save_critical_points(crit_points, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/cf/critical_points.txt')
-# #print('Poincare index N+F-S =', fl.poincare_index(crit_points))  # see README.md - NOT expected to be 2 on this open, cropped selection
+# Vortex-footprint critical points (node/saddle/focus - see README.md,
+# "Vortex-footprint critical points"; 'focus' = actual vortex core, e.g.
+# a leading-edge or corner/horseshoe vortex, not just an ordinary
+# separation/reattachment feature). No reverse_chord - works in raw
+# physical (span, chord) coordinates, not x/c:
+#crit_points = fl.critical_points(surface='Upper', frame=None, span_min=span_min)
+#fl.save_critical_points(crit_points, '/storage/renj3003/rotor-alone/6e-5_6000rpm/data/cf/critical_points.txt')
+#print('Poincare index N+F-S =', fl.poincare_index(crit_points))  # see README.md - NOT expected to be 2 on this open, cropped selection
 
-# # show_critical_points_index=True annotates the figure itself with N+F-S:
-# print(40*'-')
-# print('Plotting Friction Lines with critical points, Upper surface, average over all frames')
-# fl.friction_lines(
-#    surface='Upper', frame=None, span_min=span_min, show_critical_points=True, show_critical_points_index=False,
-#    figsize=blade_figsize,
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_critical_points_{case}.png'),
-# )
-
-# for frame in range(0,fl.n_frames,frame_loop_step):
-# 	print(40*'-')
-# 	print(f'Plotting Friction Lines with critical points, Upper surface, for frame {frame:03d}')
-# 	fl.friction_lines(
-# 	surface='Upper', frame=frame, span_min=span_min, show_critical_points=True, show_critical_points_index=False,
-# 	figsize=blade_figsize,
-# 	normalize=normalize,
-# 	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_critical_points_frame{frame:03d}_{case}.png'),
-# 	)
-
-# # ------------- Any surface variable at radii/over the blade (Cf-related) ------------- #
-# #
-# # Skin Friction as a SurfaceVariable (generalizes friction_lines() above
-# # to any scalar field - see README.md, "Any surface variable at radii" /
-# # "Whole-blade surface plot"). Input: a SNCReader.to_h5(..., surface_split=True)
-# # file (the forces branch, same as fl above), for the raw Skin_Friction
-# # variable rather than the tau-derived Cf FrictionLines computes:
-
-
+# show_critical_points_index=True annotates the figure itself with N+F-S:
 print(40*'-')
-print('Opening SurfaceVariable file: ', os.path.join(master_path, inst_force_file))
-sf_inst_forces = SurfaceVariable(
-  os.path.join(master_path, inst_force_file),
-  r_tip=r_tip, rho_ref=rho_ref, rpm=rpm, c_ref=c_ref,
-  span_axis=span_axis, chord_axis=chord_axis, thickness_axis=thickness_axis,
-  azimuth_center_deg=azimuth_center_deg, azimuth_tol_deg=azimuth_tol_deg,
+print(f'Plotting Friction Lines with critical points, {surface} surface, average over all frames')
+fl.friction_lines(
+   surface=surface, frame=None, span_min=span_min, span_max=span_max, show_critical_points=True, show_critical_points_index=False,
+   n_arrows=1000, interpolate=interpolate,
+   figsize=blade_figsize,
+   normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/avg/friction_lines_critical_points_{surface.lower()}_{case}.png'),
 )
 
-# print(40*'-')
-# print('Plotting Skin Friction surface scatter, average over all frames')
-# sv_inst_forces.plot_variable_surface(
-#    lambda s: sv_inst_forces.variable('Skin_Friction', surface=s, stat='mean'),
-#    cbar_label='Skin Friction [Pa]', span_min=span_min, surface='Upper',
-#    figsize=blade_figsize,
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/avg/cf_surface_avg_upper_{case}.png'),
-# )
+for frame in range(0,fl.n_frames,frame_loop_step):
+	print(40*'-')
+	print(f'Plotting Friction Lines with critical points, {surface} surface, for frame {frame:03d}')
+	fl.friction_lines(
+	surface=surface, frame=frame, span_min=span_min, span_max=span_max, show_critical_points=True, show_critical_points_index=False,
+	n_arrows=1000, interpolate=interpolate,
+	figsize=blade_figsize,
+	normalize=normalize,
+	savepath=os.path.join(master_path, f'images/cf/inst/friction_lines_critical_points_frame{frame:03d}_{surface.lower()}_{case}.png'),
+	)
 
-# print(40*'-')
-# print('Plotting Skin Friction surface scatter, average over all frames')
-# sv_inst_forces.plot_variable_surface(
-#    lambda s: sv_inst_forces.variable('Skin_Friction', surface=s, stat='rms'),
-#    cbar_label='Skin Friction [Pa]', span_min=span_min, surface='Upper',
-#    figsize=blade_figsize,
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/rms/cf_surface_rms_upper_{case}.png'),
-# )
+print(40*'-')
+print(f'Plotting Cf surface field (no quiver), {surface} surface, average over all frames')
+fl.friction_lines(
+   surface=surface, frame=None, span_min=span_min, span_max=span_max,
+   show_quiver=False, interpolate=interpolate,
+   figsize=blade_figsize,
+   normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/avg/cf_surface_avg_{surface.lower()}_{case}.png'),
+)
 
-for frame in range(0,fl.n_frames,frame_loop_step):   
-   print(40*'-')
-   print('Plotting Skin Friction surface scatter, average over all frames')
-   sf_inst_forces.plot_variable_surface(
-      lambda s: sf_inst_forces.variable('Skin_Friction', surface=s, frame=frame),
-      cbar_label='Skin Friction [Pa]', span_min=span_min, surface='Upper',
-      figsize=blade_figsize,
-      normalize=normalize,
-      savepath=os.path.join(master_path, f'images/cf/inst/cf_surface_inst_upper_frame{frame:03d}_{case}.png'),
-   )
+print(40*'-')
+print(f'Plotting Cf RMS surface field (no quiver), {surface} surface, average over all frames')
+fl.friction_lines(
+   surface=surface, frame=None, stat='rms', span_min=span_min, span_max=span_max,
+   show_quiver=False, interpolate=interpolate,
+   figsize=blade_figsize,
+   normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/rms/cf_surface_rms_{surface.lower()}_{case}.png'),
+)
 
-# # Convergence checking: Cf phase portrait (see README.md, "Convergence
-# # checking: wall-shear/Cf phase portraits") - near-wall/viscous
-# # quantities converge MORE SLOWLY than integrated forces, so this needs
-# # checking separately from StripForces' phase portraits even if those
-# # already look converged:
-# print(40*'-')
-# print('Plotting Cf phase portrait (magnitude vs chordwise), Upper surface')
-# fl.plot_cf_phase_portrait(
-#    component_pair=(None, 'chordwise'), surface='Upper', span_min=span_min,
-#    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_mag_chordwise_{case}.png'),
-# )
+for frame in range(0,fl.n_frames,frame_loop_step):
+	print(40*'-')
+	print(f'Plotting Cf surface field (no quiver), {surface} surface, for frame {frame:03d}')
+	fl.friction_lines(
+	   surface=surface, frame=frame, span_min=span_min, span_max=span_max,
+	   show_quiver=False, interpolate=interpolate,
+	   figsize=blade_figsize,
+	   normalize=normalize,
+	   savepath=os.path.join(master_path, f'images/cf/inst/cf_surface_inst_{surface.lower()}_frame{frame:03d}_{case}.png'),
+	)
 
-# print(40*'-')
-# print('Plotting Cf phase portrait (magnitude vs spanwise), Upper surface')
-# fl.plot_cf_phase_portrait(
-#    component_pair=(None, 'spanwise'), surface='Upper', span_min=span_min,
-#    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_mag_spanwise_{case}.png'),
-# )
+# Convergence checking: Cf phase portrait (see README.md, "Convergence
+# checking: wall-shear/Cf phase portraits") - near-wall/viscous
+# quantities converge MORE SLOWLY than integrated forces, so this needs
+# checking separately from StripForces' phase portraits even if those
+# already look converged:
+print(40*'-')
+print(f'Plotting Cf phase portrait (magnitude vs chordwise), {surface} surface')
+fl.plot_cf_phase_portrait(
+   component_pair=(None, 'chordwise'), surface=surface, span_min=span_min,
+   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_mag_chordwise_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting Cf phase portrait (magnitude vs spanwise), Upper surface')
-# fl.plot_cf_phase_portrait(
-#    component_pair=('spanwise', 'chordwise'), surface='Upper', span_min=span_min,
-#    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_spanwise_chordwise_{case}.png'),
-# )
+print(40*'-')
+print(f'Plotting Cf phase portrait (magnitude vs spanwise), {surface} surface')
+fl.plot_cf_phase_portrait(
+   component_pair=(None, 'spanwise'), surface=surface, span_min=span_min,
+   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_mag_spanwise_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
-# fl.plot_cf_phase_portrait_by_strip(
-#    component_pair=(None, 'chordwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_mag_chordwise_by_strip_{case}.png'),
-# )
+print(40*'-')
+print(f'Plotting Cf phase portrait (magnitude vs spanwise), {surface} surface')
+fl.plot_cf_phase_portrait(
+   component_pair=('spanwise', 'chordwise'), surface=surface, span_min=span_min,
+   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_spanwise_chordwise_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
-# fl.plot_cf_phase_portrait_by_strip(
-#    component_pair=(None, 'spanwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_mag_spanwise_by_strip_{case}.png'),
-# )
+print(40*'-')
+print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
+fl.plot_cf_phase_portrait_by_strip(
+   component_pair=(None, 'chordwise'), surface=surface, span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
+   normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_mag_chordwise_by_strip_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
-# fl.plot_cf_phase_portrait_by_strip(
-#    component_pair=('spanwise', 'chordwise'), surface='Upper', span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
-#    normalize=normalize,
-#    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_spanwise_chordwise_by_strip_{case}.png'),
-# )
+print(40*'-')
+print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
+fl.plot_cf_phase_portrait_by_strip(
+   component_pair=(None, 'spanwise'), surface=surface, span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
+   normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_mag_spanwise_by_strip_{surface.lower()}_{case}.png'),
+)
 
-# # Convergence checking: cumulative mean+variance and higher-order
-# # moments (skewness/flatness) of Cf ITSELF - the same tools already
-# # used for thrust/torque in forces_manager.py, fed with Cf's own
-# # spatial-mean-per-frame series instead. Near-wall/viscous quantities
-# # are known to converge MORE SLOWLY than integrated forces (see the Cf
-# # phase-portrait note above), so this is worth checking even once
-# # thrust/torque already look converged. No extra span cropping needed
-# # here - fl was already constructed with span_min=span_min, so
-# # cf_time_series() only ever covers the one blade half fl was built
-# # with; just reduce it to one scalar per frame:
-# cf_mag_series = fl.cf_time_series(surface='Upper', component=None).mean(axis=1)
-# cf_chordwise_series = fl.cf_time_series(surface='Upper', component='chordwise').mean(axis=1)
-# cf_spanwise_series = fl.cf_time_series(surface='Upper', component='spanwise').mean(axis=1)
+print(40*'-')
+print('Plotting per-strip Cf phase portraits (spanwise vs chordwise) - localizes convergence issues by span')
+fl.plot_cf_phase_portrait_by_strip(
+   component_pair=('spanwise', 'chordwise'), surface=surface, span_min=span_min, n_span_bins=10, strips=[2, 4, 6, 8, 9],
+   normalize=normalize,
+   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_phase_portrait_spanwise_chordwise_by_strip_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cumulative mean+variance of Cf magnitude')
-# plot_cumulative_stats(
-#    cf_mag_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
-#    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_mag_cumulative_stats_{case}.png'),
-# )
+# Convergence checking: cumulative mean+variance and higher-order
+# moments (skewness/flatness) of Cf ITSELF - the same tools already
+# used for thrust/torque in forces_manager.py, fed with Cf's own
+# spatial-mean-per-frame series instead. Near-wall/viscous quantities
+# are known to converge MORE SLOWLY than integrated forces (see the Cf
+# phase-portrait note above), so this is worth checking even once
+# thrust/torque already look converged. No extra span cropping needed
+# here - fl was already constructed with span_min=span_min, so
+# cf_time_series() only ever covers the one blade half fl was built
+# with; just reduce it to one scalar per frame:
+cf_mag_series = fl.cf_time_series(surface=surface, component=None).mean(axis=1)
+cf_chordwise_series = fl.cf_time_series(surface=surface, component='chordwise').mean(axis=1)
+cf_spanwise_series = fl.cf_time_series(surface=surface, component='spanwise').mean(axis=1)
 
-# print(40*'-')
-# print('Plotting cumulative mean+variance of chordwise Cf')
-# plot_cumulative_stats(
-#    cf_chordwise_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_{f,chordwise}$ [-]',
-#    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_chordwise_cumulative_stats_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative mean+variance of Cf magnitude')
+plot_cumulative_stats(
+   cf_mag_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
+   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_mag_cumulative_stats_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cumulative mean+variance of spanwise Cf')
-# plot_cumulative_stats(
-#    cf_spanwise_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_{f,spanwise}$ [-]',
-#    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_spanwise_cumulative_stats_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative mean+variance of chordwise Cf')
+plot_cumulative_stats(
+   cf_chordwise_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_{f,chordwise}$ [-]',
+   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_chordwise_cumulative_stats_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cumulative skewness+flatness of Cf magnitude')
-# plot_cumulative_moments(
-#    cf_mag_series, dt=dt, rpm=rpm, sync='none', label='$C_f$',
-#    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_mag_cumulative_moments_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative mean+variance of spanwise Cf')
+plot_cumulative_stats(
+   cf_spanwise_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_{f,spanwise}$ [-]',
+   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_spanwise_cumulative_stats_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cumulative skewness+flatness of chordwise Cf')
-# plot_cumulative_moments(
-#    cf_chordwise_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,chordwise}$',
-#    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_chordwise_cumulative_moments_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative skewness+flatness of Cf magnitude')
+plot_cumulative_moments(
+   cf_mag_series, dt=dt, rpm=rpm, sync='none', label='$C_f$',
+   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_mag_cumulative_moments_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cumulative skewness+flatness of spanwise Cf')
-# plot_cumulative_moments(
-#    cf_spanwise_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,spanwise}$',
-#    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_spanwise_cumulative_moments_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative skewness+flatness of chordwise Cf')
+plot_cumulative_moments(
+   cf_chordwise_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,chordwise}$',
+   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_chordwise_cumulative_moments_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cf magnitude autocorrelation, first half vs second half of the run')
-# plot_autocorrelation_windows(
-#   cf_mag_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
-#   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_mag_autocorrelation_windows_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cumulative skewness+flatness of spanwise Cf')
+plot_cumulative_moments(
+   cf_spanwise_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,spanwise}$',
+   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_spanwise_cumulative_moments_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cf spanwise autocorrelation, first half vs second half of the run')
-# plot_autocorrelation_windows(
-#   cf_spanwise_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
-#   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_spanwise_autocorrelation_windows_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cf magnitude autocorrelation, first half vs second half of the run')
+plot_autocorrelation_windows(
+  cf_mag_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+  savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_mag_autocorrelation_windows_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting cf chordwise autocorrelation, first half vs second half of the run')
-# plot_autocorrelation_windows(
-#   cf_chordwise_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
-#   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_chordwise_autocorrelation_windows_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cf spanwise autocorrelation, first half vs second half of the run')
+plot_autocorrelation_windows(
+  cf_spanwise_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+  savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_spanwise_autocorrelation_windows_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting integral timescale / required averaging time for cf magnitude')
-# plot_integral_timescale(
-#   cf_mag_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-#   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_mag_integral_timescale_{case}.png'),
-# )
+print(40*'-')
+print('Plotting cf chordwise autocorrelation, first half vs second half of the run')
+plot_autocorrelation_windows(
+  cf_chordwise_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+  savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_chordwise_autocorrelation_windows_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting integral timescale / required averaging time for cf spanwise')
-# plot_integral_timescale(
-#   cf_spanwise_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-#   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_spanwise_integral_timescale_{case}.png'),
-# )
+print(40*'-')
+print('Plotting integral timescale / required averaging time for cf magnitude')
+plot_integral_timescale(
+  cf_mag_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+  savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_mag_integral_timescale_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting integral timescale / required averaging time for cf chordwise')
-# plot_integral_timescale(
-#   cf_chordwise_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-#   savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_chordwise_integral_timescale_{case}.png'),
-# )
+print(40*'-')
+print('Plotting integral timescale / required averaging time for cf spanwise')
+plot_integral_timescale(
+  cf_spanwise_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+  savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_spanwise_integral_timescale_{surface.lower()}_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting integral timescale / required averaging time for cf chordwise')
+plot_integral_timescale(
+  cf_chordwise_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+  savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_chordwise_integral_timescale_{surface.lower()}_{case}.png'),
+)
 
 # # # Rolling (fixed-size sliding window) overlay on top of the cumulative
 # # # curve above (see README.md, "Cross-checking the cumulative curve with
@@ -487,266 +476,473 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 # #    savepath=os.path.join(master_path, f'images/cf/convergence/global/cf_mag_cumulative_stats_rolling_{case}.png'),
 # # )
 
-# # Convergence at a SINGLE point, not just the spatial mean above (see
-# # README.md, "Convergence checking at a single point, not just the
-# # spatial mean") - a converged spatial mean is necessary but not
-# # sufficient for convergence at any given point; span_pct/chord_pct=90/25
-# # targets a point near the tip, a location expected to be among the
-# # hardest to converge (see friction_lines_test_migration_overlay.png-
-# # style separation/reattachment discussion above for why the tip region
-# # is a reasonable "hardest case" choice on this project's own geometry -
-# # adjust per case).
-# chord_pts = np.arange(30, 101, 10)
-# span_pts = [50, 70, 80, 90]
+# Convergence at a SINGLE point, not just the spatial mean above (see
+# README.md, "Convergence checking at a single point, not just the
+# spatial mean") - a converged spatial mean is necessary but not
+# sufficient for convergence at any given point; span_pct/chord_pct=90/25
+# targets a point near the tip, a location expected to be among the
+# hardest to converge (see friction_lines_test_migration_overlay.png-
+# style separation/reattachment discussion above for why the tip region
+# is a reasonable "hardest case" choice on this project's own geometry -
+# adjust per case).
+chord_pts = np.arange(30, 101, 10)
+span_pts = [50, 70, 80, 90]
 
-# for chord in chord_pts:
-#    for span in span_pts:
-#       # Magnitude
-#       print(40*'-')
-#       print('Plotting cumulative mean+variance of Cf magnitude at a single point near the tip')
-#       cf_mag_point_series, cf_mag_point_info = fl.cf_time_series_at_point(span_pct=span, chord_pct=chord, surface='Upper')
+for chord in chord_pts:
+   for span in span_pts:
+      # Magnitude
+      print(40*'-')
+      print('Plotting cumulative mean+variance of Cf magnitude at a single point near the tip')
+      cf_mag_point_series, cf_mag_point_info = fl.cf_time_series_at_point(span_pct=span, chord_pct=chord, surface=surface)
 
-#       print('Point actually used: ', cf_mag_point_info)
-#       plot_cumulative_stats(
-#          cf_mag_point_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
-#          savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_mag_point_cumulative_stats_s{span:03d}_c{chord:03d}_{case}.png'),
-#       )
+      print('Point actually used: ', cf_mag_point_info)
+      plot_cumulative_stats(
+         cf_mag_point_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
+         savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_mag_point_cumulative_stats_s{span:03d}_c{chord:03d}_{surface.lower()}_{case}.png'),
+      )
 
-#       print(40*'-')
-#       print('Plotting cumulative skewness+flatness of spanwise Cf')
-#       plot_cumulative_moments(
-#          cf_mag_point_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,spanwise}$',
-#          savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_mag_point_cumulative_moments_s{span:03d}_c{chord:03d}_{case}.png'),
-#       )
+      print(40*'-')
+      print('Plotting cumulative skewness+flatness of spanwise Cf')
+      plot_cumulative_moments(
+         cf_mag_point_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,spanwise}$',
+         savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_mag_point_cumulative_moments_s{span:03d}_c{chord:03d}_{surface.lower()}_{case}.png'),
+      )
 
-#       print(40*'-')
-#       print('Plotting cf magnitude autocorrelation, first half vs second half of the run')
-#       plot_autocorrelation_windows(
-#       cf_mag_point_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
-#       savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_mag_point_autocorrelation_windows_s{span:03d}_c{chord:03d}_{case}.png'),
-#       )
+      print(40*'-')
+      print('Plotting cf magnitude autocorrelation, first half vs second half of the run')
+      plot_autocorrelation_windows(
+      cf_mag_point_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+      savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_mag_point_autocorrelation_windows_s{span:03d}_c{chord:03d}_{surface.lower()}_{case}.png'),
+      )
 
-#       print(40*'-')
-#       print('Plotting integral timescale / required averaging time for cf magnitude')
-#       plot_integral_timescale(
-#       cf_mag_point_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-#       savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_mag_point_integral_timescale_s{span:03d}_c{chord:03d}_{case}.png'),
-#       )
+      print(40*'-')
+      print('Plotting integral timescale / required averaging time for cf magnitude')
+      plot_integral_timescale(
+      cf_mag_point_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+      savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_mag_point_integral_timescale_s{span:03d}_c{chord:03d}_{surface.lower()}_{case}.png'),
+      )
 
-#       # Chordwise
-#       print(40*'-')
-#       print('Plotting cumulative mean+variance of Cf magnitude at a single point near the tip')
-#       cf_chordwise_point_series, cf_chordwise_point_info = fl.cf_time_series_at_point(span_pct=span, chord_pct=chord, surface='Upper', component='chordwise')
+      # Chordwise
+      print(40*'-')
+      print('Plotting cumulative mean+variance of Cf magnitude at a single point near the tip')
+      cf_chordwise_point_series, cf_chordwise_point_info = fl.cf_time_series_at_point(span_pct=span, chord_pct=chord, surface=surface, component='chordwise')
 
-#       print('Point actually used: ', cf_chordwise_point_info)
-#       plot_cumulative_stats(
-#          cf_chordwise_point_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
-#          savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_chordwise_point_cumulative_stats_s{span:03d}_c{chord:03d}_{case}.png'),
-#       )
+      print('Point actually used: ', cf_chordwise_point_info)
+      plot_cumulative_stats(
+         cf_chordwise_point_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
+         savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_chordwise_point_cumulative_stats_s{span:03d}_c{chord:03d}_{surface.lower()}_{case}.png'),
+      )
 
-#       print(40*'-')
-#       print('Plotting cumulative skewness+flatness of spanwise Cf')
-#       plot_cumulative_moments(
-#          cf_chordwise_point_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,spanwise}$',
-#          savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_chordwise_point_cumulative_moments_s{span:03d}_c{chord:03d}_{case}.png'),
-#       )
+      print(40*'-')
+      print('Plotting cumulative skewness+flatness of spanwise Cf')
+      plot_cumulative_moments(
+         cf_chordwise_point_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,spanwise}$',
+         savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_chordwise_point_cumulative_moments_s{span:03d}_c{chord:03d}_{surface.lower()}_{case}.png'),
+      )
 
-#       print(40*'-')
-#       print('Plotting cf magnitude autocorrelation, first half vs second half of the run')
-#       plot_autocorrelation_windows(
-#       cf_chordwise_point_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
-#       savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_chordwise_point_autocorrelation_windows_s{span:03d}_c{chord:03d}_{case}.png'),
-#       )
+      print(40*'-')
+      print('Plotting cf magnitude autocorrelation, first half vs second half of the run')
+      plot_autocorrelation_windows(
+      cf_chordwise_point_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+      savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_chordwise_point_autocorrelation_windows_s{span:03d}_c{chord:03d}_{surface.lower()}_{case}.png'),
+      )
 
-#       print(40*'-')
-#       print('Plotting integral timescale / required averaging time for cf magnitude')
-#       plot_integral_timescale(
-#       cf_chordwise_point_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-#       savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_chordwise_point_integral_timescale_s{span:03d}_c{chord:03d}_{case}.png'),
-#       )
+      print(40*'-')
+      print('Plotting integral timescale / required averaging time for cf magnitude')
+      plot_integral_timescale(
+      cf_chordwise_point_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+      savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_chordwise_point_integral_timescale_s{span:03d}_c{chord:03d}_{surface.lower()}_{case}.png'),
+      )
 
-#       # Spanwise
-#       print(40*'-')
-#       print('Plotting cumulative mean+variance of Cf magnitude at a single point near the tip')
-#       cf_spanwise_point_series, cf_spanwise_point_info = fl.cf_time_series_at_point(span_pct=span, chord_pct=chord, surface='Upper', component='spanwise')
+      # Spanwise
+      print(40*'-')
+      print('Plotting cumulative mean+variance of Cf magnitude at a single point near the tip')
+      cf_spanwise_point_series, cf_spanwise_point_info = fl.cf_time_series_at_point(span_pct=span, chord_pct=chord, surface=surface, component='spanwise')
 
-#       print('Point actually used: ', cf_spanwise_point_info)
-#       plot_cumulative_stats(
-#          cf_spanwise_point_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
-#          savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_spanwise_point_cumulative_stats_s{span:03d}_c{chord:03d}_{case}.png'),
-#       )
+      print('Point actually used: ', cf_spanwise_point_info)
+      plot_cumulative_stats(
+         cf_spanwise_point_series, dt=dt, rpm=rpm, sync='none', ylabel='$C_f$ [-]',
+         savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_spanwise_point_cumulative_stats_s{span:03d}_c{chord:03d}_{surface.lower()}_{case}.png'),
+      )
 
-#       print(40*'-')
-#       print('Plotting cumulative skewness+flatness of spanwise Cf')
-#       plot_cumulative_moments(
-#          cf_spanwise_point_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,spanwise}$',
-#          savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_spanwise_point_cumulative_moments_s{span:03d}_c{chord:03d}_{case}.png'),
-#       )
+      print(40*'-')
+      print('Plotting cumulative skewness+flatness of spanwise Cf')
+      plot_cumulative_moments(
+         cf_spanwise_point_series, dt=dt, rpm=rpm, sync='none', label='$C_{f,spanwise}$',
+         savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_spanwise_point_cumulative_moments_s{span:03d}_c{chord:03d}_{surface.lower()}_{case}.png'),
+      )
 
-#       print(40*'-')
-#       print('Plotting cf magnitude autocorrelation, first half vs second half of the run')
-#       plot_autocorrelation_windows(
-#       cf_spanwise_point_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
-#       savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_spanwise_point_autocorrelation_windows_s{span:03d}_c{chord:03d}_{case}.png'),
-#       )
+      print(40*'-')
+      print('Plotting cf magnitude autocorrelation, first half vs second half of the run')
+      plot_autocorrelation_windows(
+      cf_spanwise_point_series, n_windows=2, dt=dt, labels=['First half', 'Second half'],
+      savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_spanwise_point_autocorrelation_windows_s{span:03d}_c{chord:03d}_{surface.lower()}_{case}.png'),
+      )
 
-#       print(40*'-')
-#       print('Plotting integral timescale / required averaging time for cf magnitude')
-#       plot_integral_timescale(
-#       cf_spanwise_point_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
-#       savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_spanwise_point_integral_timescale_s{span:03d}_c{chord:03d}_{case}.png'),
-#       )
+      print(40*'-')
+      print('Plotting integral timescale / required averaging time for cf magnitude')
+      plot_integral_timescale(
+      cf_spanwise_point_series, dt=dt, rpm=rpm, sync='none', target_relative_sem=0.01,
+      savepath=os.path.join(master_path, f'images/cf/convergence/local/cf_spanwise_point_integral_timescale_s{span:03d}_c{chord:03d}_{surface.lower()}_{case}.png'),
+      )
 
-# # ------------- Proper Orthogonal Decomposition (POD) of Cf ------------- #
-# #
-# # Objective, energy-ranked check of the spatial coherent structure
-# # identified from the friction-line/critical-point analysis above (e.g.
-# # an LSB/leading-edge-vortex-like structure and its migration with span -
-# # see rotaris-docs/pod_section.tex for the full derivation). Computed on
-# # ONE surface at a time (Upper/suction side here, where that structure
-# # was identified - NOT both surfaces combined, matching how
-# # cf_time_series() is already surface-specific), restricted to the span
-# # window where the structure actually lives - NOT assumed to be the tip;
-# # pod_span_min/pod_span_max below are a placeholder and must be set from
-# # this case's own friction-line/critical-point findings above before the
-# # result means anything.
-# pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
-# # pod_chord_min/pod_chord_max: set these (e.g. pod_chord_min = -0.02) if
-# # plot_pod_mode()'s own output shows a stray point sitting far from the
-# # rest of the selected region - confirmed a real degenerate/edge surfel
-# # on a real case, visible as a single dot that also drags the plot's own
-# # axis range out to accommodate it, squeezing the actual structure into
-# # a sliver. None (default, either one): no crop - check the printed
-# # chord min/max below first; only add a bound once you've confirmed
-# # there's a genuine single-point (or near-single-point) outlier, not
-# # real edge data (see FrictionLines/SurfaceVariable's own chord_percentile
-# # docstrings for the same caution about assuming something is an
-# # artifact rather than real physics).
-# pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own findings below, if needed
-# # pod_point_stride: keep only every Nth point of pod_region (e.g. 2 or 3),
-# # AFTER the span/chord crop above - for a case where even the physically-
-# # justified region is still too many points to fit in memory (confirmed a
-# # real OOM on a real DNS-resolution case, pressure branch: narrowing
-# # pod_span_min/pod_span_max alone cut the region to 38% of the surface's
-# # total points, which was still ~477GB materialized - point density only
-# # falls off roughly linearly with a narrower span band, not steeply, so
-# # region narrowing alone may not be enough on its own for an unusually
-# # fine-resolution case). None/1 (default): no decimation, every point in
-# # the selected region kept - this is what every OTHER case in this
-# # project should leave it as; only set this for a case too large to fit
-# # otherwise, same spirit as pod_span_min/pod_span_max/pod_chord_min/
-# # pod_chord_max above - an explicit, deliberate reduction, not a silent
-# # default.
-# pod_point_stride = 2  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
+# ------------- Proper Orthogonal Decomposition (POD) of Cf ------------- #
+#
+# Objective, energy-ranked check of the spatial coherent structure
+# identified from the friction-line/critical-point analysis above (e.g.
+# an LSB/leading-edge-vortex-like structure and its migration with span -
+# see rotaris-docs/pod_section.tex for the full derivation). Computed on
+# ONE surface at a time (Upper/suction side here, where that structure
+# was identified - NOT both surfaces combined, matching how
+# cf_time_series() is already surface-specific), restricted to the span
+# window where the structure actually lives - NOT assumed to be the tip;
+# pod_span_min/pod_span_max below are a placeholder and must be set from
+# this case's own friction-line/critical-point findings above before the
+# result means anything.
+pod_span_min, pod_span_max = 0.1 * r_tip, 1 * r_tip  # TODO: set from this case's own findings above
+# pod_chord_min/pod_chord_max: set these (e.g. pod_chord_min = -0.02) if
+# plot_pod_mode()'s own output shows a stray point sitting far from the
+# rest of the selected region - confirmed a real degenerate/edge surfel
+# on a real case, visible as a single dot that also drags the plot's own
+# axis range out to accommodate it, squeezing the actual structure into
+# a sliver. None (default, either one): no crop - check the printed
+# chord min/max below first; only add a bound once you've confirmed
+# there's a genuine single-point (or near-single-point) outlier, not
+# real edge data (see FrictionLines/SurfaceVariable's own chord_percentile
+# docstrings for the same caution about assuming something is an
+# artifact rather than real physics).
+pod_chord_min, pod_chord_max = None, None  # TODO: set from this case's own findings below, if needed
+# pod_point_stride: keep only every Nth point of pod_region (e.g. 2 or 3),
+# AFTER the span/chord crop above - for a case where even the physically-
+# justified region is still too many points to fit in memory (confirmed a
+# real OOM on a real DNS-resolution case, pressure branch: narrowing
+# pod_span_min/pod_span_max alone cut the region to 38% of the surface's
+# total points, which was still ~477GB materialized - point density only
+# falls off roughly linearly with a narrower span band, not steeply, so
+# region narrowing alone may not be enough on its own for an unusually
+# fine-resolution case). None/1 (default): no decimation, every point in
+# the selected region kept - this is what every OTHER case in this
+# project should leave it as; only set this for a case too large to fit
+# otherwise, same spirit as pod_span_min/pod_span_max/pod_chord_min/
+# pod_chord_max above - an explicit, deliberate reduction, not a silent
+# default.
+pod_point_stride = 1  # TODO: set e.g. 2 or 3 only if this case's own region is still too large
 
-# span_fl, chord_fl = fl._span_chord('Upper')
-# radius_fl = fl._radius('Upper')
-# area_fl = fl._area('Upper')
-# # radius_fl (TRUE physical radius, [0, r_tip]) - NOT span_fl (the raw,
-# # CENTERED Cartesian span coordinate _span_chord() returns, roughly
-# # [-half_extent, +half_extent]) - pod_span_min/pod_span_max are fractions
-# # of r_tip, so they only mean "10%-100% of the blade" when compared
-# # against radius_fl. Comparing them against span_fl instead (an earlier
-# # version of this line did) silently selected some arbitrary narrow
-# # sliver near whichever end has positive centered-span values instead -
-# # confirmed on a real case: 0.1*r_tip to 1*r_tip was intended to cover
-# # nearly the whole blade, but the plotted region only ever showed the
-# # last ~15% near the tip.
-# pod_region = (radius_fl >= pod_span_min) & (radius_fl <= pod_span_max)
-# print(f'pod_region chord range BEFORE any pod_chord_min/pod_chord_max crop: '
-#       f'[{chord_fl[pod_region].min():.4f}, {chord_fl[pod_region].max():.4f}] '
-#       f'({int(pod_region.sum())} points) - check this for a stray outlier before trusting the plot/POD below')
-# if pod_chord_min is not None:
-#    pod_region &= chord_fl >= pod_chord_min
-# if pod_chord_max is not None:
-#    pod_region &= chord_fl <= pod_chord_max
+span_fl, chord_fl = fl._span_chord(surface)
+radius_fl = fl._radius(surface)
+area_fl = fl._area(surface)
+# radius_fl (TRUE physical radius, [0, r_tip]) - NOT span_fl (the raw,
+# CENTERED Cartesian span coordinate _span_chord() returns, roughly
+# [-half_extent, +half_extent]) - pod_span_min/pod_span_max are fractions
+# of r_tip, so they only mean "10%-100% of the blade" when compared
+# against radius_fl. Comparing them against span_fl instead (an earlier
+# version of this line did) silently selected some arbitrary narrow
+# sliver near whichever end has positive centered-span values instead -
+# confirmed on a real case: 0.1*r_tip to 1*r_tip was intended to cover
+# nearly the whole blade, but the plotted region only ever showed the
+# last ~15% near the tip.
+pod_region = (radius_fl >= pod_span_min) & (radius_fl <= pod_span_max)
+print(f'pod_region chord range BEFORE any pod_chord_min/pod_chord_max crop: '
+      f'[{chord_fl[pod_region].min():.4f}, {chord_fl[pod_region].max():.4f}] '
+      f'({int(pod_region.sum())} points) - check this for a stray outlier before trusting the plot/POD below')
+if pod_chord_min is not None:
+   pod_region &= chord_fl >= pod_chord_min
+if pod_chord_max is not None:
+   pod_region &= chord_fl <= pod_chord_max
 
-# if pod_point_stride is not None and pod_point_stride > 1:
-#    # Thin out the ALREADY-selected region's own points, in their existing
-#    # order - not a re-crop by position, so it keeps points spread across
-#    # the whole span_min/span_max x chord_min/chord_max box rather than
-#    # cutting off one side of it.
-#    kept_indices = np.flatnonzero(pod_region)[::pod_point_stride]
-#    pod_region = np.zeros_like(pod_region)
-#    pod_region[kept_indices] = True
-#    print(f'pod_point_stride={pod_point_stride}: region thinned to {int(pod_region.sum())} points')
+if pod_point_stride is not None and pod_point_stride > 1:
+   # Thin out the ALREADY-selected region's own points, in their existing
+   # order - not a re-crop by position, so it keeps points spread across
+   # the whole span_min/span_max x chord_min/chord_max box rather than
+   # cutting off one side of it.
+   kept_indices = np.flatnonzero(pod_region)[::pod_point_stride]
+   pod_region = np.zeros_like(pod_region)
+   pod_region[kept_indices] = True
+   print(f'pod_point_stride={pod_point_stride}: region thinned to {int(pod_region.sum())} points')
 
-# modes = [0,1]
+modes = [0,1]
 
-# print(40*'-')
-# print(f'Running POD on Cf magnitude, Upper surface, {int(pod_region.sum())} points in the selected region')
-# cf_pod_mag_data = fl.cf_time_series(surface='Upper', component=None)[:, pod_region]
-# cf_pod_mag_result = pod(cf_pod_mag_data, n_modes=100, weights=area_fl[pod_region])
-# print('Cf magnitude POD energy fractions (first 5): ', cf_pod_mag_result['energy_fraction'][:5])
+print(40*'-')
+print(f'Running POD on Cf magnitude, {surface} surface, {int(pod_region.sum())} points in the selected region')
+cf_pod_mag_data = fl.cf_time_series(surface=surface, component=None)[:, pod_region]
+cf_pod_mag_result = pod(cf_pod_mag_data, n_modes=100, weights=area_fl[pod_region])
+print('Cf magnitude POD energy fractions (first 5): ', cf_pod_mag_result['energy_fraction'][:5])
 
-# print(40*'-')
-# print('Plotting Cf magnitude POD energy spectrum')
-# plot_pod_energy(
-#    cf_pod_mag_result,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_energy_{case}.png'),
-# )
+print(40*'-')
+print('Plotting Cf magnitude POD energy spectrum')
+plot_pod_energy(
+   cf_pod_mag_result,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_energy_{surface.lower()}_{case}.png'),
+)
 
-# print(40*'-')
-# print('Plotting Cf magnitude POD spectrogram (every retained mode\'s own PSD)')
-# plot_pod_spectrogram(
-#    cf_pod_mag_result, dt=dt,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_spectrogram_{case}.png'),
-# )
+print(40*'-')
+print('Plotting Cf magnitude POD spectrogram (every retained mode\'s own PSD)')
+plot_pod_spectrogram(
+   cf_pod_mag_result, dt=dt,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_spectrogram_{surface.lower()}_{case}.png'),
+)
 
-# for m in modes:
-#    print(40*'-')
-#    print('Plotting Cf magnitude POD mode 1 (most energetic) on the actual blade geometry')
-#    plot_pod_mode(
-#       radius_fl[pod_region], chord_fl[pod_region], cf_pod_mag_result, mode_index=m,
-#       unit_label='$C_f$ mode amplitude [-]',
-#       figsize=blade_figsize,
-#       savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_{case}.png'),
-#    )
+for m in modes:
+   print(40*'-')
+   print('Plotting Cf magnitude POD mode 1 (most energetic) on the actual blade geometry')
+   plot_pod_mode(
+      radius_fl[pod_region], chord_fl[pod_region], cf_pod_mag_result, mode_index=m,
+      unit_label='$C_f$ mode amplitude [-]',
+      interpolate=interpolate,
+      figsize=blade_figsize,
+      savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_{surface.lower()}_{case}.png'),
+   )
 
-#    print(40*'-')
-#    print('Plotting Cf magnitude POD mode 1 temporal coefficient')
-#    plot_pod_temporal_coefficient(
-#       cf_pod_mag_result, mode_index=m, dt=dt,
-#       savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_{case}.png'),
-#    )
+   print(40*'-')
+   print('Plotting Cf magnitude POD mode 1 temporal coefficient')
+   plot_pod_temporal_coefficient(
+      cf_pod_mag_result, mode_index=m, dt=dt,
+      savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_{surface.lower()}_{case}.png'),
+   )
    
-#    print(40*'-')
-#    print('Plotting Cf magnitude POD mode 1 temporal coefficient PSD')
-#    plot_periodogram(
-#       cf_pod_mag_result['coefficients'][:, m], dt=dt,
-#       ylabel='$a_1(t)$ PSD',
-#       savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_psd_{case}.png'),
-#    )
+   print(40*'-')
+   print('Plotting Cf magnitude POD mode 1 temporal coefficient PSD')
+   plot_periodogram(
+      cf_pod_mag_result['coefficients'][:, m], dt=dt,
+      ylabel='$a_1(t)$ PSD',
+      savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_psd_{surface.lower()}_{case}.png'),
+   )
 
-#    print(40*'-')
-#    print('Plotting Cf magnitude POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
-#    plot_phase_lock(
-#       cf_pod_mag_result['coefficients'][:, m], dt, rpm,
-#       ylabel='$a_1(t)$ phase-locked mean',
-#       savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_phaselock_{case}.png'),
-#    )
+   print(40*'-')
+   print('Plotting Cf magnitude POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
+   plot_phase_lock(
+      cf_pod_mag_result['coefficients'][:, m], dt, rpm,
+      ylabel='$a_1(t)$ phase-locked mean',
+      savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_pod_mode{m+1}_coeff_phaselock_{surface.lower()}_{case}.png'),
+   )
 
-# # Do modes 1 and 2 form a traveling-wave pair? Quadrature (~90 deg), not
-# # opposite phase (~180 deg), is the expected signature - see
-# # pod_mode_phase()'s own docstring.
+# Do modes 1 and 2 form a traveling-wave pair? Quadrature (~90 deg), not
+# opposite phase (~180 deg), is the expected signature - see
+# pod_mode_phase()'s own docstring.
+print(40*'-')
+print('Checking Cf magnitude POD mode 1/2 phase relationship (quadrature check)')
+print(pod_mode_phase(cf_pod_mag_result, mode_a=0, mode_b=1, dt=dt))
+
+# Spatial coherence length of the raw Cf magnitude field itself -
+# anchored on the dominant POD mode's own peak location (see
+# two_point_correlation()'s own docstring for why this, rather than the
+# default peak-RMS point, is the right anchor once a specific coherent
+# structure has already been identified).
+cf_mag_ref_index = int(np.argmax(np.abs(cf_pod_mag_result['modes'][0])))
+print(40*'-')
+print('Checking Cf magnitude two-point spatial correlation / coherence length')
+print(two_point_correlation(
+   cf_pod_mag_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_mag_ref_index,
+)['length_scale'])
+plot_two_point_correlation(
+   cf_pod_mag_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_mag_ref_index,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_two_point_corr_{surface.lower()}_{case}.png'),
+)
+
+# Chordwise component specifically - the signed quantity whose sign
+# reversal actually DEFINES separation/the LSB (see
+# rotaris-docs/cf_computations_section.tex, "Directional Components
+# versus Magnitude"), so the most direct POD counterpart to the
+# friction-line/critical-point story above:
+print(40*'-')
+print(f'Running POD on Cf chordwise component, {surface} surface, {int(pod_region.sum())} points in the selected region')
+cf_pod_chordwise_data = fl.cf_time_series(surface=surface, component='chordwise')[:, pod_region]
+cf_pod_chordwise_result = pod(cf_pod_chordwise_data, n_modes=100, weights=area_fl[pod_region])
+print('Cf chordwise POD energy fractions (first 5): ', cf_pod_chordwise_result['energy_fraction'][:5])
+
+print(40*'-')
+print('Plotting Cf chordwise POD energy spectrum')
+plot_pod_energy(
+   cf_pod_chordwise_result,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_energy_{surface.lower()}_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf chordwise POD spectrogram (every retained mode\'s own PSD)')
+plot_pod_spectrogram(
+   cf_pod_chordwise_result, dt=dt,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_spectrogram_{surface.lower()}_{case}.png'),
+)
+
+for m in modes:
+   print(40*'-')
+   print('Plotting Cf chordwise POD mode 1 (most energetic) on the actual blade geometry')
+   plot_pod_mode(
+      radius_fl[pod_region], chord_fl[pod_region], cf_pod_chordwise_result, mode_index=m,
+      unit_label='$C_{f,chordwise}$ mode amplitude [-]',
+      interpolate=interpolate,
+      figsize=blade_figsize,
+      savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_{surface.lower()}_{case}.png'),
+   )
+
+   print(40*'-')
+   print('Plotting Cf chordwise POD mode 1 temporal coefficient')
+   plot_pod_temporal_coefficient(
+      cf_pod_chordwise_result, mode_index=m, dt=dt,
+      savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_{surface.lower()}_{case}.png'),
+   )
+
+   print(40*'-')
+   print('Plotting Cf chordwise POD mode 1 temporal coefficient PSD')
+   plot_periodogram(
+      cf_pod_chordwise_result['coefficients'][:, m], dt=dt,
+      ylabel='$a_1(t)$ PSD',
+      savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_psd_{surface.lower()}_{case}.png'),
+   )
+
+   print(40*'-')
+   print('Plotting Cf chordwise POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
+   plot_phase_lock(
+      cf_pod_chordwise_result['coefficients'][:, m], dt, rpm,
+      ylabel='$a_1(t)$ phase-locked mean',
+      savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_phaselock_{surface.lower()}_{case}.png'),
+   )
+
+print(40*'-')
+print('Checking Cf chordwise POD mode 1/2 phase relationship (quadrature check)')
+print(pod_mode_phase(cf_pod_chordwise_result, mode_a=0, mode_b=1, dt=dt))
+
+cf_chordwise_ref_index = int(np.argmax(np.abs(cf_pod_chordwise_result['modes'][0])))
+print(40*'-')
+print('Checking Cf chordwise two-point spatial correlation / coherence length')
+print(two_point_correlation(
+   cf_pod_chordwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_chordwise_ref_index,
+)['length_scale'])
+plot_two_point_correlation(
+   cf_pod_chordwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_chordwise_ref_index,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_two_point_corr_{surface.lower()}_{case}.png'),
+)
+
+# Spanwise component specifically - the signed quantity whose sign
+# reversal actually DEFINES separation/the LSB (see
+# rotaris-docs/cf_computations_section.tex, "Directional Components
+# versus Magnitude"), so the most direct POD counterpart to the
+# friction-line/critical-point story above:
+print(40*'-')
+print(f'Running POD on Cf spanwise component, {surface} surface, {int(pod_region.sum())} points in the selected region')
+cf_pod_spanwise_data = fl.cf_time_series(surface=surface, component='spanwise')[:, pod_region]
+cf_pod_spanwise_result = pod(cf_pod_spanwise_data, n_modes=100, weights=area_fl[pod_region])
+print('Cf spanwise POD energy fractions (first 5): ', cf_pod_spanwise_result['energy_fraction'][:5])
+
+print(40*'-')
+print('Plotting Cf spanwise POD energy spectrum')
+plot_pod_energy(
+   cf_pod_spanwise_result,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_energy_{surface.lower()}_{case}.png'),
+)
+
+print(40*'-')
+print('Plotting Cf spanwise POD spectrogram (every retained mode\'s own PSD)')
+plot_pod_spectrogram(
+   cf_pod_spanwise_result, dt=dt,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_spectrogram_{surface.lower()}_{case}.png'),
+)
+
+for m in modes:
+   print(40*'-')
+   print('Plotting Cf spanwise POD mode 1 (most energetic) on the actual blade geometry')
+   plot_pod_mode(
+      radius_fl[pod_region], chord_fl[pod_region], cf_pod_spanwise_result, mode_index=m,
+      unit_label='$C_{f,spanwise}$ mode amplitude [-]',
+      interpolate=interpolate,
+      figsize=blade_figsize,
+      savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_{surface.lower()}_{case}.png'),
+   )
+
+   print(40*'-')
+   print('Plotting Cf spanwise POD mode 1 temporal coefficient')
+   plot_pod_temporal_coefficient(
+      cf_pod_spanwise_result, mode_index=m, dt=dt,
+      savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_{surface.lower()}_{case}.png'),
+   )
+
+   print(40*'-')
+   print('Plotting Cf spanwise POD mode 1 temporal coefficient PSD')
+   plot_periodogram(
+      cf_pod_spanwise_result['coefficients'][:, m], dt=dt,
+      ylabel=f'$a_{m+1}(t)$ PSD',
+      savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_psd_{surface.lower()}_{case}.png'),
+   )
+
+   print(40*'-')
+   print('Plotting Cf spanwise POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
+   plot_phase_lock(
+      cf_pod_spanwise_result['coefficients'][:, m], dt, rpm,
+      ylabel=f'$a_{m+1}(t)$ phase-locked mean',
+      savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_phaselock_{surface.lower()}_{case}.png'),
+   )
+
+print(40*'-')
+print('Checking Cf spanwise POD mode 1/2 phase relationship (quadrature check)')
+print(pod_mode_phase(cf_pod_spanwise_result, mode_a=0, mode_b=1, dt=dt))
+
+cf_spanwise_ref_index = int(np.argmax(np.abs(cf_pod_spanwise_result['modes'][0])))
+print(40*'-')
+print('Checking Cf spanwise two-point spatial correlation / coherence length')
+print(two_point_correlation(
+   cf_pod_spanwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_spanwise_ref_index,
+)['length_scale'])
+plot_two_point_correlation(
+   cf_pod_spanwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_spanwise_ref_index,
+   savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_two_point_corr_{surface.lower()}_{case}.png'),
+)
+
 # print(40*'-')
-# print('Checking Cf magnitude POD mode 1/2 phase relationship (quadrature check)')
-# print(pod_mode_phase(cf_pod_mag_result, mode_a=0, mode_b=1, dt=dt))
+# print('Running DMD on Cf chordwise POD coefficient subspace')
+# cf_dmd_chordwise_result = dmd(cf_pod_chordwise_result, dt=dt, n_modes=6)
+# print('Cf chordwise DMD frequencies [Hz]: ', cf_dmd_chordwise_result['frequency'])
+# print('Cf chordwise DMD growth rates [1/s]: ', cf_dmd_chordwise_result['growth_rate'])
 
-# # Spatial coherence length of the raw Cf magnitude field itself -
-# # anchored on the dominant POD mode's own peak location (see
-# # two_point_correlation()'s own docstring for why this, rather than the
-# # default peak-RMS point, is the right anchor once a specific coherent
-# # structure has already been identified).
-# cf_mag_ref_index = int(np.argmax(np.abs(cf_pod_mag_result['modes'][0])))
 # print(40*'-')
-# print('Checking Cf magnitude two-point spatial correlation / coherence length')
-# print(two_point_correlation(
-#    cf_pod_mag_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_mag_ref_index,
-# )['length_scale'])
-# plot_two_point_correlation(
-#    cf_pod_mag_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_mag_ref_index,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_two_point_corr_{case}.png'),
+# print('Plotting Cf chordwise DMD spectrum')
+# plot_dmd_spectrum(
+#    cf_dmd_chordwise_result,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_spectrum_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting Cf chordwise DMD mode 1 (largest amplitude) on the actual blade geometry')
+# plot_dmd_mode(
+#    radius_fl[pod_region], chord_fl[pod_region], cf_dmd_chordwise_result, mode_index=0,
+#    unit_label='$C_{f,chordwise}$ DMD mode amplitude [-]',
+#    figsize=blade_figsize,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_mode1_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting Cf chordwise DMD reconstruction vs. the recorded POD coefficient (mode 1)')
+# plot_dmd_reconstruction(
+#    cf_pod_chordwise_result, cf_dmd_chordwise_result, mode_index=0, dt=dt,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_reconstruction_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Running DMD on Cf spanwise POD coefficient subspace')
+# cf_dmd_spanwise_result = dmd(cf_pod_spanwise_result, dt=dt, n_modes=6)
+# print('Cf spanwise DMD frequencies [Hz]: ', cf_dmd_spanwise_result['frequency'])
+# print('Cf spanwise DMD growth rates [1/s]: ', cf_dmd_spanwise_result['growth_rate'])
+
+# print(40*'-')
+# print('Plotting Cf spanwise DMD spectrum')
+# plot_dmd_spectrum(
+#    cf_dmd_spanwise_result,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_spectrum_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting Cf spanwise DMD mode 1 (largest amplitude) on the actual blade geometry')
+# plot_dmd_mode(
+#    radius_fl[pod_region], chord_fl[pod_region], cf_dmd_spanwise_result, mode_index=0,
+#    unit_label='$C_{f,spanwise}$ DMD mode amplitude [-]',
+#    figsize=blade_figsize,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_mode1_{case}.png'),
+# )
+
+# print(40*'-')
+# print('Plotting Cf spanwise DMD reconstruction vs. the recorded POD coefficient (mode 1)')
+# plot_dmd_reconstruction(
+#    cf_pod_spanwise_result, cf_dmd_spanwise_result, mode_index=0, dt=dt,
+#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_reconstruction_{case}.png'),
 # )
 
 # # DMD, fit on the (noise-robust, truncated) POD coefficient subspace -
@@ -779,208 +975,4 @@ for frame in range(0,fl.n_frames,frame_loop_step):
 # plot_dmd_reconstruction(
 #    cf_pod_mag_result, cf_dmd_mag_result, mode_index=0, dt=dt,
 #    savepath=os.path.join(master_path, f'images/cf/pod/cf_mag_dmd_reconstruction_{case}.png'),
-# )
-
-# # Chordwise component specifically - the signed quantity whose sign
-# # reversal actually DEFINES separation/the LSB (see
-# # rotaris-docs/cf_computations_section.tex, "Directional Components
-# # versus Magnitude"), so the most direct POD counterpart to the
-# # friction-line/critical-point story above:
-# print(40*'-')
-# print(f'Running POD on Cf chordwise component, Upper surface, {int(pod_region.sum())} points in the selected region')
-# cf_pod_chordwise_data = fl.cf_time_series(surface='Upper', component='chordwise')[:, pod_region]
-# cf_pod_chordwise_result = pod(cf_pod_chordwise_data, n_modes=100, weights=area_fl[pod_region])
-# print('Cf chordwise POD energy fractions (first 5): ', cf_pod_chordwise_result['energy_fraction'][:5])
-
-# print(40*'-')
-# print('Plotting Cf chordwise POD energy spectrum')
-# plot_pod_energy(
-#    cf_pod_chordwise_result,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_energy_{case}.png'),
-# )
-
-# print(40*'-')
-# print('Plotting Cf chordwise POD spectrogram (every retained mode\'s own PSD)')
-# plot_pod_spectrogram(
-#    cf_pod_chordwise_result, dt=dt,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_spectrogram_{case}.png'),
-# )
-
-# for m in modes:
-#    print(40*'-')
-#    print('Plotting Cf chordwise POD mode 1 (most energetic) on the actual blade geometry')
-#    plot_pod_mode(
-#       radius_fl[pod_region], chord_fl[pod_region], cf_pod_chordwise_result, mode_index=m,
-#       unit_label='$C_{f,chordwise}$ mode amplitude [-]',
-#       figsize=blade_figsize,
-#       savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_{case}.png'),
-#    )
-
-#    print(40*'-')
-#    print('Plotting Cf chordwise POD mode 1 temporal coefficient')
-#    plot_pod_temporal_coefficient(
-#       cf_pod_chordwise_result, mode_index=m, dt=dt,
-#       savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_{case}.png'),
-#    )
-
-#    print(40*'-')
-#    print('Plotting Cf chordwise POD mode 1 temporal coefficient PSD')
-#    plot_periodogram(
-#       cf_pod_chordwise_result['coefficients'][:, m], dt=dt,
-#       ylabel='$a_1(t)$ PSD',
-#       savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_psd_{case}.png'),
-#    )
-
-#    print(40*'-')
-#    print('Plotting Cf chordwise POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
-#    plot_phase_lock(
-#       cf_pod_chordwise_result['coefficients'][:, m], dt, rpm,
-#       ylabel='$a_1(t)$ phase-locked mean',
-#       savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_pod_mode{m+1}_coeff_phaselock_{case}.png'),
-#    )
-
-# print(40*'-')
-# print('Checking Cf chordwise POD mode 1/2 phase relationship (quadrature check)')
-# print(pod_mode_phase(cf_pod_chordwise_result, mode_a=0, mode_b=1, dt=dt))
-
-# cf_chordwise_ref_index = int(np.argmax(np.abs(cf_pod_chordwise_result['modes'][0])))
-# print(40*'-')
-# print('Checking Cf chordwise two-point spatial correlation / coherence length')
-# print(two_point_correlation(
-#    cf_pod_chordwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_chordwise_ref_index,
-# )['length_scale'])
-# plot_two_point_correlation(
-#    cf_pod_chordwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_chordwise_ref_index,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_two_point_corr_{case}.png'),
-# )
-
-# print(40*'-')
-# print('Running DMD on Cf chordwise POD coefficient subspace')
-# cf_dmd_chordwise_result = dmd(cf_pod_chordwise_result, dt=dt, n_modes=6)
-# print('Cf chordwise DMD frequencies [Hz]: ', cf_dmd_chordwise_result['frequency'])
-# print('Cf chordwise DMD growth rates [1/s]: ', cf_dmd_chordwise_result['growth_rate'])
-
-# print(40*'-')
-# print('Plotting Cf chordwise DMD spectrum')
-# plot_dmd_spectrum(
-#    cf_dmd_chordwise_result,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_spectrum_{case}.png'),
-# )
-
-# print(40*'-')
-# print('Plotting Cf chordwise DMD mode 1 (largest amplitude) on the actual blade geometry')
-# plot_dmd_mode(
-#    radius_fl[pod_region], chord_fl[pod_region], cf_dmd_chordwise_result, mode_index=0,
-#    unit_label='$C_{f,chordwise}$ DMD mode amplitude [-]',
-#    figsize=blade_figsize,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_mode1_{case}.png'),
-# )
-
-# print(40*'-')
-# print('Plotting Cf chordwise DMD reconstruction vs. the recorded POD coefficient (mode 1)')
-# plot_dmd_reconstruction(
-#    cf_pod_chordwise_result, cf_dmd_chordwise_result, mode_index=0, dt=dt,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_chordwise_dmd_reconstruction_{case}.png'),
-# )
-
-# # Spanwise component specifically - the signed quantity whose sign
-# # reversal actually DEFINES separation/the LSB (see
-# # rotaris-docs/cf_computations_section.tex, "Directional Components
-# # versus Magnitude"), so the most direct POD counterpart to the
-# # friction-line/critical-point story above:
-# print(40*'-')
-# print(f'Running POD on Cf spanwise component, Upper surface, {int(pod_region.sum())} points in the selected region')
-# cf_pod_spanwise_data = fl.cf_time_series(surface='Upper', component='spanwise')[:, pod_region]
-# cf_pod_spanwise_result = pod(cf_pod_spanwise_data, n_modes=100, weights=area_fl[pod_region])
-# print('Cf spanwise POD energy fractions (first 5): ', cf_pod_spanwise_result['energy_fraction'][:5])
-
-# print(40*'-')
-# print('Plotting Cf spanwise POD energy spectrum')
-# plot_pod_energy(
-#    cf_pod_spanwise_result,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_energy_{case}.png'),
-# )
-
-# print(40*'-')
-# print('Plotting Cf spanwise POD spectrogram (every retained mode\'s own PSD)')
-# plot_pod_spectrogram(
-#    cf_pod_spanwise_result, dt=dt,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_spectrogram_{case}.png'),
-# )
-
-# for m in modes:
-#    print(40*'-')
-#    print('Plotting Cf spanwise POD mode 1 (most energetic) on the actual blade geometry')
-#    plot_pod_mode(
-#       radius_fl[pod_region], chord_fl[pod_region], cf_pod_spanwise_result, mode_index=m,
-#       unit_label='$C_{f,spanwise}$ mode amplitude [-]',
-#       figsize=blade_figsize,
-#       savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_{case}.png'),
-#    )
-
-#    print(40*'-')
-#    print('Plotting Cf spanwise POD mode 1 temporal coefficient')
-#    plot_pod_temporal_coefficient(
-#       cf_pod_spanwise_result, mode_index=m, dt=dt,
-#       savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_{case}.png'),
-#    )
-
-#    print(40*'-')
-#    print('Plotting Cf spanwise POD mode 1 temporal coefficient PSD')
-#    plot_periodogram(
-#       cf_pod_spanwise_result['coefficients'][:, m], dt=dt,
-#       ylabel=f'$a_{m+1}(t)$ PSD',
-#       savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_psd_{case}.png'),
-#    )
-
-#    print(40*'-')
-#    print('Plotting Cf spanwise POD mode 1 temporal coefficient, phase-locked to rotor azimuth')
-#    plot_phase_lock(
-#       cf_pod_spanwise_result['coefficients'][:, m], dt, rpm,
-#       ylabel=f'$a_{m+1}(t)$ phase-locked mean',
-#       savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_pod_mode{m+1}_coeff_phaselock_{case}.png'),
-#    )
-
-# print(40*'-')
-# print('Checking Cf spanwise POD mode 1/2 phase relationship (quadrature check)')
-# print(pod_mode_phase(cf_pod_spanwise_result, mode_a=0, mode_b=1, dt=dt))
-
-# cf_spanwise_ref_index = int(np.argmax(np.abs(cf_pod_spanwise_result['modes'][0])))
-# print(40*'-')
-# print('Checking Cf spanwise two-point spatial correlation / coherence length')
-# print(two_point_correlation(
-#    cf_pod_spanwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_spanwise_ref_index,
-# )['length_scale'])
-# plot_two_point_correlation(
-#    cf_pod_spanwise_data, radius_fl[pod_region], chord_fl[pod_region], ref_index=cf_spanwise_ref_index,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_two_point_corr_{case}.png'),
-# )
-
-# print(40*'-')
-# print('Running DMD on Cf spanwise POD coefficient subspace')
-# cf_dmd_spanwise_result = dmd(cf_pod_spanwise_result, dt=dt, n_modes=6)
-# print('Cf spanwise DMD frequencies [Hz]: ', cf_dmd_spanwise_result['frequency'])
-# print('Cf spanwise DMD growth rates [1/s]: ', cf_dmd_spanwise_result['growth_rate'])
-
-# print(40*'-')
-# print('Plotting Cf spanwise DMD spectrum')
-# plot_dmd_spectrum(
-#    cf_dmd_spanwise_result,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_spectrum_{case}.png'),
-# )
-
-# print(40*'-')
-# print('Plotting Cf spanwise DMD mode 1 (largest amplitude) on the actual blade geometry')
-# plot_dmd_mode(
-#    radius_fl[pod_region], chord_fl[pod_region], cf_dmd_spanwise_result, mode_index=0,
-#    unit_label='$C_{f,spanwise}$ DMD mode amplitude [-]',
-#    figsize=blade_figsize,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_mode1_{case}.png'),
-# )
-
-# print(40*'-')
-# print('Plotting Cf spanwise DMD reconstruction vs. the recorded POD coefficient (mode 1)')
-# plot_dmd_reconstruction(
-#    cf_pod_spanwise_result, cf_dmd_spanwise_result, mode_index=0, dt=dt,
-#    savepath=os.path.join(master_path, f'images/cf/pod/cf_spanwise_dmd_reconstruction_{case}.png'),
 # )

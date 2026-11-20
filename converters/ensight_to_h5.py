@@ -256,7 +256,7 @@ class EnsightSeriesWriter:
 
     def __init__(self, output_path: str, variables: list = None, surface_split: bool = False,
                  reference_positions=None, reference_upper=None, axis_origin=None, axis_direction=None,
-                 blade_lrf_offset_deg: float = 0.0):
+                 blade_lrf_offset_deg: float = 0.0, object_type: str = 'rotor'):
 
         if surface_split and (reference_positions is None or reference_upper is None):
             raise ValueError(
@@ -273,6 +273,7 @@ class EnsightSeriesWriter:
         self.axis_origin = axis_origin
         self.axis_direction = axis_direction
         self.blade_lrf_offset_deg = blade_lrf_offset_deg
+        self.object_type = object_type
         self._h5f = h5py.File(output_path, 'w')
         self._data_groups = None
         self._masks = None
@@ -329,6 +330,7 @@ class EnsightSeriesWriter:
         if self.axis_direction is not None:
             self._meta_group.create_dataset('lrf_axis_direction', data=self.axis_direction)
         self._meta_group.attrs['blade_lrf_offset_deg'] = self.blade_lrf_offset_deg
+        self._meta_group.attrs['object_type'] = self.object_type
 
     def _append_row(self, dataset, value):
         dataset.resize(dataset.shape[0] + 1, axis=0)
@@ -454,8 +456,8 @@ class EnsightSeriesWriter:
 def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_frame: int,
                        nc_stats_path: str = None, variables: list = None,
                        reference_frame: int = None, work_dir: str = None,
-                       surface_split: bool = False, face_names: list = None,
-                       blade_lrf_offset_deg: float = 0.0):
+                       surface_split: bool = False, split_axis: str = 'rotation', face_names: list = None,
+                       blade_lrf_offset_deg: float = 0.0, object_type: str = 'rotor'):
 
     '''
     Run the full pipeline for a range of frames within a single process:
@@ -493,6 +495,13 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
         classification borrowed from the raw .snc file, matched by
         nearest position (see EnsightFrame.surface_split and
         raw_positions_to_ensight_frame), by default False.
+    split_axis : str
+        Forwarded to SNCReader.surface_split() (the classification
+        source above borrows from) - see that method's docstring.
+        'rotation' (default) for a rotor blade; 'tangential' for a
+        stator vane in an axial-flow stage; 'radial' for completeness.
+        Use the SAME value here as the forces-branch conversion for this
+        case, so both branches agree on which surfel is Upper/Lower.
     face_names : list of str, optional
         Which faces to pass to pf2ens's `-i/--include_faces` (e.g.
         `['/rotor::blade1', '/rotor::blade2', '/rotor::hub']`). None
@@ -657,7 +666,7 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
 
     if surface_split:
         reference_positions = raw_positions
-        reference_upper = ref_reader.surface_split()[face_surfel_mask]
+        reference_upper = ref_reader.surface_split(split_axis=split_axis)[face_surfel_mask]
     else:
         reference_positions = reference_upper = None
 
@@ -691,7 +700,7 @@ def convert_snc_to_h5(snc_path: str, output_path: str, first_frame: int, last_fr
         output_path, variables=variables, surface_split=surface_split,
         reference_positions=reference_positions, reference_upper=reference_upper,
         axis_origin=axis_origin, axis_direction=axis_direction,
-        blade_lrf_offset_deg=blade_lrf_offset_deg,
+        blade_lrf_offset_deg=blade_lrf_offset_deg, object_type=object_type,
     )
 
     # Written UNCONDITIONALLY here, regardless of whether reference_frame

@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 from scipy.signal import welch
 
 from bladeprocessor._azimuth import azimuth_deg, azimuth_mask
+from bladeprocessor._dynamics import dynamic_pressure
+from bladeprocessor._grid_field import grid_scatter
 from bladeprocessor._h5_read import read_masked_columns
 
 plt.rcParams.update({
@@ -50,12 +52,27 @@ class SurfaceVariable:
         Path to a to_h5()/convert_snc_to_h5() HDF5 file (surface_split=True).
     r_tip : float, optional
         Physical tip radius [m], for reference only.
-    rho_ref, rpm, pref : float, optional
-        Reference density [kg/m^3], rotor speed [rev/min], and reference
-        (freestream) pressure [Pa] - needed for cp(stat='mean') (all
-        three) and cp(stat='rms'/'raw_rms') (rho_ref, rpm only - a
+    rho_ref, pref : float, optional
+        Reference density [kg/m^3] and reference (freestream) pressure
+        [Pa] - needed for cp(stat='mean') (both, plus rpm or v_ref) and
+        cp(stat='rms'/'raw_rms') (rho_ref plus rpm or v_ref only - a
         constant pref doesn't affect a fluctuation's statistics). Not
         needed by variable() itself (raw access).
+    rpm : float, optional
+        Rotor speed [rev/min], for a rotating object - q_ref =
+        0.5*rho_ref*(omega*r)^2, LOCAL to each point's own radius (see
+        FrictionLines' "Cf normalization" docstring - Cp uses the same
+        q_ref). Give exactly one of rpm/v_ref.
+    v_ref : float, optional
+        Reference freestream/inlet velocity [m/s], for a STATIONARY
+        object (a stator vane or a beam/strut has no rotation rate of
+        its own to build a local dynamic pressure from) - q_ref =
+        0.5*rho_ref*v_ref^2, the SAME value everywhere, not derived
+        from position (see bladeprocessor._dynamics.dynamic_pressure).
+        Give exactly one of rpm/v_ref. rpm can still be set
+        independently of this (on a stationary object too) purely as a
+        phase-lock period clock elsewhere - a separate use, unaffected
+        by v_ref.
     span_axis, chord_axis, thickness_axis : int
         Which raw position column (0=X, 1=Y, 2=Z) is spanwise, chordwise,
         thickness-wise - see FrictionLines' docstring.
@@ -83,8 +100,9 @@ class SurfaceVariable:
     '''
 
     def __init__(self, filename: str, r_tip: float = None, rho_ref: float = None, rpm: float = None,
-                 pref: float = None, c_ref: float = None, span_axis: int = 0, chord_axis: int = 2,
-                 thickness_axis: int = 1, azimuth_center_deg: float = None, azimuth_tol_deg: float = None):
+                 v_ref: float = None, pref: float = None, c_ref: float = None, span_axis: int = 0,
+                 chord_axis: int = 2, thickness_axis: int = 1, azimuth_center_deg: float = None,
+                 azimuth_tol_deg: float = None):
 
         if (azimuth_center_deg is None) != (azimuth_tol_deg is None):
             raise ValueError("azimuth_center_deg and azimuth_tol_deg must be given together.")
@@ -93,6 +111,7 @@ class SurfaceVariable:
         self.r_tip = r_tip
         self.rho_ref = rho_ref
         self.rpm = rpm
+        self.v_ref = v_ref
         self.pref = pref
         self.c_ref = c_ref
         self.span_axis = span_axis
@@ -277,12 +296,10 @@ class SurfaceVariable:
 
     def _q_ref(self, surface: str):
 
-        '''Local dynamic pressure q_ref = 0.5*rho_ref*(omega*r)^2 - see FrictionLines._q_ref().'''
+        '''Reference dynamic pressure q_ref - see FrictionLines._q_ref() (same rpm/v_ref dispatch).'''
 
-        omega = self.rpm * 2 * np.pi / 60
         r = self._radius(surface)
-
-        return 0.5 * self.rho_ref * (omega * r) ** 2
+        return dynamic_pressure(self.rho_ref, r, rpm=self.rpm, v_ref=self.v_ref)
 
     def variable(self, name: str, surface: str = 'Upper', frame: int = None, stat: str = 'mean',
                  frame_chunk_size: int = 50):
@@ -407,8 +424,8 @@ class SurfaceVariable:
         np.ndarray, shape (n_points,)
         '''
 
-        if self.rho_ref is None or self.rpm is None:
-            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cp.")
+        if self.rho_ref is None or (self.rpm is None and self.v_ref is None):
+            raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to compute Cp.")
 
         q_ref = self._q_ref(surface)
 
@@ -476,8 +493,8 @@ class SurfaceVariable:
         np.ndarray, shape (n_frames, n_points)
         '''
 
-        if self.rho_ref is None or self.rpm is None:
-            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cp.")
+        if self.rho_ref is None or (self.rpm is None and self.v_ref is None):
+            raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to compute Cp.")
         if self.pref is None:
             raise ValueError("pref must be set (in __init__) to compute Cp.")
 
@@ -552,8 +569,8 @@ class SurfaceVariable:
         np.ndarray, shape (n_frames,)
         '''
 
-        if self.rho_ref is None or self.rpm is None:
-            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cp.")
+        if self.rho_ref is None or (self.rpm is None and self.v_ref is None):
+            raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to compute Cp.")
         if self.pref is None:
             raise ValueError("pref must be set (in __init__) to compute Cp.")
 
@@ -655,8 +672,8 @@ class SurfaceVariable:
         np.ndarray, shape (n_frames, region_mask.sum())
         '''
 
-        if self.rho_ref is None or self.rpm is None:
-            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cp.")
+        if self.rho_ref is None or (self.rpm is None and self.v_ref is None):
+            raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to compute Cp.")
         if self.pref is None:
             raise ValueError("pref must be set (in __init__) to compute Cp.")
 
@@ -1043,6 +1060,202 @@ class SurfaceVariable:
                                    reverse_chord=reverse_chord, marker_size=marker_size, cmap=cmap,
                                    normalize=normalize, ax=ax, savepath=savepath, dpi=dpi)
 
+    def _axial_tangential(self, surface: str, strut_azimuth_deg: float):
+
+        '''
+        Raw (axial, tangential) position for every surfel on `surface` -
+        see FrictionLines._axial_tangential() for the full geometric
+        picture (a CYLINDRICAL object's own local cross-section
+        coordinates, for the "unwrap" view used instead of an Upper/
+        Lower split when that split isn't physically meaningful - a true
+        circular cross-section has no privileged pressure/suction side).
+        Duplicated here rather than shared via inheritance, same as
+        _radius()/_span_chord() - see this class's own docstring for why.
+
+        Returns
+        -------
+        axial, tangential : np.ndarray, shape (n_points,) each
+        '''
+
+        positions = self.positions[surface]
+        rel = positions - self.axis_origin
+        along = rel @ self.axis_direction
+        radial_vec = rel - along[:, None] * self.axis_direction
+
+        reference = np.array([1.0, 0.0, 0.0])
+        if abs(np.dot(reference, self.axis_direction)) > 0.9:
+            reference = np.array([0.0, 1.0, 0.0])
+        e1 = reference - np.dot(reference, self.axis_direction) * self.axis_direction
+        e1 /= np.linalg.norm(e1)
+        e2 = np.cross(self.axis_direction, e1)
+
+        theta0 = np.radians(strut_azimuth_deg)
+        u_tangential = -np.sin(theta0) * e1 + np.cos(theta0) * e2
+
+        return along, radial_vec @ u_tangential
+
+    def at_circumference(self, radii, strut_azimuth_deg, get_values, surface=('Upper', 'Lower'),
+                          tol: float = 0.0015, n_angle_bins: int = 75):
+
+        '''
+        Circumferential-angle-positioned values of an arbitrary per-surfel
+        field, at each of several span positions (distance from the
+        rotor's rotation axis - same "radius" at_radii() uses) around a
+        CYLINDRICAL object's own axis - the counterpart to at_radii() for
+        an object where Upper/Lower isn't physically meaningful (see
+        FrictionLines._axial_tangential()'s docstring - a true circular
+        cross-section has no privileged pressure/suction side, unlike an
+        airfoil).
+
+        Unlike at_radii() (which keeps each surface's curve separate -
+        {radius: {surface: (xc, values)}}), every surface named in
+        `surface` is POOLED together before binning here - together they
+        make up the WHOLE circle at that span position, so there's only
+        one curve per radius: {radius: (angle_deg, values)}. Pass
+        surface=('Upper',) (or whatever this file's single group is
+        named) if it wasn't converted with surface_split=True at all - a
+        physically-arbitrary split still works fine for a cylinder, it
+        just needs pooling back together here.
+
+        Parameters
+        ----------
+        radii : array-like of float
+            Target distances [m] from the rotor's rotation axis.
+        strut_azimuth_deg : float
+            See FrictionLines._axial_tangential().
+        get_values : callable(surface_label: str) -> np.ndarray
+            Same contract as at_radii()'s get_values.
+        tol : float
+            Half-width [m] of the band selected around each target radius.
+        n_angle_bins : int
+            Number of circumferential-angle bins (over -180..180 deg) to
+            average the field within - same role as at_radii()'s
+            n_chord_bins.
+
+        Returns
+        -------
+        dict[float, tuple[np.ndarray, np.ndarray]]
+            radius -> (angle_deg, values), sorted by angle_deg.
+        '''
+
+        surfaces = (surface,) if isinstance(surface, str) else tuple(surface)
+        curves = {}
+
+        for r_target in radii:
+
+            angle_parts, v_parts = [], []
+
+            for surf in surfaces:
+
+                r = self._radius(surf)
+                band = np.abs(r - r_target) < tol
+                if not np.any(band):
+                    continue
+
+                along, tangential = self._axial_tangential(surf, strut_azimuth_deg)
+                along_b = along[band] - along[band].mean()
+                tangential_b = tangential[band] - tangential[band].mean()
+
+                angle_parts.append(np.degrees(np.arctan2(tangential_b, along_b)))
+                v_parts.append(get_values(surf)[band])
+
+            n_sel = sum(len(a) for a in angle_parts)
+            if n_sel < 10:
+                raise ValueError(
+                    f"Only {n_sel} points within {tol} m of r={r_target} across {surfaces} - "
+                    "widen tol, check r_target, or check surface."
+                )
+
+            angle_all = np.concatenate(angle_parts)
+            v_all = np.concatenate(v_parts)
+
+            bin_edges = np.linspace(-180, 180, n_angle_bins + 1)
+            bin_idx = np.clip(np.digitize(angle_all, bin_edges) - 1, 0, n_angle_bins - 1)
+            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+            v_mean = np.full(n_angle_bins, np.nan)
+            counts = np.bincount(bin_idx, minlength=n_angle_bins)
+            sums = np.bincount(bin_idx, weights=v_all, minlength=n_angle_bins)
+            has_data = counts > 0
+            v_mean[has_data] = sums[has_data] / counts[has_data]
+
+            curves[r_target] = (bin_centers[has_data], v_mean[has_data])
+
+        return curves
+
+    def plot_at_circumference(self, radii, strut_azimuth_deg, get_values, ylabel: str,
+                               surface=('Upper', 'Lower'), tol: float = 0.0015, n_angle_bins: int = 75,
+                               cmap: str = 'cividis', normalize: bool = False, ax=None,
+                               savepath: str = None, dpi: int = 600):
+
+        '''
+        Plot of an arbitrary field vs. local circumferential angle at
+        several span positions, one line per radius - the cylindrical-
+        object counterpart to plot_at_radii(). See at_circumference() for
+        what get_values/surface/n_angle_bins do.
+
+        normalize : bool
+            If True, the legend reports each curve's r/R (needs r_tip)
+            instead of the raw physical radius in meters.
+
+        Returns
+        -------
+        (fig, ax)
+        '''
+
+        if normalize and self.r_tip is None:
+            raise ValueError("r_tip must be set (in __init__) to use normalize=True.")
+
+        curves = self.at_circumference(radii, strut_azimuth_deg, get_values, surface=surface, tol=tol,
+                                        n_angle_bins=n_angle_bins)
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+        else:
+            fig = ax.figure
+
+        colors = plt.cm.get_cmap(cmap)(np.linspace(0, 1, len(radii)))
+
+        for color, r_target in zip(colors, radii):
+            angle, v = curves[r_target]
+            label = f'$r/R$={r_target / self.r_tip:.3f}' if normalize else f'r={r_target:.3f} m'
+            ax.plot(angle, v, color=color, label=label)
+
+        ax.set_xlabel(r'$\theta$ [deg]')
+        ax.set_ylabel(ylabel)
+        ax.set_xlim(-180, 180)
+        ax.grid(True)
+        ax.legend()
+        fig.tight_layout()
+
+        if savepath:
+            fig.savefig(savepath, dpi=dpi)
+
+        return fig, ax
+
+    def plot_cp_circumference(self, radii, strut_azimuth_deg, frame: int = None, stat: str = 'mean',
+                               pressure_variable: str = 'static_pressure', surface=('Upper', 'Lower'),
+                               tol: float = 0.0015, n_angle_bins: int = 75, cmap: str = 'cividis',
+                               normalize: bool = False, ax=None, savepath: str = None, dpi: int = 600):
+
+        '''
+        Convenience wrapper: plot_at_circumference() for Cp (see cp()) -
+        the cylindrical-object (beam/strut) counterpart to plot_cp_radii().
+        Same -Cp sign convention as plot_cp_radii() (see that method's
+        docstring) - 'mean' plots -Cp, 'rms'/'raw_rms' plot Cp's
+        rms/raw_rms directly (already non-negative).
+        '''
+
+        is_rms = frame is None and stat in ('rms', 'raw_rms')
+        sign = 1 if is_rms else -1
+        get_values = lambda s: sign * self.cp(surface=s, frame=frame, stat=stat,
+                                               pressure_variable=pressure_variable)
+        ylabel = r'$C_{p,rms}$ [-]' if is_rms else r'$-C_p$ [-]'
+
+        return self.plot_at_circumference(radii, strut_azimuth_deg, get_values, ylabel, surface=surface,
+                                           tol=tol, n_angle_bins=n_angle_bins, cmap=cmap,
+                                           normalize=normalize, ax=ax, savepath=savepath, dpi=dpi)
+
     def pressure_fluctuation(self, frame: int, surface: str = 'Upper',
                               pressure_variable: str = 'static_pressure'):
 
@@ -1079,7 +1292,8 @@ class SurfaceVariable:
     def plot_pressure_fluctuation(self, frame: int, surface=('Upper', 'Lower'),
                                    pressure_variable: str = 'static_pressure', span_min: float = None,
                                    span_max: float = None, value_clip_percentile: float = 99,
-                                   marker_size: float = 1, cmap: str = 'cividis', figsize: tuple = None,
+                                   marker_size: float = 1, interpolate: bool = False, grid_resolution: int = 300,
+                                   cmap: str = 'cividis', figsize: tuple = None,
                                    normalize: bool = False, savepath: str = None, dpi: int = 600):
 
         '''
@@ -1095,6 +1309,8 @@ class SurfaceVariable:
             as cp()) to get a dimensionless Cp' - like normalize elsewhere,
             this additionally hides the blade's actual radius/chord (via
             plot_variable_surface()'s own normalize handling).
+        interpolate, grid_resolution : see plot_variable_surface()'s own
+            parameters of the same name - forwarded as-is.
 
         Returns
         -------
@@ -1114,7 +1330,8 @@ class SurfaceVariable:
         return self.plot_variable_surface(get_values, cbar_label=cbar_label, surface=surface,
                                            span_min=span_min, span_max=span_max,
                                            value_clip_percentile=value_clip_percentile,
-                                           marker_size=marker_size, cmap=cmap, figsize=figsize,
+                                           marker_size=marker_size, interpolate=interpolate,
+                                           grid_resolution=grid_resolution, cmap=cmap, figsize=figsize,
                                            normalize=normalize, savepath=savepath, dpi=dpi)
 
     def stagnation_line(self, frame: int = None, stat: str = 'mean',
@@ -1204,8 +1421,8 @@ class SurfaceVariable:
             plot_stagnation_line()), 'cp' (the peak Cp value itself).
         '''
 
-        if self.rho_ref is None or self.rpm is None:
-            raise ValueError("rho_ref and rpm must be set (in __init__) to compute Cp.")
+        if self.rho_ref is None or (self.rpm is None and self.v_ref is None):
+            raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to compute Cp.")
 
         per_surface = {}
         for surf in ('Upper', 'Lower'):
@@ -1560,16 +1777,15 @@ class SurfaceVariable:
         (fig, ax)
         '''
 
-        if normalize and (self.rho_ref is None or self.rpm is None):
-            raise ValueError("rho_ref and rpm must both be set (in __init__) to use normalize=True.")
+        if normalize and (self.rho_ref is None or (self.rpm is None and self.v_ref is None)):
+            raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to use normalize=True.")
 
         t, values, point_info = self.timetrace(
             name, span_pct, chord_pct, surface=surface, tol=tol, chord_percentile=chord_percentile,
             reverse_chord=reverse_chord, span_min=span_min, span_max=span_max, dt=dt)
 
         if normalize:
-            omega = self.rpm * 2 * np.pi / 60
-            q_ref_point = 0.5 * self.rho_ref * (omega * point_info['r']) ** 2
+            q_ref_point = dynamic_pressure(self.rho_ref, point_info['r'], rpm=self.rpm, v_ref=self.v_ref)
             values = values / q_ref_point
 
         if ax is None:
@@ -1768,8 +1984,8 @@ class SurfaceVariable:
         '''
 
         if normalize:
-            if self.rho_ref is None or self.rpm is None:
-                raise ValueError("rho_ref and rpm must both be set (in __init__) to use normalize=True.")
+            if self.rho_ref is None or (self.rpm is None and self.v_ref is None):
+                raise ValueError("rho_ref and (rpm or v_ref) must be set (in __init__) to use normalize=True.")
             if db:
                 raise ValueError("normalize=True requires db=False - a dB scale assumes a raw Pa signal.")
 
@@ -1779,8 +1995,7 @@ class SurfaceVariable:
             reverse_chord=reverse_chord, span_min=span_min, span_max=span_max, **welch_kwargs)
 
         if normalize:
-            omega = self.rpm * 2 * np.pi / 60
-            q_ref_point = 0.5 * self.rho_ref * (omega * point_info['r']) ** 2
+            q_ref_point = dynamic_pressure(self.rho_ref, point_info['r'], rpm=self.rpm, v_ref=self.v_ref)
             psd = psd / q_ref_point ** 2
 
         if ax is None:
@@ -1837,7 +2052,8 @@ class SurfaceVariable:
     def plot_variable_surface(self, get_values, cbar_label: str, surface=('Upper', 'Lower'),
                                get_vector=None, span_min: float = None, span_max: float = None,
                                value_clip_percentile: float = 99, n_arrows: int = 2000,
-                               marker_size: float = 1, cmap: str = 'cividis', figsize: tuple = None,
+                               marker_size: float = 1, interpolate: bool = False, grid_resolution: int = 300,
+                               cmap: str = 'cividis', figsize: tuple = None,
                                show_stagnation_line: bool = False, stagnation_kwargs: dict = None,
                                stagnation_color: str = 'red', stagnation_marker_size: float = 40,
                                show_span_axis: bool = False, normalize: bool = False,
@@ -1887,7 +2103,26 @@ class SurfaceVariable:
             Number of surfels randomly sampled for the direction quiver
             (only used if get_vector is given).
         marker_size : float
-            Scatter marker size (matplotlib's `s`, points^2).
+            Scatter marker size (matplotlib's `s`, points^2). Only used
+            when interpolate=False.
+        interpolate : bool
+            If True, grid the field onto a regular (radius, chord) mesh
+            via scipy.interpolate.griddata (linear, NaN outside the
+            convex hull of the real surfels - rendered transparent, so
+            this never extrapolates past the part's actual edge) and
+            render with pcolormesh instead of a raw scatter - see
+            FrictionLines.friction_lines()'s own interpolate docstring
+            for the full reasoning (identical here: off by default,
+              matching this method's original deliberate choice for a
+            full rotor blade's tens of millions of surfels; turn on for
+            a much smaller selection - e.g. one stator vane/strut -
+            where the raw scatter visibly under-resolves instead). The
+            direction quiver (if get_vector is given) still samples from
+            the ORIGINAL scattered points either way.
+        grid_resolution : int
+            Grid points along the LONGER of the two axes when
+            interpolate=True - see grid_scatter(). Only used if
+            interpolate=True.
         show_span_axis : bool
             The primary (bottom) x-axis is physical radius from the
             rotation axis (r [m], via _radius()), not the raw centered
@@ -1970,7 +2205,11 @@ class SurfaceVariable:
             vmin, vmax = np.percentile(v_sel, [100 - value_clip_percentile, value_clip_percentile])
             v_clipped = np.clip(v_sel, vmin, vmax)
 
-            sc = ax.scatter(radius_sel, chord_sel, c=v_clipped, s=marker_size, cmap=cmap, vmin=vmin, vmax=vmax)
+            if interpolate:
+                Xg, Yg, Zg = grid_scatter(radius_sel, chord_sel, v_clipped, grid_resolution=grid_resolution)
+                sc = ax.pcolormesh(Xg, Yg, Zg, cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+            else:
+                sc = ax.scatter(radius_sel, chord_sel, c=v_clipped, s=marker_size, cmap=cmap, vmin=vmin, vmax=vmax)
             cbar = fig.colorbar(sc, ax=ax, pad=0.02)
             cbar.set_label(cbar_label)
 

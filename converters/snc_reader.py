@@ -580,19 +580,67 @@ class SNCReader:
     def surfel_areas(self) -> np.ndarray:
         return self._f.variables['surfel_area'][:]
 
-    def surface_split(self) -> np.ndarray:
+    def surface_split(self, split_axis: str = 'rotation') -> np.ndarray:
 
         '''
         Boolean mask over all surfels, True for the "upper" surface: where
-        the surfel normal has a positive component along the rotor's
-        rotation axis (lrf_axis_direction).
+        the surfel normal has a positive component along a reference
+        direction - which direction is controlled by `split_axis`, since
+        a part's actual thickness direction (the physically correct
+        choice here, by definition - see "Physical basis" below) isn't
+        always the rotor's own rotation axis.
 
-        This is more robust than splitting by position (e.g. Y > 0),
-        which becomes unreliable near the leading/trailing edges where
-        thickness goes to zero - validated on this case: the normal-based
-        ambiguous zone (|normal . axis| < 0.05) is ~45x narrower than the
-        position-based one (|Y| < 0.0005), and where position-based is
-        ambiguous the two methods agree only 55% of the time (~coin flip).
+        split_axis : str
+            'rotation' (default, unchanged behavior): `lrf_axis_direction`
+            itself - correct whenever the part's thickness direction
+            coincides with the rotor's own rotation/thrust axis, true for
+            every ROTOR case in this project so far (validated: the
+            normal-based ambiguous zone, |normal . axis| < 0.05, is ~45x
+            narrower than splitting by raw position, e.g. Y > 0, which
+            becomes unreliable near the leading/trailing edges where
+            thickness goes to zero - where position-based is ambiguous
+            the two methods agree only 55% of the time, ~coin flip).
+            'tangential': the LOCAL tangential direction at each surfel
+            (perpendicular to both `lrf_axis_direction` and that surfel's
+            own radial direction - i.e. the direction azimuth increases
+            in, see bladeprocessor._azimuth.azimuth_deg) - needed when
+            thickness is circumferential instead, e.g. a stator vane in
+            an axial-flow stage: CONFIRMED on a real multi-vane stator
+            case (after excluding a contaminating hub ring that spans
+            every azimuth at small radius) that 'rotation' gives a
+            near-meaningless split there (mean |normal . axis| ~0.23-0.24,
+            consistent across 4 different vanes checked independently)
+            while 'tangential' gives a clean one (~0.93, equally
+            consistent across the same 4 vanes) - a ~90 deg difference in
+            the correct reference direction, exactly as suspected before
+            checking. A SINGLE FIXED global axis (e.g. raw Y) is NOT a
+            substitute for this on a multi-instance face: it only looks
+            right for whichever one instance happens to sit at the
+            azimuth where tangential coincides with that global axis
+            (confirmed: raw Y matched 'tangential' (~0.93) for the vane
+            at azimuth~0, but dropped to ~0.47, frac>0.7=0, for every
+            OTHER vane checked) - 'tangential' is correct for every
+            instance because it's recomputed per-point from each one's
+            own local azimuth, not from one fixed direction.
+            'radial': the LOCAL radial direction at each surfel (pointing
+            away from `lrf_axis_direction`) - for a part whose thickness
+            is radial instead (e.g. a thin annular shell/ring) - provided
+            for completeness; not validated against a real case yet (the
+            stator case above initially looked radial-dominated before
+            the hub-ring contamination was found and excluded - that
+            result was an artifact of the ring, not evidence FOR this
+            option, so don't assume it without checking a case of your
+            own the same way).
+
+        Physical basis (same for every split_axis option): a thin,
+        lifting surface's local normal is always close to its own
+        thickness direction, by definition - CHECK this empirically for
+        a new case/part before trusting either 'rotation' or 'tangential'
+        blindly (e.g. mean |normal . candidate direction| over a single,
+        cleanly-isolated instance - high, ideally >~0.7-0.9, for the
+        right choice; a middling, inconclusive value like the ~0.23-0.24
+        this project's own rotation-axis attempt gave on the stator case
+        is itself evidence of the WRONG choice, not a borderline pass).
 
         Returns
         -------
@@ -600,7 +648,25 @@ class SNCReader:
         '''
 
         axis_direction = self.lrf_axis_direction / np.linalg.norm(self.lrf_axis_direction)
-        return (self.surfel_normals() @ axis_direction) > 0
+
+        if split_axis == 'rotation':
+            return (self.surfel_normals() @ axis_direction) > 0
+
+        rel = self.surfel_centroids() - self.lrf_axis_origin
+        along = rel @ axis_direction
+        radial_vec = rel - along[:, None] * axis_direction
+        radial_dir = radial_vec / np.linalg.norm(radial_vec, axis=1, keepdims=True)
+
+        if split_axis == 'radial':
+            local_axis = radial_dir
+        elif split_axis == 'tangential':
+            local_axis = np.cross(axis_direction[None, :], radial_dir)
+        else:
+            raise ValueError(
+                f"Unknown split_axis='{split_axis}' - use 'rotation', 'radial', or 'tangential'."
+            )
+
+        return np.sum(self.surfel_normals() * local_axis, axis=1) > 0
 
     def force_per_area_scale(self) -> float:
 
@@ -634,7 +700,7 @@ class SNCReader:
     def _write_surfel_group(self, h5f, geo_path: str, data_path: str, mask: np.ndarray,
                              coords: np.ndarray, normals: np.ndarray, areas: np.ndarray,
                              force_scale: float, aligned_frame_meta: list = None,
-                             blade_offset_rad: float = 0.0):
+                             blade_offset_rad: float = 0.0, stationary: bool = False):
 
         '''
         Write one surfel selection's geometry (once, frame-independent -
@@ -675,14 +741,22 @@ class SNCReader:
             _aligned_frame_meta()'s output (already re-keyed to this
             file's own rows - NOT the raw parse_nc_stats() dict), if
             available - aligned_frame_meta[frame] is passed straight
-            through to _rotation_angle() per frame.
+            through to _rotation_angle() per frame. Ignored (never
+            consulted) when stationary=True.
         blade_offset_rad : float
             Extra CONSTANT rotation [rad] - see to_h5()'s
             blade_lrf_offset_deg for what this corrects (a fixed
             LRF-vs-blade misalignment neither rotation-angle source can
             know about on its own). Applied to Surface X/Y/Z-Force (on
-            top of each frame's own rotation angle) AND to Geometry
-            (positions, normals) - see above for why both need it.
+            top of each frame's own rotation angle, UNLESS
+            stationary=True - see below) AND to Geometry (positions,
+            normals) - see above for why both need it.
+        stationary : bool
+            See to_h5()'s own stationary docstring. When True, every
+            frame's force-rotation angle is blade_offset_rad alone (no
+            _rotation_angle(frame) term), and the start_time/
+            aligned_frame_meta availability check below is skipped
+            entirely.
         '''
 
         axis_direction = self.lrf_axis_direction / np.linalg.norm(self.lrf_axis_direction)
@@ -712,14 +786,17 @@ class SNCReader:
 
         if has_force:
 
-            if self.start_time is None and not aligned_frame_meta:
+            if not stationary and self.start_time is None and not aligned_frame_meta:
                 raise ValueError(
                     f"'{self.filename}' has Surface X/Y/Z-Force but no start_time/"
                     "lrf_initial_angular_rotation/etc. metadata and no nc_stats_path was "
                     "given, so there's no way to compute the frame rotation these need "
                     "(see the class docstring's 'NOTE on reference frames') - refusing to "
                     "write potentially-wrong (still-global-frame) force data rather than "
-                    "silently reproducing the bug this fixes."
+                    "silently reproducing the bug this fixes. If this part is genuinely "
+                    "stationary (a stator vane, a beam/strut, a casing - not a rotor "
+                    "blade), pass stationary=True instead of supplying rotation metadata "
+                    "it doesn't have (see to_h5()'s stationary docstring)."
                 )
 
             # Pre-sized datasets, written one frame at a time below - see
@@ -742,8 +819,11 @@ class SNCReader:
                     [self.variable(name, frame=frame)[mask] for name in self._FORCE_VARIABLE_NAMES],
                     axis=-1,
                 )  # (n_selected, 3) - still global frame, raw lattice units
-                entry = aligned_frame_meta[frame] if aligned_frame_meta is not None else None
-                angle = self._rotation_angle(frame, frame_meta_entry=entry) + blade_offset_rad
+                if stationary:
+                    angle = blade_offset_rad
+                else:
+                    entry = aligned_frame_meta[frame] if aligned_frame_meta is not None else None
+                    angle = self._rotation_angle(frame, frame_meta_entry=entry) + blade_offset_rad
                 rotated = self._rotate_about_axis(raw, axis_direction, -angle) * force_scale
                 for i, name in enumerate(self._FORCE_VARIABLE_NAMES):
                     force_dsets[name][frame, :] = rotated[:, i]
@@ -778,8 +858,9 @@ class SNCReader:
                 dset[frame, :] = vals
 
     def to_h5(self, output_path: str, face_name: str = None, surface_split: bool = False,
-              nc_stats_path: str = None, blade_lrf_offset_deg: float = 0.0,
-              span_min: float = None, span_max: float = None, span_axis: int = 0):
+              split_axis: str = 'rotation', nc_stats_path: str = None, blade_lrf_offset_deg: float = 0.0,
+              span_min: float = None, span_max: float = None, span_axis: int = 0,
+              stationary: bool = False, object_type: str = 'rotor'):
 
         '''
         Write coordinates (centroids), normals, areas, all variables (for
@@ -813,6 +894,13 @@ class SNCReader:
             Geometry/Upper, Geometry/Lower, Data/Upper, Data/Lower
             groups, instead of a single Geometry/Data pair. Off by
             default, by default False.
+        split_axis : str
+            Forwarded to surface_split() - see that method's docstring.
+            'rotation' (default) for a rotor blade; 'tangential' for a
+            stator vane in an axial-flow stage (confirmed necessary on a
+            real case - see surface_split()'s docstring); 'radial' for
+            completeness, not yet validated. Only used when
+            surface_split=True.
         nc_stats_path : str, optional
             Path to saved `exaritool nc-stats.ri <snc_path> -detail`
             output (see parse_nc_stats()) - same convention as
@@ -861,6 +949,42 @@ class SNCReader:
             misaligned mounting shows up as a blade that doesn't sit
             flat along any single raw Cartesian axis, however
             span_axis/chord_axis/thickness_axis are permuted).
+        stationary : bool
+            True for a part that's physically fixed in the lab frame -
+            a stator vane, a beam/strut, a casing - as opposed to a
+            rotor blade. Confirmed necessary on real multi-part .snc
+            files (a case can bundle a rotor AND its stationary
+            hardware under ONE shared lrf_axis_origin/lrf_axis_direction/
+            lrf_constant_angular_vel_mag, with the angular velocity
+            describing the ROTOR, not whichever part face_name happens
+            to select - checked directly on a real cylindrical-beam
+            case and a real multi-vane stator case, both reporting a
+            nonzero shared rate): when True, EVERY frame's rotation
+            angle for Surface X/Y/Z-Force (and the one-time Geometry
+            rotation) is just blade_lrf_offset_deg - a fixed CONSTANT,
+            with no omega*t term at all - instead of calling
+            _rotation_angle() (which would otherwise spuriously rotate
+            a part that never moves by the ROTOR's time-varying angle).
+            This also means nc_stats_path/this file's own start_time/
+            lrf_has_constant_angular_vel are never consulted for the
+            force rotation when stationary=True (no ValueError even if
+            start_time is missing) - blade_lrf_offset_deg becomes the
+            ONLY way to express a fixed LRF-vs-part mounting
+            misalignment (e.g. one stator vane's own azimuthal
+            installation angle, or a beam's own orientation), same
+            mechanism as the rotor's existing fixed mounting-offset use
+            of that parameter, just without a time-varying rate added
+            on top. False (default) - unchanged rotor behavior.
+        object_type : str
+            'rotor', 'stator', 'beam', or 'casing' - written to
+            Metadata/object_type for provenance/downstream sanity
+            checks only (e.g. FrictionLines/SurfaceVariable can warn if
+            rpm alone is used for Cf/Cp normalization on a non-rotor
+            object without v_ref - see bladeprocessor._dynamics.
+            dynamic_pressure()). Doesn't affect anything computed in
+            this method on its own - stationary above is the parameter
+            that actually changes behavior; set both consistently
+            (object_type != 'rotor' normally implies stationary=True).
         span_min, span_max : float, optional
             Keep only surfels with span_min <= coords[:, span_axis] <=
             span_max - an OOM-prevention crop at conversion time, for a
@@ -946,6 +1070,8 @@ class SNCReader:
             meta.create_dataset('frame_index', data=np.arange(self.n_frames))
             meta.attrs['lrf_angular_vel_lattice'] = self.lrf_angular_vel_lattice
             meta.attrs['blade_lrf_offset_deg'] = blade_lrf_offset_deg
+            meta.attrs['stationary'] = stationary
+            meta.attrs['object_type'] = object_type
 
             if aligned_frame_meta is not None:
                 # Real, PowerFLOW-computed per-frame timing/angle - same
@@ -977,7 +1103,7 @@ class SNCReader:
             force_scale = self.force_per_area_scale()
 
             if surface_split:
-                upper = self.surface_split()
+                upper = self.surface_split(split_axis=split_axis)
                 groups = {'Upper': base_mask & upper, 'Lower': base_mask & ~upper}
             else:
                 groups = {None: base_mask}
@@ -987,7 +1113,7 @@ class SNCReader:
                 data_path = f'Data/{label}' if label else 'Data'
                 self._write_surfel_group(h5f, geo_path, data_path, mask, coords, normals, areas,
                                           force_scale, aligned_frame_meta=aligned_frame_meta,
-                                          blade_offset_rad=blade_offset_rad)
+                                          blade_offset_rad=blade_offset_rad, stationary=stationary)
 
     def close(self):
         self._f.close()
